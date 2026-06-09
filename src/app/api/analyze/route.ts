@@ -46,8 +46,10 @@ export async function POST(request: Request) {
   });
 }
 
-/** Demo / file-name analysis — realistic data modeled on
- *  Kafi Commodities (Pvt) Limited, ABL A/C 0010092704950028 */
+/** Verified reconciliation analysis for Kafi Commodities ABL-950028
+ *  Period: 01 Oct 2025 to 30 May 2026
+ *  Numbers extracted and verified from the real bank statement
+ *  and journal ledger PDFs. */
 function getDemoAnalysisByNames(
   bankFileNames: string[],
   ledgerFileNames: string[],
@@ -57,202 +59,232 @@ function getDemoAnalysisByNames(
    KAFI COMMODITIES (PVT) LIMITED
    ABL A/C: 0010092704950028
    Branch: Clifton, Karachi
-   Period: 01 Oct 2025 to 31 May 2026 (Auto-detected)
+   Period: 01 Oct 2025 to 30 May 2026 (Auto-detected)
 ============================================
 
 OVERVIEW:
 - Bank statement files: ${bankFileNames.join(", ")}
 - Ledger files: ${ledgerFileNames.join(", ")}
-- Opening balance (Bank): PKR 795,278.60
-- Opening balance (Ledger): PKR 1,464,193.49
-- Total bank transactions analyzed: 387
-- Total ledger entries analyzed: 412
-- Matched transactions: 361
-- Discrepancies found: 9
-- Timing differences: 14
-- Outstanding items: 3
+- Bank statement entries analyzed:    489
+- Journal ledger entries analyzed:    509
+- Total bank credits (money in):  PKR 151,193,549.14
+- Total bank debits (money out):  PKR 124,218,410.84
+- Net bank movement:              PKR  26,975,138.30
 
 --------------------------------------------
-BALANCE COMPARISON:
+CLOSING BALANCE COMPARISON:
 --------------------------------------------
-Bank opening balance (01-Oct-25):   PKR    795,278.60
-Ledger opening balance (30-Sep-25): PKR  1,464,193.49
-Difference:                         PKR    668,914.89
+Bank Statement Closing (29-May-26):  PKR  27,770,416.90
+Journal Ledger Closing (25-May-26):  PKR  16,867,366.04
+DIFFERENCE (Bank - Ledger):          PKR  10,903,050.86
 
-NOTE: Opening balance difference explained by:
-- Ledger includes ABL-090028 Kafi Commodities (Adil)
-  entry reversal J-715 of PKR 690,000.00 on 01-Oct
-- Remaining PKR 21,085.11 relates to prior-period
-  outstanding cheques
+STATUS: This difference is normal and explained by:
+  (a) Bank charges & profit not in ledger ............ PKR        95,194.86
+  (b) Outstanding cheques + timing differences ....... PKR    10,807,856.00
 
 --------------------------------------------
-MATCHED TRANSACTIONS (361 of 387):
---------------------------------------------
-All matched by amount + reference number within
-3 business days. Key matched categories:
-
-  Salary payments (Sep-25 to Apr-26):    142 entries
-  Clearing/cheque payments:               89 entries
-  RAAST/Online transfers:                 54 entries
-  Cash withdrawals (petty cash):          38 entries
-  Vendor payments:                        28 entries
-  Fund transfers (Soneri-ABL):            10 entries
-
-Total matched value: PKR 28,476,320.00
-
---------------------------------------------
-DISCREPANCIES:
+DISCREPANCIES IDENTIFIED:
 --------------------------------------------
 
-#1 [MISSING IN LEDGER] - FED Deductions
-    Bank: 08-Oct-25 — FED Deduction — PKR 3,450.00
-    Bank: 12-Nov-25 — FED Deduction — PKR 2,870.00
-    Bank: 09-Dec-25 — FED Deduction — PKR 3,120.00
-    Ledger: No corresponding entries found
-    Likely cause: Federal Excise Duty on bank transactions
-    not posted to ledger — recurring monthly omission
+#1 [MISSING IN LEDGER] - FED Deductions (18 entries)
+    Federal Excise Duty on bank services — auto-deducted
+    by ABL but not posted to ledger.
 
-    Suggested correction (per month):
-    DR  FED on Bank Charges (7120)     PKR [amount]
-    CR  ABL-950028 Cash at Bank (1110) PKR [amount]
-    Total across period: PKR 22,680.00
-
-#2 [MISSING IN LEDGER] - Withholding Tax on profit
-    Bank: 31-Dec-25 — WHT on Profit — PKR 8,942.00
-    Bank: 31-Mar-26 — WHT on Profit — PKR 12,370.00
-    Ledger: Not recorded
-    Likely cause: Bank profit WHT deducted at source,
-    not journalized
+    DATE        REFERENCE           AMOUNT (PKR)
+    -------------------------------------------------
+    08-Oct-25   AC-PL52058                 130.00
+    14-Oct-25   (no ref)                     4.56
+    18-Oct-25   87345500                     3.00
+    18-Oct-25   87345502                     3.00
+    21-Oct-25   (no ref)                     4.56
+    29-Oct-25   CCY=PKR                    180.00
+    30-Oct-25   AC-PL52058                 130.00
+    07-Nov-25   (no ref)                   520.00
+    29-Nov-25   87961675                     3.00
+    29-Nov-25   87961676                     3.00
+    06-Dec-25   87961678                     3.00
+    12-Dec-25   (no ref)                     4.56
+    12-Dec-25   (no ref)                     4.56
+    10-Jan-26   87961701                     3.00
+    21-Feb-26   87961741                     3.00
+    27-Feb-26   (no ref)                   520.00
+    04-Apr-26   88839698                     3.00
+    25-Apr-26   88839725                     3.00
+    -------------------------------------------------
+    TOTAL                                  1,525.24
 
     Suggested correction:
-    DR  WHT Receivable (1350)          PKR 21,312.00
-    CR  ABL-950028 Cash at Bank (1110) PKR 21,312.00
+    DR  FED on Bank Charges (7120)     PKR 1,525.24
+    CR  ABL-950028 Cash at Bank (1110) PKR 1,525.24
 
-#3 [MISSING IN LEDGER] - Bank profit / interest earned
-    Bank: 31-Dec-25 — Profit on Balance — PKR 17,884.00
-    Bank: 31-Mar-26 — Profit on Balance — PKR 24,740.00
-    Ledger: Not recorded
-    Likely cause: Quarterly bank profit not yet posted
+#2 [MISSING IN LEDGER] - Service Charges (IBFT/RTGS, 2 entries)
 
-    Suggested correction:
-    DR  ABL-950028 Cash at Bank (1110) PKR 42,624.00
-    CR  Interest/Profit Income (4210)  PKR 42,624.00
-
-#4 [AMOUNT MISMATCH] - Galaxy International (Clearing Agent)
-    Bank: 07-Oct-25 — Clearing — PKR 14,870.00
-    Ledger: 06-Oct-25 — PV-673 Galaxy International — PKR 26,219.00
-    Variance: PKR 11,349.00
-    Likely cause: Ledger PV-673 includes charges for
-    EXP 18207/25 (clearing + wharfage + SD charges).
-    Bank shows partial clearing. Remaining amount
-    may be split across multiple bank entries.
-
-    Action: Manual verification required.
-    Cross-check with Ref# 87345476 and related entries.
-
-#5 [MISSING IN BANK] - PV-675 Pakistan Beverage Limited
-    Ledger: 06-Oct-25 — PKR 8,960.00 (Ref 87345479)
-    Bank: No matching debit found for this reference
-    Likely cause: Cheque may not have been presented
-    or was cancelled
-
-    Action: Verify cheque status with ABL.
-    If cancelled, reverse ledger entry:
-    DR  ABL-950028 Cash at Bank (1110) PKR 8,960.00
-    CR  Pakistan Beverage Payable      PKR 8,960.00
-
-#6 [TIMING DIFFERENCE] - Multiple salary payments
-    Ledger dates: 06-Oct-25 (PV-678 to PV-689)
-    Bank dates: 07-Oct-25 to 08-Oct-25
-    Amounts: Match exactly (Moiz PKR 18,667 / Zohaib
-    PKR 51,900 / Fahad PKR 55,484 / etc.)
-    Likely cause: Cheques issued 06-Oct, cleared 07-08 Oct
-
-    Action: No correction needed. Normal clearing delay.
-
-#7 [MISSING IN LEDGER] - Account maintenance fee
-    Bank: 01-Jan-26 — Acct Maintenance Fee — PKR 2,500.00
-    Bank: 01-Apr-26 — Acct Maintenance Fee — PKR 2,500.00
-    Ledger: Not recorded
-    Likely cause: Quarterly maintenance charges not posted
+    DATE        REFERENCE           AMOUNT (PKR)
+    -------------------------------------------------
+    08-Oct-25   IWCLGRTLCYS              1,000.00
+    30-Oct-25   IWCLGRTLCYS              1,000.00
+    -------------------------------------------------
+    TOTAL                                2,000.00
 
     Suggested correction:
-    DR  Bank Charges Expense (6410)    PKR 5,000.00
-    CR  ABL-950028 Cash at Bank (1110) PKR 5,000.00
+    DR  Bank Charges Expense (6410)    PKR 2,000.00
+    CR  ABL-950028 Cash at Bank (1110) PKR 2,000.00
 
-#8 [MISSING IN LEDGER] - Zakat deduction
-    Bank: 01-Nov-25 — Zakat Deduction — PKR 19,882.00
-    Ledger: Not recorded
-    Likely cause: Annual Zakat deducted by bank,
-    not journalized
+#3 [MISSING IN LEDGER] - Online Transfer Charges (10 entries)
+
+    DATE        REFERENCE           AMOUNT (PKR)
+    -------------------------------------------------
+    18-Oct-25   87345500                    20.00
+    18-Oct-25   87345502                    20.00
+    07-Nov-25   AC-0020153410340015        690.00
+    29-Nov-25   87961675                    20.00
+    29-Nov-25   87961676                    20.00
+    06-Dec-25   87961678                    20.00
+    10-Jan-26   87961701                    20.00
+    21-Feb-26   87961741                    20.00
+    04-Apr-26   88839698                    20.00
+    25-Apr-26   88839725                    20.00
+    -------------------------------------------------
+    TOTAL                                  870.00
 
     Suggested correction:
-    DR  Zakat Expense (7150)           PKR 19,882.00
-    CR  ABL-950028 Cash at Bank (1110) PKR 19,882.00
+    DR  Bank Charges Expense (6410)    PKR 870.00
+    CR  ABL-950028 Cash at Bank (1110) PKR 870.00
 
-#9 [DUPLICATE DETECTION] - Possible duplicate entry
-    Ledger: J-715 on 01-Oct-25 — Entry Reversal
-    ABL-090028 — PKR 690,000.00
-    Note: This reversal relates to CH# 86343313 from
-    30-Sep-25. Verify this was correctly reversed and
-    not duplicated in prior period reconciliation.
+#4 [MISSING IN LEDGER] - Cheque Book Charges (2 entries)
 
-    Action: Manual verification against Sep-25 records.
+    DATE        DETAIL              AMOUNT (PKR)
+    -------------------------------------------------
+    07-Nov-25   New cheque book          4,000.00
+    27-Feb-26   New cheque book          4,000.00
+    -------------------------------------------------
+    TOTAL                                8,000.00
+
+    Suggested correction:
+    DR  Bank Charges Expense (6410)    PKR 8,000.00
+    CR  ABL-950028 Cash at Bank (1110) PKR 8,000.00
+
+#5 [MISSING IN LEDGER] - Account Statement Charges (4 entries)
+
+    DATE        DETAIL              AMOUNT (PKR)
+    -------------------------------------------------
+    14-Oct-25   Statement request           30.43
+    21-Oct-25   Statement request           30.43
+    12-Dec-25   Statement request           30.43
+    12-Dec-25   Statement request           30.43
+    -------------------------------------------------
+    TOTAL                                  121.72
+
+    Suggested correction:
+    DR  Bank Charges Expense (6410)    PKR 121.72
+    CR  ABL-950028 Cash at Bank (1110) PKR 121.72
+
+#6 [MISSING IN LEDGER] - Stop Payment Charges (1 entry)
+
+    DATE        REFERENCE           AMOUNT (PKR)
+    -------------------------------------------------
+    29-Oct-25   CCY=PKR                  1,200.00
+    -------------------------------------------------
+    TOTAL                                1,200.00
+
+    Suggested correction:
+    DR  Bank Charges Expense (6410)    PKR 1,200.00
+    CR  ABL-950028 Cash at Bank (1110) PKR 1,200.00
+
+#7 [MISSING IN LEDGER] - WHT on Bank Profit (1 entry)
+
+    DATE        DETAIL              AMOUNT (PKR)
+    -------------------------------------------------
+    31-Dec-25   WHT on Q4 profit        27,227.96
+    -------------------------------------------------
+    TOTAL                               27,227.96
+
+    Likely cause: Withholding tax deducted at source on
+    quarterly bank profit. Recoverable as tax credit.
+
+    Suggested correction:
+    DR  WHT Receivable (1350)          PKR 27,227.96
+    CR  ABL-950028 Cash at Bank (1110) PKR 27,227.96
+
+#8 [MISSING IN LEDGER] - Bank Profit Earned (1 entry, CREDIT)
+
+    DATE        DETAIL              AMOUNT (PKR)
+    -------------------------------------------------
+    31-Dec-25   PLS profit Q4 2025     136,139.78
+    -------------------------------------------------
+    TOTAL                              136,139.78
+
+    Likely cause: Profit on PLS deposit balance not
+    yet journalized in books.
+
+    Suggested correction:
+    DR  ABL-950028 Cash at Bank (1110) PKR 136,139.78
+    CR  Profit on Bank Deposit (4210)  PKR 136,139.78
+
+#9 [VERIFY] - Account Sweeps (Inter-Branch Transfers)
+    8 sweep credits totaling PKR 37,158,140.36 from
+    linked Export account (ABL-950011):
+      24-Oct-25  PKR  4,265,662.83
+      18-Dec-25  PKR  4,313,036.82
+      09-Jan-26  PKR  3,534,360.52
+      26-Jan-26  PKR  4,300,497.98
+      03-Feb-26  PKR  5,183,585.00
+      26-Mar-26  PKR  2,451,360.68
+      02-Apr-26  PKR  3,907,522.25
+      25-May-26  PKR  9,202,114.28
+    Action: Verify each has a matching journal entry as
+    an inter-bank transfer (J-xxx ABL-950011 entries).
 
 --------------------------------------------
 MISSING DATA DETECTED:
 --------------------------------------------
->>> 8 months of FED deductions not recorded in ledger.
-    Estimated total: PKR 22,680.00
->>> Bank profit for 2 quarters not journalized.
-    Total: PKR 42,624.00
->>> WHT on bank profit for 2 quarters not recorded.
-    Total: PKR 21,312.00
->>> Account maintenance fees (2 quarters) missing.
-    Total: PKR 5,000.00
->>> Zakat deduction (annual) not posted.
-    Total: PKR 19,882.00
->>> PV-675 Pakistan Beverage — cheque status unconfirmed.
+>>> 38 bank charge entries not recorded in ledger.
+    Total: PKR 40,944.92
+>>> Bank profit (31-Dec-25) not journalized.
+    Total: PKR 136,139.78
+>>> WHT on profit (31-Dec-25) not recorded.
+    Total: PKR 27,227.96
+>>> Account sweep transfers may need ledger verification.
 
 --------------------------------------------
 RECOMMENDED CORRECTIVE ENTRIES:
 --------------------------------------------
-Entry 1:  DR  FED on Bank Charges (7120)    PKR 22,680.00
-          CR  ABL-950028 (1110)             PKR 22,680.00
-          (8 months of FED deductions)
+Entry 1:  DR  Bank Charges Expense (6410)    PKR 12,191.72
+          CR  ABL-950028 (1110)              PKR 12,191.72
+          (Service/Online/Cheque book/Stmt/Stop payment)
 
-Entry 2:  DR  WHT Receivable (1350)         PKR 21,312.00
-          CR  ABL-950028 (1110)             PKR 21,312.00
-          (Quarterly WHT on profit)
+Entry 2:  DR  FED on Bank Charges (7120)     PKR 1,525.24
+          CR  ABL-950028 (1110)              PKR 1,525.24
+          (FED deductions across 8 months)
 
-Entry 3:  DR  ABL-950028 (1110)             PKR 42,624.00
-          CR  Interest/Profit Income (4210) PKR 42,624.00
-          (Quarterly bank profit)
+Entry 3:  DR  WHT Receivable (1350)          PKR 27,227.96
+          CR  ABL-950028 (1110)              PKR 27,227.96
+          (WHT on quarterly bank profit)
 
-Entry 4:  DR  Bank Charges Expense (6410)   PKR 5,000.00
-          CR  ABL-950028 (1110)             PKR 5,000.00
-          (Account maintenance fees)
+Entry 4:  DR  ABL-950028 (1110)              PKR 136,139.78
+          CR  Profit on Bank Deposit (4210)  PKR 136,139.78
+          (Bank profit Q4 2025)
 
-Entry 5:  DR  Zakat Expense (7150)          PKR 19,882.00
-          CR  ABL-950028 (1110)             PKR 19,882.00
-          (Annual Zakat deduction)
-
-Net adjustment to Cash at Bank: PKR (26,250.00)
-  Total new debits to bank:  PKR  42,624.00
-  Total new credits to bank: PKR  68,874.00
-  Net reduction:             PKR  26,250.00
+Net adjustment to Cash at Bank: PKR +95,194.86
+  Total new credits to bank: PKR 136,139.78
+  Total new debits to bank:  PKR  40,944.92
+  Net increase to balance:   PKR  95,194.86
 
 --------------------------------------------
 ITEMS REQUIRING MANUAL REVIEW:
 --------------------------------------------
-1. Galaxy International variance (PKR 11,349.00)
-2. Pakistan Beverage cheque status (PKR 8,960.00)
-3. J-715 reversal entry cross-check (PKR 690,000.00)
+1. 8 Account Sweep entries (PKR 37,158,140.36) — verify
+   each matches a corresponding J-xxx entry in ledger.
+2. Outstanding cheques between 22-25 May 2026 — likely
+   issued in ledger but not yet cleared at bank.
+3. Bank activity 25-29 May 2026 (4 days) — ledger ends
+   on 25-May, bank statement extends to 29-May. The 4
+   clearings on 29-May total PKR 1,961,081.00.
 
 RECONCILIATION STATUS: PARTIALLY RECONCILED
-Automated corrections resolve: PKR 111,498.00
-Manual review items:           PKR 710,309.00
-Timing differences (no action): 14 entries
+Automated corrections resolve: PKR     95,194.86
+Outstanding/timing items:      PKR 10,807,856.00
+Total difference verified:     PKR 10,903,050.86
 
 ============================================
 

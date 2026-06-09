@@ -353,11 +353,35 @@ export default function ReconPage() {
 
                 <div className="flex gap-3">
                   <button
-                    onClick={() => sendChat("Please generate the updated journal ledger with the corrections you recommended.")}
+                    onClick={async () => {
+                      // Tell the chat what we're doing
+                      sendChat("Approve corrections — please confirm the updated journal ledger has been generated.");
+
+                      // Actually trigger the file download
+                      try {
+                        const res = await fetch("/api/download-ledger");
+                        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                        const blob = await res.blob();
+                        const url = window.URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = url;
+                        a.download = "Updated-Ledger-ABL-950028.xlsx";
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        window.URL.revokeObjectURL(url);
+                      } catch (err) {
+                        const msg = err instanceof Error ? err.message : String(err);
+                        setChatMsgs((prev) => [
+                          ...prev,
+                          { role: "assistant", content: `Download failed: ${msg}. Please try again.` },
+                        ]);
+                      }
+                    }}
                     className="flex-1 flex items-center justify-center gap-2 bg-accent hover:bg-accent/80 text-white font-semibold py-3 rounded-xl transition-all cursor-pointer"
                   >
                     <Download className="w-4 h-4" />
-                    Approve & Generate Updated Ledger
+                    Approve & Download Updated Ledger
                   </button>
                   <button
                     onClick={() => { setStep("upload-bank"); setBankFiles([]); setLedgerFiles([]); setAnalysisResult(""); }}
