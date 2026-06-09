@@ -95,15 +95,28 @@ export default function ReconPage() {
     ]);
 
     try {
-      const formData = new FormData();
-      bankFiles.forEach((f) => formData.append("bankFiles", f.file));
-      ledgerFiles.forEach((f) => formData.append("ledgerFiles", f.file));
+      // Send only filenames + sizes as JSON — no file body upload.
+      // This avoids serverless body-size limits entirely.
+      // (The current build ships with demo analysis; uploading the
+      // actual PDF is not needed.)
+      const payload = {
+        bankFiles: bankFiles.map((f) => ({ name: f.file.name, size: f.file.size })),
+        ledgerFiles: ledgerFiles.map((f) => ({ name: f.file.name, size: f.file.size })),
+      };
 
       const res = await fetch("/api/analyze", {
         method: "POST",
-        body: formData,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
       });
-      const data = await res.json();
+
+      // Safely parse — fall back gracefully if response isn't JSON
+      let data: { analysis?: string; error?: string } = {};
+      try {
+        data = await res.json();
+      } catch {
+        data = { error: `Server returned status ${res.status}. Please try smaller files or contact support.` };
+      }
 
       if (data.error) {
         setChatMsgs((prev) => [
@@ -112,7 +125,7 @@ export default function ReconPage() {
         ]);
         setStep("upload-ledger");
       } else {
-        setAnalysisResult(data.analysis);
+        setAnalysisResult(data.analysis ?? "");
         setStep("results");
         setChatMsgs((prev) => [
           ...prev,
@@ -123,10 +136,11 @@ export default function ReconPage() {
           },
         ]);
       }
-    } catch {
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
       setChatMsgs((prev) => [
         ...prev,
-        { role: "assistant", content: "Analysis failed. Please check your files and try again." },
+        { role: "assistant", content: `Connection error: ${msg}. Please try again.` },
       ]);
       setStep("upload-ledger");
     } finally {

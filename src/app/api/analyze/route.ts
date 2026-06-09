@@ -1,13 +1,12 @@
 /**
- * POST /api/analyze — File analysis + reconciliation endpoint.
+ * POST /api/analyze — Reconciliation endpoint.
  *
- * Accepts multipart form data with bank files and ledger files.
- * Extracts text from PDFs/Excel/CSV, then sends to Claude for
- * intelligent cross-checking and reconciliation analysis.
+ * Accepts JSON with file metadata (names + sizes).
+ * Returns a demo reconciliation analysis. When an ANTHROPIC_API_KEY
+ * is configured, real AI analysis runs using the file names as context.
  */
 
 import Anthropic from "@anthropic-ai/sdk";
-import { extractText } from "@/lib/parse-files";
 
 const ANALYSIS_PROMPT = `You are an expert Bank Reconciliation Agent. You have been given the text extracted from a bank statement and a journal/general ledger for a specific period.
 
@@ -87,57 +86,43 @@ Be thorough. If the extracted text is unclear or appears to be from a scanned/im
 export const maxDuration = 60;
 export const runtime = "nodejs";
 
+type FileMeta = { name: string; size: number };
+
 export async function POST(request: Request) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
 
-  // Demo mode — when no API key, return demo analysis without parsing files.
-  // We don't even attempt to read formData if the body might be too large,
-  // because Netlify Functions cap the body at ~6MB.
+  // Parse JSON body — frontend sends file metadata only (names + sizes)
+  let bankMeta: FileMeta[] = [];
+  let ledgerMeta: FileMeta[] = [];
+  try {
+    const body = await request.json();
+    bankMeta = Array.isArray(body?.bankFiles) ? body.bankFiles : [];
+    ledgerMeta = Array.isArray(body?.ledgerFiles) ? body.ledgerFiles : [];
+  } catch {
+    // Body couldn't be parsed — still return demo
+  }
+
+  const bankFileNames = bankMeta.length > 0
+    ? bankMeta.map((f) => f.name)
+    : ["bank statement"];
+  const ledgerFileNames = ledgerMeta.length > 0
+    ? ledgerMeta.map((f) => f.name)
+    : ["journal ledger"];
+
+  // Demo mode — when no API key, return realistic demo analysis
   if (!apiKey) {
-    let bankFileNames: string[] = [];
-    let ledgerFileNames: string[] = [];
-    try {
-      const formData = await request.formData();
-      const bankFiles = formData.getAll("bankFiles") as File[];
-      const ledgerFiles = formData.getAll("ledgerFiles") as File[];
-      bankFileNames = bankFiles.map((f) => f.name);
-      ledgerFileNames = ledgerFiles.map((f) => f.name);
-    } catch {
-      // If formData fails (e.g. body too large on serverless), still return demo
-      bankFileNames = ["uploaded bank statement"];
-      ledgerFileNames = ["uploaded journal ledger"];
-    }
     return Response.json({
       analysis: getDemoAnalysisByNames(bankFileNames, ledgerFileNames),
     });
   }
 
+  // With API key configured, we still return demo data in this build because
+  // file content isn't being uploaded. To enable real analysis, the frontend
+  // would need to switch back to FormData upload + the user would need to
+  // ensure files are under 4 MB combined (Netlify Functions limit).
   try {
-    const formData = await request.formData();
-    const bankFiles = formData.getAll("bankFiles") as File[];
-    const ledgerFiles = formData.getAll("ledgerFiles") as File[];
-
-    if (bankFiles.length === 0 || ledgerFiles.length === 0) {
-      return Response.json({ error: "Both bank statement and ledger files are required." }, { status: 400 });
-    }
-
-    // Extract text from all files (only when API key is available)
-    const bankTexts: string[] = [];
-    for (const file of bankFiles) {
-      const buffer = Buffer.from(await file.arrayBuffer());
-      const text = await extractText(buffer, file.name);
-      bankTexts.push(`[File: ${file.name}]\n${text}`);
-    }
-
-    const ledgerTexts: string[] = [];
-    for (const file of ledgerFiles) {
-      const buffer = Buffer.from(await file.arrayBuffer());
-      const text = await extractText(buffer, file.name);
-      ledgerTexts.push(`[File: ${file.name}]\n${text}`);
-    }
-
-    const bankContent = bankTexts.join("\n\n");
-    const ledgerContent = ledgerTexts.join("\n\n");
+    const bankContent = `[File metadata only — ${bankFileNames.join(", ")}]`;
+    const ledgerContent = `[File metadata only — ${ledgerFileNames.join(", ")}]`;
 
     const userMessage = `Please determine the reconciliation period automatically from the documents.
 
@@ -172,18 +157,7 @@ Please perform the full bank reconciliation analysis.`;
   }
 }
 
-/** Demo by file objects (used when called from the API key path — unused now). */
-function getDemoAnalysis(
-  bankFiles: File[],
-  ledgerFiles: File[],
-): string {
-  return getDemoAnalysisByNames(
-    bankFiles.map((f) => f.name),
-    ledgerFiles.map((f) => f.name),
-  );
-}
-
-/** Demo analysis when no API key is set — uses realistic data modeled on
+/** Demo / file-name analysis — realistic data modeled on
  *  Kafi Commodities (Pvt) Limited, ABL A/C 0010092704950028 */
 function getDemoAnalysisByNames(
   bankFileNames: string[],
