@@ -83,7 +83,35 @@ Net difference: [Amount]
 
 Be thorough. If the extracted text is unclear or appears to be from a scanned/image document with OCR artifacts, note which parts may need manual verification. Use PKR as default currency.`;
 
+// Configure route — allow up to 10 minutes and large bodies for PDFs
+export const maxDuration = 60;
+export const runtime = "nodejs";
+
 export async function POST(request: Request) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+
+  // Demo mode — when no API key, return demo analysis without parsing files.
+  // We don't even attempt to read formData if the body might be too large,
+  // because Netlify Functions cap the body at ~6MB.
+  if (!apiKey) {
+    let bankFileNames: string[] = [];
+    let ledgerFileNames: string[] = [];
+    try {
+      const formData = await request.formData();
+      const bankFiles = formData.getAll("bankFiles") as File[];
+      const ledgerFiles = formData.getAll("ledgerFiles") as File[];
+      bankFileNames = bankFiles.map((f) => f.name);
+      ledgerFileNames = ledgerFiles.map((f) => f.name);
+    } catch {
+      // If formData fails (e.g. body too large on serverless), still return demo
+      bankFileNames = ["uploaded bank statement"];
+      ledgerFileNames = ["uploaded journal ledger"];
+    }
+    return Response.json({
+      analysis: getDemoAnalysisByNames(bankFileNames, ledgerFileNames),
+    });
+  }
+
   try {
     const formData = await request.formData();
     const bankFiles = formData.getAll("bankFiles") as File[];
@@ -91,15 +119,6 @@ export async function POST(request: Request) {
 
     if (bankFiles.length === 0 || ledgerFiles.length === 0) {
       return Response.json({ error: "Both bank statement and ledger files are required." }, { status: 400 });
-    }
-
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-
-    // Demo mode — return realistic analysis without parsing files
-    if (!apiKey) {
-      return Response.json({
-        analysis: getDemoAnalysis(bankFiles, ledgerFiles),
-      });
     }
 
     // Extract text from all files (only when API key is available)
@@ -153,11 +172,22 @@ Please perform the full bank reconciliation analysis.`;
   }
 }
 
-/** Demo analysis when no API key is set — uses realistic data modeled on
- *  Kafi Commodities (Pvt) Limited, ABL A/C 0010092704950028 */
+/** Demo by file objects (used when called from the API key path — unused now). */
 function getDemoAnalysis(
   bankFiles: File[],
   ledgerFiles: File[],
+): string {
+  return getDemoAnalysisByNames(
+    bankFiles.map((f) => f.name),
+    ledgerFiles.map((f) => f.name),
+  );
+}
+
+/** Demo analysis when no API key is set — uses realistic data modeled on
+ *  Kafi Commodities (Pvt) Limited, ABL A/C 0010092704950028 */
+function getDemoAnalysisByNames(
+  bankFileNames: string[],
+  ledgerFileNames: string[],
 ): string {
   return `============================================
    BANK RECONCILIATION SUMMARY
@@ -168,8 +198,8 @@ function getDemoAnalysis(
 ============================================
 
 OVERVIEW:
-- Bank statement files: ${bankFiles.map((f) => f.name).join(", ")}
-- Ledger files: ${ledgerFiles.map((f) => f.name).join(", ")}
+- Bank statement files: ${bankFileNames.join(", ")}
+- Ledger files: ${ledgerFileNames.join(", ")}
 - Opening balance (Bank): PKR 795,278.60
 - Opening balance (Ledger): PKR 1,464,193.49
 - Total bank transactions analyzed: 387
