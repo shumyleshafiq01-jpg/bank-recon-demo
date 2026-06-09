@@ -2,87 +2,13 @@
  * POST /api/analyze — Reconciliation endpoint.
  *
  * Accepts JSON with file metadata (names + sizes).
- * Returns a demo reconciliation analysis. When an ANTHROPIC_API_KEY
- * is configured, real AI analysis runs using the file names as context.
+ * Returns a polished demo reconciliation analysis. The real AI value
+ * (using ANTHROPIC_API_KEY) lives in /api/chat where genuine
+ * conversational answers happen — that's where adding the API key
+ * actually upgrades the user experience.
  */
 
-import Anthropic from "@anthropic-ai/sdk";
-
-const ANALYSIS_PROMPT = `You are an expert Bank Reconciliation Agent. You have been given the text extracted from a bank statement and a journal/general ledger for a specific period.
-
-Your task:
-1. EXTRACT TRANSACTIONS from both documents
-   - From the bank statement: date, description, debit/withdrawal, credit/deposit, balance
-   - From the journal ledger: date, account, description, debit, credit, reference
-
-2. CROSS-CHECK by matching transactions between the two documents
-   - Match by amount (exact or within 1% tolerance)
-   - Match by date (same day or within 3 business days)
-   - Match by reference/description where possible
-
-3. IDENTIFY DISCREPANCIES
-   For each issue found, categorize as:
-   - MISSING IN LEDGER: Transaction in bank statement but not in ledger
-   - MISSING IN BANK: Transaction in ledger but not in bank statement
-   - AMOUNT MISMATCH: Same transaction, different amounts
-   - TIMING DIFFERENCE: Same transaction, different dates (>3 days)
-
-4. HIGHLIGHT MISSING DATA
-   Mark any entries with incomplete data (missing dates, amounts, references)
-
-5. PROVIDE SUMMARY in this exact format:
-
-============================================
-   BANK RECONCILIATION SUMMARY
-   Period: [start date] to [end date]
-============================================
-
-OVERVIEW:
-- Total bank statement transactions: [X]
-- Total ledger transactions: [X]
-- Matched transactions: [X]
-- Discrepancies found: [X]
-
---------------------------------------------
-MATCHED TRANSACTIONS:
---------------------------------------------
-[List matched pairs briefly]
-
---------------------------------------------
-DISCREPANCIES:
---------------------------------------------
-
-[For each discrepancy:]
-[#] [TYPE] - [Description]
-    Bank: [details]
-    Ledger: [details]
-    Variance: [amount]
-    Likely cause: [explanation]
-
-    Suggested correction:
-    DR  [Account]    [Amount]
-    CR  [Account]    [Amount]
-
---------------------------------------------
-MISSING DATA DETECTED:
---------------------------------------------
-[Circle/highlight items with missing info]
-
---------------------------------------------
-RECOMMENDED CORRECTIVE ENTRIES:
---------------------------------------------
-[List all journal entries needed to reconcile]
-
-RECONCILIATION STATUS: [RECONCILED / PARTIALLY RECONCILED / UNRECONCILED]
-Net difference: [Amount]
-
-============================================
-
-6. After the summary, note: "All corrections require your approval before being applied to the journal ledger."
-
-Be thorough. If the extracted text is unclear or appears to be from a scanned/image document with OCR artifacts, note which parts may need manual verification. Use PKR as default currency.`;
-
-// Configure route — allow up to 10 minutes and large bodies for PDFs
+// Configure route — allow up to 60s execution on Netlify
 export const maxDuration = 60;
 export const runtime = "nodejs";
 
@@ -109,52 +35,15 @@ export async function POST(request: Request) {
     ? ledgerMeta.map((f) => f.name)
     : ["journal ledger"];
 
-  // Demo mode — when no API key, return realistic demo analysis
-  if (!apiKey) {
-    return Response.json({
-      analysis: getDemoAnalysisByNames(bankFileNames, ledgerFileNames),
-    });
-  }
-
-  // With API key configured, we still return demo data in this build because
-  // file content isn't being uploaded. To enable real analysis, the frontend
-  // would need to switch back to FormData upload + the user would need to
-  // ensure files are under 4 MB combined (Netlify Functions limit).
-  try {
-    const bankContent = `[File metadata only — ${bankFileNames.join(", ")}]`;
-    const ledgerContent = `[File metadata only — ${ledgerFileNames.join(", ")}]`;
-
-    const userMessage = `Please determine the reconciliation period automatically from the documents.
-
-=== BANK STATEMENT ===
-${bankContent || "[No text could be extracted — the file may be a scanned image. Please describe what you see or provide the data manually.]"}
-
-=== JOURNAL LEDGER ===
-${ledgerContent || "[No text could be extracted — the file may be a scanned image. Please describe what you see or provide the data manually.]"}
-
-Please perform the full bank reconciliation analysis.`;
-
-    const client = new Anthropic({ apiKey });
-
-    const response = await client.messages.create({
-      model: "claude-sonnet-4-5",
-      max_tokens: 4096,
-      system: ANALYSIS_PROMPT,
-      messages: [{ role: "user", content: userMessage }],
-    });
-
-    const analysis = response.content
-      .filter((b): b is Anthropic.TextBlock => b.type === "text")
-      .map((b) => b.text)
-      .join("\n")
-      .trim();
-
-    return Response.json({ analysis });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error("[analyze] error:", msg);
-    return Response.json({ error: `Analysis failed: ${msg}` }, { status: 500 });
-  }
+  // The /api/analyze endpoint always returns the polished Kafi reconciliation
+  // analysis. File content is not uploaded (to avoid Netlify's 6MB body limit),
+  // so even with an API key set, we cannot meaningfully send Claude the actual
+  // PDF contents from here. The real AI value lives in /api/chat — which uses
+  // your API key for genuine conversational answers about the reconciliation.
+  void apiKey; // referenced to keep type-check happy when unused
+  return Response.json({
+    analysis: getDemoAnalysisByNames(bankFileNames, ledgerFileNames),
+  });
 }
 
 /** Demo / file-name analysis — realistic data modeled on
