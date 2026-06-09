@@ -86,8 +86,6 @@ Be thorough. If the extracted text is unclear or appears to be from a scanned/im
 export async function POST(request: Request) {
   try {
     const formData = await request.formData();
-    const startDate = formData.get("startDate") as string;
-    const endDate = formData.get("endDate") as string;
     const bankFiles = formData.getAll("bankFiles") as File[];
     const ledgerFiles = formData.getAll("ledgerFiles") as File[];
 
@@ -100,7 +98,7 @@ export async function POST(request: Request) {
     // Demo mode — return realistic analysis without parsing files
     if (!apiKey) {
       return Response.json({
-        analysis: getDemoAnalysis(startDate, endDate, bankFiles, ledgerFiles),
+        analysis: getDemoAnalysis(bankFiles, ledgerFiles),
       });
     }
 
@@ -122,7 +120,7 @@ export async function POST(request: Request) {
     const bankContent = bankTexts.join("\n\n");
     const ledgerContent = ledgerTexts.join("\n\n");
 
-    const userMessage = `Reconciliation period: ${startDate} to ${endDate}
+    const userMessage = `Please determine the reconciliation period automatically from the documents.
 
 === BANK STATEMENT ===
 ${bankContent || "[No text could be extracted — the file may be a scanned image. Please describe what you see or provide the data manually.]"}
@@ -158,8 +156,6 @@ Please perform the full bank reconciliation analysis.`;
 /** Demo analysis when no API key is set — uses realistic data modeled on
  *  Kafi Commodities (Pvt) Limited, ABL A/C 0010092704950028 */
 function getDemoAnalysis(
-  startDate: string,
-  endDate: string,
   bankFiles: File[],
   ledgerFiles: File[],
 ): string {
@@ -168,7 +164,7 @@ function getDemoAnalysis(
    KAFI COMMODITIES (PVT) LIMITED
    ABL A/C: 0010092704950028
    Branch: Clifton, Karachi
-   Period: ${startDate} to ${endDate}
+   Period: 01 Oct 2025 to 31 May 2026 (Auto-detected)
 ============================================
 
 OVERVIEW:

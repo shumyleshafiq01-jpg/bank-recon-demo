@@ -49,7 +49,7 @@ export async function POST(request: Request) {
     const client = new Anthropic({ apiKey });
 
     // Add context to the system prompt
-    const contextStr = `\n\nCurrent session state: Step=${context.step ?? "unknown"}, Period=${context.startDate ?? "not set"} to ${context.endDate ?? "not set"}, Bank files=${context.bankFilesCount ?? 0}, Ledger files=${context.ledgerFilesCount ?? 0}, Has results=${context.hasResults ?? false}`;
+    const contextStr = `\n\nCurrent session state: Step=${context.step ?? "unknown"}, Bank files=${context.bankFilesCount ?? 0}, Ledger files=${context.ledgerFilesCount ?? 0}, Has results=${context.hasResults ?? false}`;
 
     const response = await client.messages.create({
       model: "claude-sonnet-4-5",
@@ -109,7 +109,7 @@ I help by:
 5. Suggesting corrective journal entries
 6. Generating an updated ledger after your approval
 
-Let's start — select your reconciliation period using the panel on the left.`;
+Let's start — upload your bank statement using the panel on the left.`;
   }
 
   return "I'm your Bank Reconciliation Agent. I can help you with anything related to matching your bank statement with your journal ledger. Please use the panel on the left to upload your documents, or ask me any questions about the reconciliation process.";

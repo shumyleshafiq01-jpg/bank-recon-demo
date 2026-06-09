@@ -2,32 +2,21 @@
 
 import { useState, useRef, useEffect } from "react";
 import {
-  Landmark, ArrowLeft, Upload, FileText, Calendar,
+  Landmark, ArrowLeft, Upload, FileText,
   Loader2, CheckCircle, AlertTriangle, Send, Bot, User,
   Download, ChevronRight, X, MessageSquare,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 type FileEntry = { file: File; preview: string };
-type Step = "dates" | "upload-bank" | "upload-ledger" | "analyzing" | "results";
+type Step = "upload-bank" | "upload-ledger" | "analyzing" | "results";
 type ChatMsg = { role: "user" | "assistant"; content: string };
-
-/* ── helpers ────────────────────────────────────────────────── */
-
-function fmt(d: string) {
-  if (!d) return "";
-  return new Date(d).toLocaleDateString("en-PK", {
-    day: "numeric", month: "short", year: "numeric",
-  });
-}
 
 /* ── component ──────────────────────────────────────────────── */
 
 export default function ReconPage() {
   const router = useRouter();
-  const [step, setStep] = useState<Step>("dates");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+  const [step, setStep] = useState<Step>("upload-bank");
   const [bankFiles, setBankFiles] = useState<FileEntry[]>([]);
   const [ledgerFiles, setLedgerFiles] = useState<FileEntry[]>([]);
   const [analysisResult, setAnalysisResult] = useState<string>("");
@@ -36,7 +25,7 @@ export default function ReconPage() {
     {
       role: "assistant",
       content:
-        "Hi! I'm your Bank Reconciliation Agent. Let's get started.\n\nPlease select the statement period — choose a start and end date for the reconciliation.",
+        "Hi! I'm your Bank Reconciliation Agent. Let's get started.\n\nPlease upload your bank statement — I accept PDF, scanned images (PNG/JPG), Excel, or CSV files.",
     },
   ]);
   const [chatInput, setChatInput] = useState("");
@@ -65,8 +54,6 @@ export default function ReconPage() {
           messages: newMsgs,
           context: {
             step,
-            startDate,
-            endDate,
             bankFilesCount: bankFiles.length,
             ledgerFilesCount: ledgerFiles.length,
             hasResults: !!analysisResult,
@@ -109,8 +96,6 @@ export default function ReconPage() {
 
     try {
       const formData = new FormData();
-      formData.append("startDate", startDate);
-      formData.append("endDate", endDate);
       bankFiles.forEach((f) => formData.append("bankFiles", f.file));
       ledgerFiles.forEach((f) => formData.append("ledgerFiles", f.file));
 
@@ -150,18 +135,6 @@ export default function ReconPage() {
   }
 
   /* ── step progression ──────────────────────────────────── */
-  function nextFromDates() {
-    if (!startDate || !endDate) return;
-    setStep("upload-bank");
-    setChatMsgs((prev) => [
-      ...prev,
-      {
-        role: "assistant",
-        content: `Great! Period set: ${fmt(startDate)} to ${fmt(endDate)}.\n\nNow please upload your bank statement. I accept PDF, scanned images (PNG/JPG), or Excel files.`,
-      },
-    ]);
-  }
-
   function nextFromBank() {
     if (bankFiles.length === 0) return;
     setStep("upload-ledger");
@@ -180,8 +153,8 @@ export default function ReconPage() {
   }
 
   /* ── render helpers ────────────────────────────────────── */
-  const stepIdx = { dates: 0, "upload-bank": 1, "upload-ledger": 2, analyzing: 3, results: 3 };
-  const steps = ["Period", "Bank Statement", "Journal Ledger", "Results"];
+  const stepIdx = { "upload-bank": 0, "upload-ledger": 1, analyzing: 2, results: 2 };
+  const steps = ["Bank Statement", "Journal Ledger", "Results"];
 
   return (
     <div className="flex-1 flex flex-col h-screen">
@@ -234,43 +207,6 @@ export default function ReconPage() {
         <div className={`flex-1 overflow-y-auto p-4 md:p-8 ${chatOpen ? "hidden md:block" : ""}`}>
           <div className="max-w-2xl mx-auto space-y-6 animate-fade-in">
 
-            {/* STEP: Dates */}
-            {step === "dates" && (
-              <div className="bg-surface rounded-2xl border border-border p-6 space-y-5">
-                <div className="flex items-center gap-3">
-                  <Calendar className="w-5 h-5 text-primary" />
-                  <h2 className="font-semibold text-foreground">Select Reconciliation Period</h2>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs text-muted mb-1.5">Start Date</label>
-                    <input
-                      type="date"
-                      value={startDate}
-                      onChange={(e) => setStartDate(e.target.value)}
-                      className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-muted mb-1.5">End Date</label>
-                    <input
-                      type="date"
-                      value={endDate}
-                      onChange={(e) => setEndDate(e.target.value)}
-                      className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                    />
-                  </div>
-                </div>
-                <button
-                  onClick={nextFromDates}
-                  disabled={!startDate || !endDate}
-                  className="w-full flex items-center justify-center gap-2 bg-primary hover:bg-primary-hover disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition-all cursor-pointer"
-                >
-                  Continue <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
-            )}
-
             {/* STEP: Upload Bank Statement */}
             {step === "upload-bank" && (
               <div className="bg-surface rounded-2xl border border-border p-6 space-y-5">
@@ -279,7 +215,7 @@ export default function ReconPage() {
                   <h2 className="font-semibold text-foreground">Upload Bank Statement</h2>
                 </div>
                 <p className="text-sm text-muted">
-                  Period: {fmt(startDate)} — {fmt(endDate)}
+                  Upload your bank statement for the reconciliation period.
                 </p>
                 <div className="relative">
                   <input
@@ -394,7 +330,7 @@ export default function ReconPage() {
                       <CheckCircle className="w-5 h-5 text-accent" />
                       <h2 className="font-semibold text-foreground">Reconciliation Results</h2>
                     </div>
-                    <span className="text-xs text-muted">{fmt(startDate)} — {fmt(endDate)}</span>
+                    <span className="text-xs text-muted">Auto-detected from files</span>
                   </div>
                   <div className="bg-background rounded-xl p-5 text-sm text-foreground whitespace-pre-wrap leading-relaxed font-mono max-h-[60vh] overflow-y-auto">
                     {analysisResult}
@@ -410,7 +346,7 @@ export default function ReconPage() {
                     Approve & Generate Updated Ledger
                   </button>
                   <button
-                    onClick={() => { setStep("dates"); setBankFiles([]); setLedgerFiles([]); setAnalysisResult(""); }}
+                    onClick={() => { setStep("upload-bank"); setBankFiles([]); setLedgerFiles([]); setAnalysisResult(""); }}
                     className="flex items-center justify-center gap-2 bg-surface hover:bg-surface-light border border-border text-foreground font-semibold py-3 px-5 rounded-xl transition-all cursor-pointer"
                   >
                     Start Over
