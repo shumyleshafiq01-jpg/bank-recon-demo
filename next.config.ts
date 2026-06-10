@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   // pdf-parse uses fs — tell webpack it's server-only
-  serverExternalPackages: ["pdf-parse"],
+  serverExternalPackages: ["pdf-parse", "xlsx"],
 };
 
 export default nextConfig;

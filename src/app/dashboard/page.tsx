@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Landmark, ArrowRight, BarChart3, Clock, User } from "lucide-react";
+import { Landmark, ArrowRight, BarChart3, Clock, User, ArrowDownUp } from "lucide-react";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -39,7 +39,7 @@ export default function DashboardPage() {
               <BarChart3 className="w-5 h-5 text-primary" />
               <div>
                 <p className="text-xs text-muted">Available Modules</p>
-                <p className="text-lg font-bold text-foreground">1</p>
+                <p className="text-lg font-bold text-foreground">2</p>
               </div>
             </div>
           </div>
@@ -63,9 +63,41 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Module Card */}
-        <div>
-          <h3 className="text-sm font-semibold uppercase tracking-wider text-muted mb-4">Modules</h3>
+        {/* Module Cards */}
+        <div className="space-y-4">
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-muted">Modules</h3>
+
+          {/* Debit/Credit Comparison */}
+          <button
+            onClick={() => router.push("/compare")}
+            className="w-full text-left bg-surface hover:bg-surface-light rounded-2xl border border-border hover:border-accent/50 p-6 transition-all group cursor-pointer"
+          >
+            <div className="flex items-start justify-between">
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 rounded-xl bg-accent/20 flex items-center justify-center shrink-0">
+                  <ArrowDownUp className="w-6 h-6 text-accent" />
+                </div>
+                <div>
+                  <h4 className="font-semibold text-foreground group-hover:text-accent transition-colors">
+                    Debit / Credit Comparison
+                  </h4>
+                  <p className="text-sm text-muted mt-1">
+                    Upload a bank statement (PDF) and journal ledger (Excel/CSV).
+                    Instantly find amounts present in one file but missing from the
+                    other — pure number matching, no AI interpretation.
+                  </p>
+                  <div className="flex flex-wrap gap-2 mt-3">
+                    {["Bank PDF", "Ledger XLS/CSV", "Frequency Match", "Both Sides"].map((tag) => (
+                      <span key={tag} className="text-xs px-2.5 py-1 rounded-full bg-accent/10 text-accent">{tag}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <ArrowRight className="w-5 h-5 text-muted group-hover:text-accent transition-colors shrink-0 mt-1" />
+            </div>
+          </button>
+
+          {/* Bank Reconciliation */}
           <button
             onClick={() => router.push("/recon")}
             className="w-full text-left bg-surface hover:bg-surface-light rounded-2xl border border-border hover:border-primary/50 p-6 transition-all group cursor-pointer"
@@ -87,12 +119,7 @@ export default function DashboardPage() {
                   </p>
                   <div className="flex flex-wrap gap-2 mt-3">
                     {["PDF", "Excel", "Images", "Scanned Docs", "AI Cross-Check"].map((tag) => (
-                      <span
-                        key={tag}
-                        className="text-xs px-2.5 py-1 rounded-full bg-primary/10 text-primary"
-                      >
-                        {tag}
-                      </span>
+                      <span key={tag} className="text-xs px-2.5 py-1 rounded-full bg-primary/10 text-primary">{tag}</span>
                     ))}
                   </div>
                 </div>
