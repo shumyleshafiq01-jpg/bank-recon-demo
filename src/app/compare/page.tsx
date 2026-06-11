@@ -3,9 +3,10 @@
 import { useState } from "react";
 import {
   ArrowLeft, Upload, FileText, Loader2, CheckCircle,
-  ChevronRight, X, ArrowDownUp, ChevronDown, ChevronUp,
+  ChevronRight, X, ArrowDownUp, ChevronDown, ChevronUp, Download,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import * as XLSX from "xlsx";
 
 type BankRow = { date: string; particulars: string; debit: number; credit: number };
 type LedgerRow = { date: string; ref: string; desc: string; debit: number; credit: number };
@@ -60,6 +61,31 @@ export default function ComparePage() {
     setLedgerFile(null);
     setResults(null);
     setError("");
+  }
+
+  function downloadXLS() {
+    if (!results) return;
+    const wb = XLSX.utils.book_new();
+
+    const bankRows = [
+      ["Date", "Debit", "Credit"],
+      ...results.bankMissing.map((r) => [r.date, r.debit || "", r.credit || ""]),
+      ["TOTAL", results.bankMissing.reduce((s, r) => s + r.debit, 0), results.bankMissing.reduce((s, r) => s + r.credit, 0)],
+    ];
+    const ws1 = XLSX.utils.aoa_to_sheet(bankRows);
+    ws1["!cols"] = [{ wch: 14 }, { wch: 18 }, { wch: 18 }];
+    XLSX.utils.book_append_sheet(wb, ws1, "Bank Not In Ledger");
+
+    const ledgerRows = [
+      ["Date", "Debit", "Credit"],
+      ...results.ledgerMissing.map((r) => [r.date, r.debit || "", r.credit || ""]),
+      ["TOTAL", results.ledgerMissing.reduce((s, r) => s + r.debit, 0), results.ledgerMissing.reduce((s, r) => s + r.credit, 0)],
+    ];
+    const ws2 = XLSX.utils.aoa_to_sheet(ledgerRows);
+    ws2["!cols"] = [{ wch: 14 }, { wch: 18 }, { wch: 18 }];
+    XLSX.utils.book_append_sheet(wb, ws2, "Ledger Not In Bank");
+
+    XLSX.writeFile(wb, "Missing-Entries-Comparison.xlsx");
   }
 
   const ready = bankFile && ledgerFile && !loading;
@@ -286,14 +312,23 @@ export default function ComparePage() {
                 )}
               </div>
 
-              {/* Start Over */}
-              <button
-                onClick={reset}
-                className="w-full flex items-center justify-center gap-2 bg-surface hover:bg-surface-light border border-border text-foreground font-semibold py-3 rounded-xl transition-all cursor-pointer"
-              >
-                <ChevronRight className="w-4 h-4 rotate-180" />
-                Start Over
-              </button>
+              {/* Actions */}
+              <div className="flex gap-3">
+                <button
+                  onClick={downloadXLS}
+                  className="flex-1 flex items-center justify-center gap-2 bg-accent hover:bg-accent/80 text-white font-semibold py-3 rounded-xl transition-all cursor-pointer"
+                >
+                  <Download className="w-4 h-4" />
+                  Download XLS
+                </button>
+                <button
+                  onClick={reset}
+                  className="flex-1 flex items-center justify-center gap-2 bg-surface hover:bg-surface-light border border-border text-foreground font-semibold py-3 rounded-xl transition-all cursor-pointer"
+                >
+                  <ChevronRight className="w-4 h-4 rotate-180" />
+                  Start Over
+                </button>
+              </div>
             </>
           )}
         </div>
