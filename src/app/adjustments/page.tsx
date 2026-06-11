@@ -2,28 +2,25 @@
 
 import { useState } from "react";
 import {
-  ArrowLeft, Upload, FileText, Loader2, CheckCircle2,
+  ArrowLeft, Upload, FileText, Loader2,
   ChevronRight, X, SlidersHorizontal, ChevronDown, ChevronUp,
   Download, AlertTriangle, CircleCheck,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
 
-type ResolvedRow = {
-  bankDate: string; ledgerDate: string; amount: number; direction: string;
-  bankParticulars: string; ledgerRef: string; ledgerDoc: string; ledgerDesc: string;
-};
 type BankRow = { date: string; particulars: string; debit: number; credit: number };
 type LedgerRow = { date: string; ref: string; doc: string; desc: string; debit: number; credit: number };
 type Summary = {
-  resolvedCount: number; resolvedTotal: string;
+  resolvedFromBank: number; resolvedFromLedger: number;
   bankUnresolvedCount: number; bankUnresolvedDR: string; bankUnresolvedCR: string;
   ledgerUnresolvedCount: number; ledgerUnresolvedDR: string; ledgerUnresolvedCR: string;
 };
 type Results = {
   bankTotal: number; ledgerTotal: number;
   module2BankMissing: number; module2LedgerMissing: number;
-  resolved: ResolvedRow[]; bankUnresolved: BankRow[]; ledgerUnresolved: LedgerRow[];
+  resolvedCount: number;
+  bankUnresolved: BankRow[]; ledgerUnresolved: LedgerRow[];
   summary: Summary;
 };
 
@@ -37,7 +34,6 @@ export default function AdjustmentsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [results, setResults] = useState<Results | null>(null);
-  const [showResolved, setShowResolved] = useState(true);
   const [showBankUn, setShowBankUn] = useState(true);
   const [showLedgerUn, setShowLedgerUn] = useState(true);
 
@@ -69,29 +65,23 @@ export default function AdjustmentsPage() {
     if (!results) return;
     const wb = XLSX.utils.book_new();
 
-    const resolvedRows = [
-      ["Bank Date", "Ledger Date", "Amount", "Direction", "Bank Particulars", "Ledger Ref", "Document #", "Ledger Desc"],
-      ...results.resolved.map((r) => [r.bankDate, r.ledgerDate, r.amount, r.direction, r.bankParticulars, r.ledgerRef, r.ledgerDoc, r.ledgerDesc]),
-    ];
-    const ws1 = XLSX.utils.aoa_to_sheet(resolvedRows);
-    ws1["!cols"] = [{ wch: 12 }, { wch: 12 }, { wch: 16 }, { wch: 6 }, { wch: 24 }, { wch: 14 }, { wch: 14 }, { wch: 30 }];
-    XLSX.utils.book_append_sheet(wb, ws1, "Resolved by Date");
-
     const bankRows = [
       ["Date", "Particulars", "Debit", "Credit"],
       ...results.bankUnresolved.map((r) => [r.date, r.particulars, r.debit || "", r.credit || ""]),
+      ["TOTAL", "", results.bankUnresolved.reduce((s, r) => s + r.debit, 0), results.bankUnresolved.reduce((s, r) => s + r.credit, 0)],
     ];
-    const ws2 = XLSX.utils.aoa_to_sheet(bankRows);
-    ws2["!cols"] = [{ wch: 12 }, { wch: 30 }, { wch: 16 }, { wch: 16 }];
-    XLSX.utils.book_append_sheet(wb, ws2, "Bank Unresolved");
+    const ws1 = XLSX.utils.aoa_to_sheet(bankRows);
+    ws1["!cols"] = [{ wch: 12 }, { wch: 30 }, { wch: 16 }, { wch: 16 }];
+    XLSX.utils.book_append_sheet(wb, ws1, "Bank Unresolved");
 
     const ledgerRows = [
       ["Date", "Ref", "Document #", "Description", "Debit", "Credit"],
       ...results.ledgerUnresolved.map((r) => [r.date, r.ref, r.doc, r.desc, r.debit || "", r.credit || ""]),
+      ["TOTAL", "", "", "", results.ledgerUnresolved.reduce((s, r) => s + r.debit, 0), results.ledgerUnresolved.reduce((s, r) => s + r.credit, 0)],
     ];
-    const ws3 = XLSX.utils.aoa_to_sheet(ledgerRows);
-    ws3["!cols"] = [{ wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 30 }, { wch: 16 }, { wch: 16 }];
-    XLSX.utils.book_append_sheet(wb, ws3, "Ledger Unresolved");
+    const ws2 = XLSX.utils.aoa_to_sheet(ledgerRows);
+    ws2["!cols"] = [{ wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 30 }, { wch: 16 }, { wch: 16 }];
+    XLSX.utils.book_append_sheet(wb, ws2, "Ledger Unresolved");
 
     XLSX.writeFile(wb, "Adjustments-Report.xlsx");
   }
@@ -118,8 +108,9 @@ export default function AdjustmentsPage() {
             <>
               <div className="bg-surface rounded-2xl border border-border p-5">
                 <p className="text-sm text-muted">
-                  This module takes the missing entries from Module 2 (amount-only comparison) and resolves them
-                  further by matching dates, reference numbers, and document numbers. Upload the same two files.
+                  This module goes beyond amount-only matching. It groups all entries by amount,
+                  then pairs them by date (exact match, then within ±3 and ±7 days) to correctly
+                  identify WHICH specific entry is missing when the same amount appears multiple times.
                 </p>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -190,82 +181,36 @@ export default function AdjustmentsPage() {
           {results && (
             <>
               {/* Summary cards */}
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                <div className="bg-surface rounded-xl border border-border p-4 text-center">
-                  <p className="text-[10px] text-muted uppercase tracking-wide">Module 2 Bank Missing</p>
-                  <p className="text-lg font-bold text-foreground">{results.module2BankMissing}</p>
-                </div>
-                <div className="bg-surface rounded-xl border border-border p-4 text-center">
-                  <p className="text-[10px] text-muted uppercase tracking-wide">Module 2 Ledger Missing</p>
-                  <p className="text-lg font-bold text-foreground">{results.module2LedgerMissing}</p>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <div className="bg-surface rounded-xl border border-border p-4 text-center col-span-2 md:col-span-3">
+                  <p className="text-xs text-muted">Module 2 flagged {results.module2BankMissing} bank + {results.module2LedgerMissing} ledger entries as missing (amount-only match)</p>
                 </div>
                 <div className="bg-surface rounded-xl border border-emerald-500/30 p-4 text-center">
                   <p className="text-[10px] text-muted uppercase tracking-wide">Resolved by Date</p>
-                  <p className="text-lg font-bold text-emerald-400">{results.summary.resolvedCount}</p>
+                  <p className="text-lg font-bold text-emerald-400">{results.resolvedCount}</p>
+                  <p className="text-[10px] text-muted">{results.summary.resolvedFromBank} bank + {results.summary.resolvedFromLedger} ledger</p>
                 </div>
                 <div className="bg-surface rounded-xl border border-primary/30 p-4 text-center">
-                  <p className="text-[10px] text-muted uppercase tracking-wide">Bank Still Unresolved</p>
+                  <p className="text-[10px] text-muted uppercase tracking-wide">Bank Still Missing</p>
                   <p className="text-lg font-bold text-primary">{results.summary.bankUnresolvedCount}</p>
                 </div>
                 <div className="bg-surface rounded-xl border border-warning/30 p-4 text-center">
-                  <p className="text-[10px] text-muted uppercase tracking-wide">Ledger Still Unresolved</p>
+                  <p className="text-[10px] text-muted uppercase tracking-wide">Ledger Still Missing</p>
                   <p className="text-lg font-bold text-warning">{results.summary.ledgerUnresolvedCount}</p>
                 </div>
               </div>
 
-              {/* Resolved */}
-              <div className="bg-surface rounded-2xl border border-border overflow-hidden">
-                <button onClick={() => setShowResolved(!showResolved)}
-                  className="w-full flex items-center justify-between px-5 py-4 cursor-pointer hover:bg-surface-light/30 transition-colors">
-                  <div className="flex items-center gap-3">
-                    <CircleCheck className="w-4 h-4 text-emerald-400" />
-                    <h3 className="text-sm font-semibold text-foreground">
-                      Resolved by Date Matching
-                      <span className="ml-2 text-xs font-normal text-muted">({results.resolved.length} entries — {results.summary.resolvedTotal})</span>
-                    </h3>
+              {/* Resolved explanation */}
+              {results.resolvedCount > 0 && (
+                <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-2xl p-5 flex items-start gap-3">
+                  <CircleCheck className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+                  <div className="text-sm text-foreground">
+                    <strong>{results.resolvedCount} entries</strong> that Module 2 flagged as missing were resolved
+                    by date matching — the same amount existed on both sides but with different frequencies.
+                    Date pairing identified the correct counterpart for each, leaving only genuinely unmatched entries below.
                   </div>
-                  {showResolved ? <ChevronUp className="w-4 h-4 text-muted" /> : <ChevronDown className="w-4 h-4 text-muted" />}
-                </button>
-                {showResolved && results.resolved.length > 0 && (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="bg-emerald-500/10 text-emerald-400">
-                          <th className="px-3 py-2.5 text-left font-semibold">Bank Date</th>
-                          <th className="px-3 py-2.5 text-left font-semibold">Ledger Date</th>
-                          <th className="px-3 py-2.5 text-right font-semibold">Amount</th>
-                          <th className="px-3 py-2.5 text-center font-semibold">Dir</th>
-                          <th className="px-3 py-2.5 text-left font-semibold">Bank Particulars</th>
-                          <th className="px-3 py-2.5 text-left font-semibold">Ledger Ref</th>
-                          <th className="px-3 py-2.5 text-left font-semibold">Doc #</th>
-                          <th className="px-3 py-2.5 text-left font-semibold">Ledger Desc</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {results.resolved.map((r, i) => (
-                          <tr key={i} className={i % 2 === 0 ? "" : "bg-surface-light/20"}>
-                            <td className="px-3 py-2 text-muted whitespace-nowrap">{r.bankDate}</td>
-                            <td className="px-3 py-2 text-muted whitespace-nowrap">{r.ledgerDate}</td>
-                            <td className="px-3 py-2 text-right text-foreground font-mono">{fmt(r.amount)}</td>
-                            <td className="px-3 py-2 text-center">
-                              <span className={`text-[10px] px-1.5 py-0.5 rounded ${r.direction === "DR" ? "bg-red-500/10 text-red-400" : "bg-emerald-500/10 text-emerald-400"}`}>
-                                {r.direction}
-                              </span>
-                            </td>
-                            <td className="px-3 py-2 text-foreground truncate max-w-[150px]">{r.bankParticulars}</td>
-                            <td className="px-3 py-2 text-foreground whitespace-nowrap">{r.ledgerRef || "—"}</td>
-                            <td className="px-3 py-2 text-foreground whitespace-nowrap">{r.ledgerDoc || "—"}</td>
-                            <td className="px-3 py-2 text-foreground truncate max-w-[180px]">{r.ledgerDesc}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-                {showResolved && results.resolved.length === 0 && (
-                  <div className="px-5 pb-4 text-sm text-muted">No entries could be resolved by date matching.</div>
-                )}
-              </div>
+                </div>
+              )}
 
               {/* Bank Unresolved */}
               <div className="bg-surface rounded-2xl border border-border overflow-hidden">
@@ -274,7 +219,7 @@ export default function AdjustmentsPage() {
                   <div className="flex items-center gap-3">
                     <AlertTriangle className="w-4 h-4 text-primary" />
                     <h3 className="text-sm font-semibold text-foreground">
-                      Bank Entries — Still Not in Ledger
+                      Bank Entries — Not in Ledger
                       <span className="ml-2 text-xs font-normal text-muted">({results.bankUnresolved.length} entries)</span>
                     </h3>
                   </div>
@@ -285,6 +230,7 @@ export default function AdjustmentsPage() {
                     <table className="w-full text-xs">
                       <thead>
                         <tr className="bg-primary/10 text-primary">
+                          <th className="px-4 py-2.5 text-left font-semibold">#</th>
                           <th className="px-4 py-2.5 text-left font-semibold">Date</th>
                           <th className="px-4 py-2.5 text-left font-semibold">Particulars</th>
                           <th className="px-4 py-2.5 text-right font-semibold">Debit</th>
@@ -294,6 +240,7 @@ export default function AdjustmentsPage() {
                       <tbody>
                         {results.bankUnresolved.map((r, i) => (
                           <tr key={i} className={i % 2 === 0 ? "" : "bg-surface-light/20"}>
+                            <td className="px-4 py-2 text-muted">{i + 1}</td>
                             <td className="px-4 py-2 text-muted whitespace-nowrap">{r.date}</td>
                             <td className="px-4 py-2 text-foreground">{r.particulars}</td>
                             <td className="px-4 py-2 text-right text-red-400 font-mono">{fmt(r.debit)}</td>
@@ -301,13 +248,16 @@ export default function AdjustmentsPage() {
                           </tr>
                         ))}
                         <tr className="bg-primary/5 font-semibold border-t border-border">
-                          <td className="px-4 py-2.5 text-foreground" colSpan={2}>TOTAL ({results.bankUnresolved.length} entries)</td>
+                          <td className="px-4 py-2.5 text-foreground" colSpan={3}>TOTAL ({results.bankUnresolved.length} entries)</td>
                           <td className="px-4 py-2.5 text-right text-red-400 font-mono">{results.summary.bankUnresolvedDR}</td>
                           <td className="px-4 py-2.5 text-right text-emerald-400 font-mono">{results.summary.bankUnresolvedCR}</td>
                         </tr>
                       </tbody>
                     </table>
                   </div>
+                )}
+                {showBankUn && results.bankUnresolved.length === 0 && (
+                  <div className="px-5 pb-4 text-sm text-emerald-400">All bank entries accounted for.</div>
                 )}
               </div>
 
@@ -318,7 +268,7 @@ export default function AdjustmentsPage() {
                   <div className="flex items-center gap-3">
                     <AlertTriangle className="w-4 h-4 text-warning" />
                     <h3 className="text-sm font-semibold text-foreground">
-                      Ledger Entries — Still Not in Bank
+                      Ledger Entries — Not in Bank
                       <span className="ml-2 text-xs font-normal text-muted">({results.ledgerUnresolved.length} entries)</span>
                     </h3>
                   </div>
@@ -329,6 +279,7 @@ export default function AdjustmentsPage() {
                     <table className="w-full text-xs">
                       <thead>
                         <tr className="bg-warning/10 text-warning">
+                          <th className="px-3 py-2.5 text-left font-semibold">#</th>
                           <th className="px-3 py-2.5 text-left font-semibold">Date</th>
                           <th className="px-3 py-2.5 text-left font-semibold">Ref</th>
                           <th className="px-3 py-2.5 text-left font-semibold">Doc #</th>
@@ -340,6 +291,7 @@ export default function AdjustmentsPage() {
                       <tbody>
                         {results.ledgerUnresolved.map((r, i) => (
                           <tr key={i} className={i % 2 === 0 ? "" : "bg-surface-light/20"}>
+                            <td className="px-3 py-2 text-muted">{i + 1}</td>
                             <td className="px-3 py-2 text-muted whitespace-nowrap">{r.date}</td>
                             <td className="px-3 py-2 text-foreground whitespace-nowrap">{r.ref || "—"}</td>
                             <td className="px-3 py-2 text-foreground whitespace-nowrap">{r.doc || "—"}</td>
@@ -349,13 +301,16 @@ export default function AdjustmentsPage() {
                           </tr>
                         ))}
                         <tr className="bg-warning/5 font-semibold border-t border-border">
-                          <td className="px-3 py-2.5 text-foreground" colSpan={4}>TOTAL ({results.ledgerUnresolved.length} entries)</td>
+                          <td className="px-3 py-2.5 text-foreground" colSpan={5}>TOTAL ({results.ledgerUnresolved.length} entries)</td>
                           <td className="px-3 py-2.5 text-right text-red-400 font-mono">{results.summary.ledgerUnresolvedDR}</td>
                           <td className="px-3 py-2.5 text-right text-emerald-400 font-mono">{results.summary.ledgerUnresolvedCR}</td>
                         </tr>
                       </tbody>
                     </table>
                   </div>
+                )}
+                {showLedgerUn && results.ledgerUnresolved.length === 0 && (
+                  <div className="px-5 pb-4 text-sm text-emerald-400">All ledger entries accounted for.</div>
                 )}
               </div>
 
