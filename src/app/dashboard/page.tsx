@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Landmark, ArrowRight, BarChart3, Clock, User, ArrowDownUp } from "lucide-react";
+import { Landmark, ArrowRight, BarChart3, Clock, User, ArrowDownUp, SlidersHorizontal } from "lucide-react";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -39,7 +39,7 @@ export default function DashboardPage() {
               <BarChart3 className="w-5 h-5 text-primary" />
               <div>
                 <p className="text-xs text-muted">Available Modules</p>
-                <p className="text-lg font-bold text-foreground">2</p>
+                <p className="text-lg font-bold text-foreground">3</p>
               </div>
             </div>
           </div>
@@ -94,6 +94,36 @@ export default function DashboardPage() {
                 </div>
               </div>
               <ArrowRight className="w-5 h-5 text-muted group-hover:text-accent transition-colors shrink-0 mt-1" />
+            </div>
+          </button>
+
+          {/* Adjustments & Corrections */}
+          <button
+            onClick={() => router.push("/adjustments")}
+            className="w-full text-left bg-surface hover:bg-surface-light rounded-2xl border border-border hover:border-warning/50 p-6 transition-all group cursor-pointer"
+          >
+            <div className="flex items-start justify-between">
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 rounded-xl bg-warning/20 flex items-center justify-center shrink-0">
+                  <SlidersHorizontal className="w-6 h-6 text-warning" />
+                </div>
+                <div>
+                  <h4 className="font-semibold text-foreground group-hover:text-warning transition-colors">
+                    Adjustments & Corrections
+                  </h4>
+                  <p className="text-sm text-muted mt-1">
+                    Takes missing entries from the comparison module and resolves them
+                    further by matching dates, reference numbers, and document numbers.
+                    Identifies outstanding cheques, bank charges, and timing differences.
+                  </p>
+                  <div className="flex flex-wrap gap-2 mt-3">
+                    {["Date Match", "Ref / Doc #", "Cheque Tracing", "Corrections"].map((tag) => (
+                      <span key={tag} className="text-xs px-2.5 py-1 rounded-full bg-warning/10 text-warning">{tag}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <ArrowRight className="w-5 h-5 text-muted group-hover:text-warning transition-colors shrink-0 mt-1" />
             </div>
           </button>
 
