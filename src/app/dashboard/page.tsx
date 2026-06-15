@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Landmark, ArrowRight, BarChart3, Clock, User, CreditCard, Globe, FileText } from "lucide-react";
+import { Landmark, ArrowRight, BarChart3, Clock, User, Building2, CreditCard, Globe, FileText } from "lucide-react";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -39,7 +39,7 @@ export default function DashboardPage() {
               <BarChart3 className="w-5 h-5 text-primary" />
               <div>
                 <p className="text-xs text-muted">Available Modules</p>
-                <p className="text-lg font-bold text-foreground">4</p>
+                <p className="text-lg font-bold text-foreground">5</p>
               </div>
             </div>
           </div>
@@ -66,6 +66,35 @@ export default function DashboardPage() {
         {/* Module Cards */}
         <div className="space-y-4">
           <h3 className="text-sm font-semibold uppercase tracking-wider text-muted">Modules</h3>
+
+          {/* Multi-Bank Adjustments */}
+          <button
+            onClick={() => router.push("/multi-bank")}
+            className="w-full text-left bg-surface hover:bg-surface-light rounded-2xl border border-border hover:border-violet-500/50 p-6 transition-all group cursor-pointer"
+          >
+            <div className="flex items-start justify-between">
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 rounded-xl bg-violet-500/20 flex items-center justify-center shrink-0">
+                  <Building2 className="w-6 h-6 text-violet-400" />
+                </div>
+                <div>
+                  <h4 className="font-semibold text-foreground group-hover:text-violet-400 transition-colors">
+                    Multi-Bank Adjustments & Corrections
+                  </h4>
+                  <p className="text-sm text-muted mt-1">
+                    Supports ABL, Habib Metropolitan, Faysal, and Soneri bank statements.
+                    Upload bank statements as PDF, Excel, or CSV along with the Tally ledger.
+                  </p>
+                  <div className="flex flex-wrap gap-2 mt-3">
+                    {["Multi-Bank", "PDF / XLS / CSV", "Tally Ledger", "Auto-Detect Format", "Date Match"].map((tag) => (
+                      <span key={tag} className="text-xs px-2.5 py-1 rounded-full bg-violet-500/10 text-violet-400">{tag}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <ArrowRight className="w-5 h-5 text-muted group-hover:text-violet-400 transition-colors shrink-0 mt-1" />
+            </div>
+          </button>
 
           {/* Bank Reconciliation */}
           <button
