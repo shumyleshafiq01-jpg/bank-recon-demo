@@ -2,6 +2,39 @@ import Anthropic from "@anthropic-ai/sdk";
 import * as XLSX from "xlsx";
 
 /* ═══════════════════════════════════════════
+   PDF WITH PASSWORD SUPPORT
+   ═══════════════════════════════════════════ */
+async function extractPdfText(buffer: Buffer, password?: string): Promise<{ text: string; needsPassword: boolean }> {
+  try {
+    const PDFJS = require("pdf-parse/lib/pdf.js/v2.0.550/build/pdf.js");
+    PDFJS.disableWorker = true;
+    const source = password ? { data: new Uint8Array(buffer), password } : new Uint8Array(buffer);
+    const doc = await PDFJS.getDocument(source);
+    let text = "";
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i);
+      const content = await page.getTextContent();
+      let lastY: number | undefined;
+      for (const item of content.items) {
+        const y = (item as { transform: number[] }).transform[5];
+        if (lastY !== undefined && lastY !== y) text += "\n";
+        text += (item as { str: string }).str;
+        lastY = y;
+      }
+      text += "\n\n";
+    }
+    doc.destroy();
+    return { text, needsPassword: false };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/password/i.test(msg) || /PasswordException/i.test(msg) || /encrypted/i.test(msg)) {
+      return { text: "", needsPassword: true };
+    }
+    return { text: "", needsPassword: false };
+  }
+}
+
+/* ═══════════════════════════════════════════
    TYPES
    ═══════════════════════════════════════════ */
 interface Transaction {
@@ -213,7 +246,7 @@ function parseCSV(text: string): Transaction[] {
 /* ═══════════════════════════════════════════
    AI PDF EXTRACTION
    ═══════════════════════════════════════════ */
-async function aiExtractTransactions(buffer: Buffer, fileName: string): Promise<{ transactions: Transaction[]; error?: string }> {
+async function aiExtractTransactions(buffer: Buffer, fileName: string, password?: string): Promise<{ transactions: Transaction[]; error?: string; passwordRequired?: boolean }> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return { transactions: [], error: `${fileName} needs AI extraction but no API key is configured.` };
@@ -221,13 +254,10 @@ async function aiExtractTransactions(buffer: Buffer, fileName: string): Promise<
 
   const client = new Anthropic({ apiKey });
 
-  // Try with extracted text first for text-based PDFs
-  let pdfText = "";
-  try {
-    const pdfParse = (await import("pdf-parse")).default;
-    const extracted = await pdfParse(buffer);
-    pdfText = extracted.text ?? "";
-  } catch { /* ignore */ }
+  const { text: pdfText, needsPassword } = await extractPdfText(buffer, password);
+  if (needsPassword) {
+    return { transactions: [], error: `${fileName} is password-protected. Please enter the password.`, passwordRequired: true };
+  }
 
   const hasText = pdfText.replace(/\s/g, "").length > 100;
 
@@ -330,6 +360,7 @@ export async function POST(request: Request) {
   try {
     const formData = await request.formData();
     const file = formData.get("statementFile") as File | null;
+    const password = (formData.get("password") as string) || undefined;
 
     if (!file) {
       return Response.json({ error: "Please upload a credit card statement." }, { status: 400 });
@@ -346,7 +377,10 @@ export async function POST(request: Request) {
     } else if (ext === "xls" || ext === "xlsx") {
       transactions = parseExcel(buffer);
     } else if (ext === "pdf") {
-      const result = await aiExtractTransactions(buffer, file.name);
+      const result = await aiExtractTransactions(buffer, file.name, password);
+      if (result.passwordRequired) {
+        return Response.json({ passwordRequired: true, fileName: file.name }, { status: 200 });
+      }
       transactions = result.transactions;
       if (result.error) extractionWarning = result.error;
     } else {

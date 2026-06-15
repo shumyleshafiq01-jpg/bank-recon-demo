@@ -48,6 +48,9 @@ export default function MultiBankPage() {
   const [results, setResults] = useState<Results | null>(null);
   const [showBankUn, setShowBankUn] = useState(true);
   const [showLedgerUn, setShowLedgerUn] = useState(true);
+  const [passwords, setPasswords] = useState<Record<string, string>>({});
+  const [passwordPrompt, setPasswordPrompt] = useState<string[] | null>(null);
+  const [passwordInputs, setPasswordInputs] = useState<Record<string, string>>({});
 
   function addBankFiles(files: FileList | null) {
     if (!files) return;
@@ -67,11 +70,13 @@ export default function MultiBankPage() {
     });
   }
 
-  async function runAnalysis() {
+  async function runAnalysis(extraPasswords?: Record<string, string>) {
     if (bankFiles.length === 0 || !ledgerFile) return;
     setLoading(true);
     setError("");
     setResults(null);
+    setPasswordPrompt(null);
+    const allPasswords = { ...passwords, ...(extraPasswords ?? {}) };
     try {
       const fd = new FormData();
       for (let i = 0; i < bankFiles.length; i++) {
@@ -79,15 +84,31 @@ export default function MultiBankPage() {
         fd.append("bankTypes", bankSelections[i] ?? "");
       }
       fd.append("ledgerFile", ledgerFile);
+      if (Object.keys(allPasswords).length > 0) {
+        fd.append("passwords", JSON.stringify(allPasswords));
+      }
       const res = await fetch("/api/multi-bank", { method: "POST", body: fd });
       const data = await res.json();
-      if (data.error) setError(data.error);
-      else setResults(data);
+      if (data.passwordRequired) {
+        setPasswordPrompt(data.files);
+        setPasswordInputs({});
+      } else if (data.error) {
+        setError(data.error);
+      } else {
+        setResults(data);
+      }
     } catch {
       setError("Connection error. Please try again.");
     } finally {
       setLoading(false);
     }
+  }
+
+  function submitPasswords() {
+    const newPasswords = { ...passwords, ...passwordInputs };
+    setPasswords(newPasswords);
+    setPasswordPrompt(null);
+    runAnalysis(newPasswords);
   }
 
   function reset() {
@@ -232,7 +253,7 @@ export default function MultiBankPage() {
                 </div>
               </div>
 
-              <button onClick={runAnalysis} disabled={!ready}
+              <button onClick={() => runAnalysis()} disabled={!ready}
                 className="w-full flex items-center justify-center gap-2 bg-violet-500 hover:bg-violet-500/80 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition-all cursor-pointer">
                 {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Building2 className="w-4 h-4" />}
                 {loading ? "Processing..." : `Analyze ${bankFiles.length} Bank Statement${bankFiles.length !== 1 ? "s" : ""} vs Ledger`}
@@ -242,6 +263,37 @@ export default function MultiBankPage() {
 
           {error && (
             <div className="bg-danger/10 border border-danger/30 rounded-xl p-4 text-sm text-danger">{error}</div>
+          )}
+
+          {/* Password Prompt */}
+          {passwordPrompt && (
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-5 space-y-4">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-amber-400" />
+                <p className="text-sm font-semibold text-amber-300">Password Required</p>
+              </div>
+              <p className="text-sm text-muted">The following files are password-protected. Enter the password to unlock:</p>
+              {passwordPrompt.map((fileName) => (
+                <div key={fileName} className="flex items-center gap-3">
+                  <FileText className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span className="text-sm text-foreground min-w-0 truncate flex-1">{fileName}</span>
+                  <input
+                    type="password"
+                    placeholder="Enter password"
+                    value={passwordInputs[fileName] ?? ""}
+                    onChange={(e) => setPasswordInputs((prev) => ({ ...prev, [fileName]: e.target.value }))}
+                    className="bg-surface border border-border rounded-lg px-3 py-1.5 text-sm text-foreground focus:outline-none focus:border-amber-500/50 w-48"
+                    onKeyDown={(e) => e.key === "Enter" && submitPasswords()}
+                  />
+                </div>
+              ))}
+              <button
+                onClick={submitPasswords}
+                className="w-full flex items-center justify-center gap-2 bg-amber-600 hover:bg-amber-500 text-white font-semibold py-2.5 px-6 rounded-xl transition-all"
+              >
+                Unlock & Retry
+              </button>
+            </div>
           )}
 
           {/* Results */}

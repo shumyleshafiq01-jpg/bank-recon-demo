@@ -1018,10 +1018,41 @@ async function ocrBankPDF(buffer: Buffer, fileName: string, fallbackText?: strin
 /* ═══════════════════════════════════════════
    PARSE A SINGLE BANK FILE (any format)
    ═══════════════════════════════════════════ */
+async function extractPdfText(buffer: Buffer, password?: string): Promise<{ text: string; needsPassword: boolean }> {
+  try {
+    const PDFJS = require("pdf-parse/lib/pdf.js/v2.0.550/build/pdf.js");
+    PDFJS.disableWorker = true;
+    const source = password ? { data: new Uint8Array(buffer), password } : new Uint8Array(buffer);
+    const doc = await PDFJS.getDocument(source);
+    let text = "";
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i);
+      const content = await page.getTextContent();
+      let lastY: number | undefined;
+      for (const item of content.items) {
+        const y = (item as { transform: number[] }).transform[5];
+        if (lastY !== undefined && lastY !== y) text += "\n";
+        text += (item as { str: string }).str;
+        lastY = y;
+      }
+      text += "\n\n";
+    }
+    doc.destroy();
+    return { text, needsPassword: false };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/password/i.test(msg) || /PasswordException/i.test(msg) || /encrypted/i.test(msg)) {
+      return { text: "", needsPassword: true };
+    }
+    return { text: "", needsPassword: false };
+  }
+}
+
 async function parseBankFile(
   file: File,
   bankOverride?: string,
-): Promise<{ entries: BankEntry[]; bank: string; error?: string; warning?: string }> {
+  password?: string,
+): Promise<{ entries: BankEntry[]; bank: string; error?: string; warning?: string; passwordRequired?: boolean }> {
   const ext = file.name.toLowerCase().split(".").pop() ?? "";
   const buffer = Buffer.from(await file.arrayBuffer());
 
@@ -1041,11 +1072,11 @@ async function parseBankFile(
   }
 
   if (ext === "pdf") {
-    let text = "";
-    try {
-      const pdfParse = (await import("pdf-parse")).default;
-      text = (await pdfParse(buffer)).text ?? "";
-    } catch {
+    const { text, needsPassword } = await extractPdfText(buffer, password);
+    if (needsPassword) {
+      return { entries: [], bank: file.name, error: `${file.name} is password-protected. Please enter the password.`, passwordRequired: true };
+    }
+    if (!text) {
       return ocrBankPDF(buffer, file.name);
     }
 
@@ -1409,6 +1440,8 @@ export async function POST(request: Request) {
     const bankFiles = formData.getAll("bankFiles") as File[];
     const bankTypes = formData.getAll("bankTypes") as string[];
     const ledgerFile = formData.get("ledgerFile") as File | null;
+    const passwordsRaw = formData.get("passwords") as string | null;
+    const passwords: Record<string, string> = passwordsRaw ? JSON.parse(passwordsRaw) : {};
 
     if (bankFiles.length === 0 || !ledgerFile) {
       return Response.json({ error: "At least one bank statement and a ledger file are required." }, { status: 400 });
@@ -1420,8 +1453,14 @@ export async function POST(request: Request) {
     const warnings: string[] = [];
 
     const results = await Promise.all(
-      bankFiles.map((file, i) => parseBankFile(file, bankTypes[i] || undefined))
+      bankFiles.map((file, i) => parseBankFile(file, bankTypes[i] || undefined, passwords[file.name]))
     );
+
+    // Check if any file needs a password
+    const needsPassword = results.filter((r) => r.passwordRequired).map((_, i) => bankFiles[i].name);
+    if (needsPassword.length > 0) {
+      return Response.json({ passwordRequired: true, files: needsPassword }, { status: 200 });
+    }
     for (let i = 0; i < bankFiles.length; i++) {
       const result = results[i];
       bankSources.push({ name: bankFiles[i].name, bank: result.bank, count: result.entries.length, error: result.error });
@@ -1446,15 +1485,17 @@ export async function POST(request: Request) {
     } else if (ext === "xls" || ext === "xlsx") {
       ledgerEntries = parseLedgerExcel(ledgerBuffer);
     } else if (ext === "pdf") {
-      try {
-        const pdfParse = (await import("pdf-parse")).default;
-        const extracted = await pdfParse(ledgerBuffer);
-        ledgerEntries = parseTallyLedger(extracted.text ?? "");
-        if (ledgerEntries.length === 0) {
-          return Response.json({ error: "No entries found in ledger PDF. Ensure it is a Tally-format PDF." }, { status: 400 });
-        }
-      } catch {
+      const ledgerPw = passwords[ledgerFile.name];
+      const { text: ledgerText, needsPassword: ledgerNeedsPw } = await extractPdfText(ledgerBuffer, ledgerPw);
+      if (ledgerNeedsPw) {
+        return Response.json({ passwordRequired: true, files: [ledgerFile.name] }, { status: 200 });
+      }
+      if (!ledgerText) {
         return Response.json({ error: "Could not extract text from ledger PDF." }, { status: 400 });
+      }
+      ledgerEntries = parseTallyLedger(ledgerText);
+      if (ledgerEntries.length === 0) {
+        return Response.json({ error: "No entries found in ledger PDF. Ensure it is a Tally-format PDF." }, { status: 400 });
       }
     } else {
       return Response.json({ error: "Ledger must be .xls, .xlsx, .csv, or .pdf (Tally format)" }, { status: 400 });

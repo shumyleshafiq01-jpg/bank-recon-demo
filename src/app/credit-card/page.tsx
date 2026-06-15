@@ -58,6 +58,9 @@ export default function CreditCardPage() {
   const [verifications, setVerifications] = useState<Record<string, VerifyStatus>>({});
   // Expanded groups
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // Password support
+  const [passwordPrompt, setPasswordPrompt] = useState(false);
+  const [passwordInput, setPasswordInput] = useState("");
 
   const toggleGroup = useCallback((header: string) => {
     setExpanded((prev) => {
@@ -80,28 +83,39 @@ export default function CreditCardPage() {
     });
   }, []);
 
-  async function runAnalysis() {
+  async function runAnalysis(password?: string) {
     if (!file) return;
     setLoading(true);
     setError("");
     setResults(null);
     setVerifications({});
     setExpanded(new Set());
+    setPasswordPrompt(false);
 
     try {
       const fd = new FormData();
       fd.append("statementFile", file);
+      if (password) fd.append("password", password);
       const res = await fetch("/api/credit-card", { method: "POST", body: fd });
       const data = await res.json();
+      if (data.passwordRequired) {
+        setPasswordPrompt(true);
+        setPasswordInput("");
+        return;
+      }
       if (!res.ok) throw new Error(data.error ?? "Upload failed");
       setResults(data);
-      // Expand all groups by default
       setExpanded(new Set(data.groups.map((g: MerchantGroup) => g.header)));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
+  }
+
+  function submitPassword() {
+    setPasswordPrompt(false);
+    runAnalysis(passwordInput);
   }
 
   /* ── Stats ── */
@@ -235,7 +249,7 @@ export default function CreditCardPage() {
 
             {/* Analyze Button */}
             <button
-              onClick={runAnalysis}
+              onClick={() => runAnalysis()}
               disabled={!file || loading}
               className="w-full py-3 rounded-xl font-semibold text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed bg-rose-500 hover:bg-rose-600 text-white cursor-pointer"
             >
@@ -259,6 +273,32 @@ export default function CreditCardPage() {
           <div className="bg-danger/10 border border-danger/30 rounded-xl p-4 flex items-start gap-3">
             <AlertTriangle className="w-5 h-5 text-danger shrink-0 mt-0.5" />
             <p className="text-sm text-danger">{error}</p>
+          </div>
+        )}
+
+        {/* Password Prompt */}
+        {passwordPrompt && (
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-5 space-y-4">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-amber-400" />
+              <p className="text-sm font-semibold text-amber-300">Password Required</p>
+            </div>
+            <p className="text-sm text-muted">This PDF is password-protected. Enter the password to unlock it:</p>
+            <input
+              type="password"
+              placeholder="Enter PDF password"
+              value={passwordInput}
+              onChange={(e) => setPasswordInput(e.target.value)}
+              className="w-full bg-surface border border-border rounded-lg px-4 py-2.5 text-sm text-foreground focus:outline-none focus:border-amber-500/50"
+              onKeyDown={(e) => e.key === "Enter" && submitPassword()}
+              autoFocus
+            />
+            <button
+              onClick={submitPassword}
+              className="w-full flex items-center justify-center gap-2 bg-amber-600 hover:bg-amber-500 text-white font-semibold py-2.5 px-6 rounded-xl transition-all"
+            >
+              Unlock & Process
+            </button>
           </div>
         )}
 
