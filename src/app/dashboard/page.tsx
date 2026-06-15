@@ -1,10 +1,45 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Landmark, ArrowRight, BarChart3, Clock, User, Building2, CreditCard, Globe, FileText } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Landmark, ArrowRight, BarChart3, Clock, User, Building2, CreditCard, Globe, FileText, LogOut } from "lucide-react";
+
+const TESTING_EXPIRY_MS = 72 * 60 * 60 * 1000;
+
+type Session = { type: "user" | "testing"; ts: number } | null;
 
 export default function DashboardPage() {
   const router = useRouter();
+  const [session, setSession] = useState<Session>(null);
+  const [checked, setChecked] = useState(false);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("session");
+      if (!raw) { router.replace("/"); return; }
+      const s = JSON.parse(raw) as Session;
+      if (!s) { router.replace("/"); return; }
+      if (s.type === "testing" && Date.now() - s.ts > TESTING_EXPIRY_MS) {
+        localStorage.removeItem("session");
+        router.replace("/?expired=1");
+        return;
+      }
+      setSession(s);
+    } catch {
+      router.replace("/");
+      return;
+    }
+    setChecked(true);
+  }, [router]);
+
+  function logout() {
+    localStorage.removeItem("session");
+    router.replace("/");
+  }
+
+  if (!checked) return null;
+
+  const sessionLabel = session?.type === "user" ? "User" : "Tester";
 
   return (
     <div className="flex-1 flex flex-col">
@@ -19,9 +54,15 @@ export default function DashboardPage() {
             <p className="text-xs text-muted">by Sheikh Shumyle &middot; 9 June 2026</p>
           </div>
         </div>
-        <div className="flex items-center gap-2 text-sm text-muted">
-          <User className="w-4 h-4" />
-          Guest User
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 text-sm text-muted">
+            <User className="w-4 h-4" />
+            {sessionLabel}
+          </div>
+          <button onClick={logout} className="flex items-center gap-1.5 text-xs text-muted hover:text-red-400 transition-colors cursor-pointer">
+            <LogOut className="w-3.5 h-3.5" />
+            Logout
+          </button>
         </div>
       </header>
 
