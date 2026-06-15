@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Landmark, ArrowRight, BarChart3, Clock, User, ArrowDownUp, SlidersHorizontal, Building2 } from "lucide-react";
+import { Landmark, ArrowRight, BarChart3, Clock, User, CreditCard, Globe, FileText } from "lucide-react";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -67,95 +67,6 @@ export default function DashboardPage() {
         <div className="space-y-4">
           <h3 className="text-sm font-semibold uppercase tracking-wider text-muted">Modules</h3>
 
-          {/* Debit/Credit Comparison */}
-          <button
-            onClick={() => router.push("/compare")}
-            className="w-full text-left bg-surface hover:bg-surface-light rounded-2xl border border-border hover:border-accent/50 p-6 transition-all group cursor-pointer"
-          >
-            <div className="flex items-start justify-between">
-              <div className="flex items-start gap-4">
-                <div className="w-12 h-12 rounded-xl bg-accent/20 flex items-center justify-center shrink-0">
-                  <ArrowDownUp className="w-6 h-6 text-accent" />
-                </div>
-                <div>
-                  <h4 className="font-semibold text-foreground group-hover:text-accent transition-colors">
-                    Debit / Credit Comparison
-                  </h4>
-                  <p className="text-sm text-muted mt-1">
-                    Upload a bank statement (PDF) and journal ledger (Excel/CSV).
-                    Instantly find amounts present in one file but missing from the
-                    other — pure number matching, no AI interpretation.
-                  </p>
-                  <div className="flex flex-wrap gap-2 mt-3">
-                    {["Bank PDF", "Ledger XLS/CSV", "Frequency Match", "Both Sides"].map((tag) => (
-                      <span key={tag} className="text-xs px-2.5 py-1 rounded-full bg-accent/10 text-accent">{tag}</span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <ArrowRight className="w-5 h-5 text-muted group-hover:text-accent transition-colors shrink-0 mt-1" />
-            </div>
-          </button>
-
-          {/* Adjustments & Corrections */}
-          <button
-            onClick={() => router.push("/adjustments")}
-            className="w-full text-left bg-surface hover:bg-surface-light rounded-2xl border border-border hover:border-warning/50 p-6 transition-all group cursor-pointer"
-          >
-            <div className="flex items-start justify-between">
-              <div className="flex items-start gap-4">
-                <div className="w-12 h-12 rounded-xl bg-warning/20 flex items-center justify-center shrink-0">
-                  <SlidersHorizontal className="w-6 h-6 text-warning" />
-                </div>
-                <div>
-                  <h4 className="font-semibold text-foreground group-hover:text-warning transition-colors">
-                    Adjustments & Corrections
-                  </h4>
-                  <p className="text-sm text-muted mt-1">
-                    Takes missing entries from the comparison module and resolves them
-                    further by matching dates, reference numbers, and document numbers.
-                    Identifies outstanding cheques, bank charges, and timing differences.
-                  </p>
-                  <div className="flex flex-wrap gap-2 mt-3">
-                    {["Date Match", "Ref / Doc #", "Cheque Tracing", "Corrections"].map((tag) => (
-                      <span key={tag} className="text-xs px-2.5 py-1 rounded-full bg-warning/10 text-warning">{tag}</span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <ArrowRight className="w-5 h-5 text-muted group-hover:text-warning transition-colors shrink-0 mt-1" />
-            </div>
-          </button>
-
-          {/* Multi-Bank Adjustments */}
-          <button
-            onClick={() => router.push("/multi-bank")}
-            className="w-full text-left bg-surface hover:bg-surface-light rounded-2xl border border-border hover:border-violet-500/50 p-6 transition-all group cursor-pointer"
-          >
-            <div className="flex items-start justify-between">
-              <div className="flex items-start gap-4">
-                <div className="w-12 h-12 rounded-xl bg-violet-500/20 flex items-center justify-center shrink-0">
-                  <Building2 className="w-6 h-6 text-violet-400" />
-                </div>
-                <div>
-                  <h4 className="font-semibold text-foreground group-hover:text-violet-400 transition-colors">
-                    Multi-Bank Adjustments & Corrections
-                  </h4>
-                  <p className="text-sm text-muted mt-1">
-                    Supports ABL, Habib Metropolitan, Faysal, and Soneri bank statements.
-                    Upload bank statements as PDF, Excel, or CSV along with the Tally ledger.
-                  </p>
-                  <div className="flex flex-wrap gap-2 mt-3">
-                    {["Multi-Bank", "PDF / XLS / CSV", "Tally Ledger", "Auto-Detect Format", "Date Match"].map((tag) => (
-                      <span key={tag} className="text-xs px-2.5 py-1 rounded-full bg-violet-500/10 text-violet-400">{tag}</span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <ArrowRight className="w-5 h-5 text-muted group-hover:text-violet-400 transition-colors shrink-0 mt-1" />
-            </div>
-          </button>
-
           {/* Bank Reconciliation */}
           <button
             onClick={() => router.push("/recon")}
@@ -184,6 +95,96 @@ export default function DashboardPage() {
                 </div>
               </div>
               <ArrowRight className="w-5 h-5 text-muted group-hover:text-primary transition-colors shrink-0 mt-1" />
+            </div>
+          </button>
+
+          {/* Credit Card Verification */}
+          <button
+            onClick={() => router.push("/credit-card")}
+            className="w-full text-left bg-surface hover:bg-surface-light rounded-2xl border border-border hover:border-rose-500/50 p-6 transition-all group cursor-pointer"
+          >
+            <div className="flex items-start justify-between">
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 rounded-xl bg-rose-500/20 flex items-center justify-center shrink-0">
+                  <CreditCard className="w-6 h-6 text-rose-400" />
+                </div>
+                <div>
+                  <h4 className="font-semibold text-foreground group-hover:text-rose-400 transition-colors">
+                    Credit Card Statement Verification
+                  </h4>
+                  <p className="text-sm text-muted mt-1">
+                    Upload a credit card statement (PDF, Excel, or CSV). Transactions are
+                    auto-grouped by merchant with totals. Manually verify each transaction
+                    against physical receipts and download the verification report.
+                  </p>
+                  <div className="flex flex-wrap gap-2 mt-3">
+                    {["Credit Card", "Group by Merchant", "Tick Verification", "Excel Report"].map((tag) => (
+                      <span key={tag} className="text-xs px-2.5 py-1 rounded-full bg-rose-500/10 text-rose-400">{tag}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <ArrowRight className="w-5 h-5 text-muted group-hover:text-rose-400 transition-colors shrink-0 mt-1" />
+            </div>
+          </button>
+
+          {/* International Bank Reconciliation */}
+          <button
+            onClick={() => router.push("/international")}
+            className="w-full text-left bg-surface hover:bg-surface-light rounded-2xl border border-border hover:border-cyan-500/50 p-6 transition-all group cursor-pointer"
+          >
+            <div className="flex items-start justify-between">
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 rounded-xl bg-cyan-500/20 flex items-center justify-center shrink-0">
+                  <Globe className="w-6 h-6 text-cyan-400" />
+                </div>
+                <div>
+                  <h4 className="font-semibold text-foreground group-hover:text-cyan-400 transition-colors">
+                    International Bank Reconciliation
+                  </h4>
+                  <p className="text-sm text-muted mt-1">
+                    Upload bank statements from any international bank (UAE, USA, UK, etc.).
+                    AI auto-detects the bank format and currency — no bank dropdown needed.
+                    Multi-currency support with date-aware matching.
+                  </p>
+                  <div className="flex flex-wrap gap-2 mt-3">
+                    {["International", "Multi-Currency", "AI Auto-Detect", "Any Bank", "Date Match"].map((tag) => (
+                      <span key={tag} className="text-xs px-2.5 py-1 rounded-full bg-cyan-500/10 text-cyan-400">{tag}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <ArrowRight className="w-5 h-5 text-muted group-hover:text-cyan-400 transition-colors shrink-0 mt-1" />
+            </div>
+          </button>
+
+          {/* Statement Converter */}
+          <button
+            onClick={() => router.push("/statement-converter")}
+            className="w-full text-left bg-surface hover:bg-surface-light rounded-2xl border border-border hover:border-emerald-500/50 p-6 transition-all group cursor-pointer"
+          >
+            <div className="flex items-start justify-between">
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 rounded-xl bg-emerald-500/20 flex items-center justify-center shrink-0">
+                  <FileText className="w-6 h-6 text-emerald-400" />
+                </div>
+                <div>
+                  <h4 className="font-semibold text-foreground group-hover:text-emerald-400 transition-colors">
+                    Bank Statement Converter
+                  </h4>
+                  <p className="text-sm text-muted mt-1">
+                    Convert any bank statement PDF into a clean, standardized Excel file
+                    with fixed columns (Date, Description, Debit, Credit, Balance).
+                    AI reads the PDF and outputs a ready-to-use spreadsheet.
+                  </p>
+                  <div className="flex flex-wrap gap-2 mt-3">
+                    {["PDF → Excel", "AI Extraction", "Any Bank", "Standardized Output"].map((tag) => (
+                      <span key={tag} className="text-xs px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400">{tag}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <ArrowRight className="w-5 h-5 text-muted group-hover:text-emerald-400 transition-colors shrink-0 mt-1" />
             </div>
           </button>
         </div>
