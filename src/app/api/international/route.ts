@@ -339,7 +339,7 @@ async function parseBankPdf(buffer: Buffer, fileName: string): Promise<AIResult>
 /* ═══════════════════════════════════════════
    EXCEL / CSV BANK PARSING (structured files)
    ═══════════════════════════════════════════ */
-function parseBankExcel(buffer: Buffer, fileName: string): { entries: BankEntry[]; bank: string; currency: string; warning?: string } {
+function parseBankExcel(buffer: Buffer, fileName: string): { entries: BankEntry[]; bank: string; currency: string; error?: string; warning?: string } {
   const wb = XLSX.read(buffer, { type: "buffer" });
   const entries: BankEntry[] = [];
 
@@ -415,7 +415,7 @@ function parseBankExcel(buffer: Buffer, fileName: string): { entries: BankEntry[
   return { entries, bank: "Excel Import", currency: "???" };
 }
 
-function parseBankCSV(text: string, fileName: string): { entries: BankEntry[]; bank: string; currency: string } {
+function parseBankCSV(text: string, fileName: string): { entries: BankEntry[]; bank: string; currency: string; error?: string; warning?: string } {
   const lines = text.split("\n");
   const entries: BankEntry[] = [];
   let headerIdx = -1;
