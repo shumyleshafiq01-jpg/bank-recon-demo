@@ -2,16 +2,25 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Landmark, ArrowRight, BarChart3, Clock, User, Building2, CreditCard, Globe, FileText, LogOut, Scale } from "lucide-react";
+import { Landmark, ArrowRight, BarChart3, Clock, User, Building2, CreditCard, Globe, FileText, LogOut, Scale, Timer } from "lucide-react";
 
 const TESTING_DEADLINE = new Date("2026-06-18T12:00:00Z").getTime();
 
 type Session = { type: "user" | "testing"; ts: number } | null;
 
+function formatCountdown(ms: number): string {
+  if (ms <= 0) return "00:00:00";
+  const h = Math.floor(ms / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  const s = Math.floor((ms % 60000) / 1000);
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const [session, setSession] = useState<Session>(null);
   const [checked, setChecked] = useState(false);
+  const [remaining, setRemaining] = useState("");
 
   useEffect(() => {
     try {
@@ -31,6 +40,22 @@ export default function DashboardPage() {
     }
     setChecked(true);
   }, [router]);
+
+  useEffect(() => {
+    if (!session || session.type !== "testing") return;
+    const tick = () => {
+      const left = TESTING_DEADLINE - Date.now();
+      if (left <= 0) {
+        localStorage.removeItem("session");
+        router.replace("/?expired=1");
+        return;
+      }
+      setRemaining(formatCountdown(left));
+    };
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [session, router]);
 
   function logout() {
     localStorage.removeItem("session");
@@ -59,6 +84,12 @@ export default function DashboardPage() {
             <User className="w-4 h-4" />
             {sessionLabel}
           </div>
+          {session?.type === "testing" && remaining && (
+            <div className="flex items-center gap-1.5 text-xs font-mono bg-amber-500/10 border border-amber-500/30 text-amber-400 px-2.5 py-1 rounded-lg">
+              <Timer className="w-3.5 h-3.5" />
+              {remaining}
+            </div>
+          )}
           <button onClick={logout} className="flex items-center gap-1.5 text-xs text-muted hover:text-red-400 transition-colors cursor-pointer">
             <LogOut className="w-3.5 h-3.5" />
             Logout
