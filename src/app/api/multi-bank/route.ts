@@ -1162,19 +1162,51 @@ function parseLedgerExcel(buffer: Buffer): LedgerEntry[] {
     if (!ws) continue;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const data: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1 });
+
+    // Detect column layout from header row
+    let colDate = 0, colRef = 1, colDesc = 2, colDoc = 3, colDebit = 5, colCredit = 6;
     for (const row of data) {
-      if (!row || row.length < 8 || row[0] === "Date") continue;
-      const rawDate = row[0];
-      const ref = String(row[1] ?? "");
-      const desc = String(row[2] ?? "");
-      const doc = String(row[3] ?? "");
-      const debit = typeof row[5] === "number" ? row[5] : 0;
-      const credit = typeof row[6] === "number" ? row[6] : 0;
+      if (!row) continue;
+      const cells: string[] = Array.from({ length: row.length }, (_, i) => {
+        const c = row[i];
+        return c == null ? "" : String(c).trim().toUpperCase();
+      });
+      const dateIdx = cells.findIndex(c => c === "DATE");
+      const debitIdx = cells.findIndex(c => c === "DEBIT");
+      const creditIdx = cells.findIndex(c => c === "CREDIT");
+      if (dateIdx >= 0 && debitIdx >= 0 && creditIdx >= 0) {
+        colDate = dateIdx;
+        colDebit = debitIdx;
+        colCredit = creditIdx;
+        const partIdx = cells.findIndex(c => c === "PARTICULARS" || c === "DESCRIPTION" || c === "NARRATION");
+        if (partIdx >= 0) colDesc = partIdx;
+        const vchIdx = cells.findIndex(c => c.includes("VCH") && c.includes("NO"));
+        if (vchIdx >= 0) colDoc = vchIdx;
+        const refIdx = cells.findIndex(c => c === "REF" || c === "REFERENCE" || c === "VCH TYPE" || (c.includes("VCH") && c.includes("TYPE")));
+        if (refIdx >= 0) colRef = refIdx;
+        break;
+      }
+    }
+
+    for (const row of data) {
+      if (!row || row.length < Math.max(colDebit, colCredit) + 1) continue;
+      const cell0 = String(row[colDate] ?? "").trim().toUpperCase();
+      if (cell0 === "DATE" || cell0 === "") continue;
+      const rawDate = row[colDate];
+      const ref = String(row[colRef] ?? "");
+      let desc = String(row[colDesc] ?? "");
+      // Tally-style: "To"/"By" in Particulars col, actual name in next col
+      if ((desc === "To" || desc === "By") && row[colDesc + 1]) {
+        desc = desc + " " + String(row[colDesc + 1]);
+      }
+      const doc = String(row[colDoc] ?? "");
+      const debit = typeof row[colDebit] === "number" ? row[colDebit] : 0;
+      const credit = typeof row[colCredit] === "number" ? row[colCredit] : 0;
       if (debit === 0 && credit === 0) continue;
       let dateStr = "";
       if (typeof rawDate === "number") {
         const d = XLSX.SSF.parse_date_code(rawDate);
-        dateStr = `${pad(d.m)}-${pad(d.d)}-${d.y}`;
+        dateStr = `${pad(d.d)}-${pad(d.m)}-${d.y}`;
       } else if (typeof rawDate === "string") {
         dateStr = rawDate;
       }
