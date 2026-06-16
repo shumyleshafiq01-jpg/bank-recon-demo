@@ -96,7 +96,7 @@ function LoginContent() {
               </div>
               <div className="flex-1">
                 <h3 className="font-semibold text-foreground group-hover:text-cyan-400 transition-colors">Testing</h3>
-                <p className="text-xs text-muted mt-0.5">Beta access &middot; limited time</p>
+                <p className="text-xs text-muted mt-0.5">Beta access &middot; {Math.max(0, Math.ceil((TESTING_DEADLINE - Date.now()) / 3600000))} hours left</p>
               </div>
               <ArrowRight className="w-4 h-4 text-muted group-hover:text-cyan-400 transition-colors" />
             </button>
