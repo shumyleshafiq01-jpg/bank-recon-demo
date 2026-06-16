@@ -228,33 +228,33 @@ export default function DashboardPage() {
             </div>
           </button>
 
-          {/* Statement Converter */}
+          {/* Statement Digitizer */}
           <button
-            onClick={() => router.push("/statement-converter")}
-            className="w-full text-left bg-surface hover:bg-surface-light rounded-2xl border border-border hover:border-emerald-500/50 p-6 transition-all group cursor-pointer"
+            onClick={() => router.push("/statement-digitizer")}
+            className="w-full text-left bg-surface hover:bg-surface-light rounded-2xl border border-border hover:border-teal-500/50 p-6 transition-all group cursor-pointer"
           >
             <div className="flex items-start justify-between">
               <div className="flex items-start gap-4">
-                <div className="w-12 h-12 rounded-xl bg-emerald-500/20 flex items-center justify-center shrink-0">
-                  <FileText className="w-6 h-6 text-emerald-400" />
+                <div className="w-12 h-12 rounded-xl bg-teal-500/20 flex items-center justify-center shrink-0">
+                  <FileText className="w-6 h-6 text-teal-400" />
                 </div>
                 <div>
-                  <h4 className="font-semibold text-foreground group-hover:text-emerald-400 transition-colors">
-                    Bank Statement Converter
+                  <h4 className="font-semibold text-foreground group-hover:text-teal-400 transition-colors">
+                    Statement Digitizer
                   </h4>
                   <p className="text-sm text-muted mt-1">
-                    Convert any bank statement PDF into a clean, standardized Excel file
-                    with fixed columns (Date, Description, Debit, Credit, Balance).
-                    AI reads the PDF and outputs a ready-to-use spreadsheet.
+                    Upload a new bank statement and ledger — AI validates, extracts,
+                    and reconciles transactions in 3 steps. Verify each match and
+                    teach the system to learn your bank&apos;s format over time.
                   </p>
                   <div className="flex flex-wrap gap-2 mt-3">
-                    {["PDF → Excel", "AI Extraction", "Any Bank", "Standardized Output"].map((tag) => (
-                      <span key={tag} className="text-xs px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400">{tag}</span>
+                    {["Step A→B→C", "AI Validation", "Any Bank", "Blueprint Learning", "Verify & Correct"].map((tag) => (
+                      <span key={tag} className="text-xs px-2.5 py-1 rounded-full bg-teal-500/10 text-teal-400">{tag}</span>
                     ))}
                   </div>
                 </div>
               </div>
-              <ArrowRight className="w-5 h-5 text-muted group-hover:text-emerald-400 transition-colors shrink-0 mt-1" />
+              <ArrowRight className="w-5 h-5 text-muted group-hover:text-teal-400 transition-colors shrink-0 mt-1" />
             </div>
           </button>
 
