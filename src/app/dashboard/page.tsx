@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Landmark, ArrowRight, BarChart3, Clock, User, Building2, CreditCard, Globe, FileText, LogOut, Scale, Timer } from "lucide-react";
+import { Landmark, ArrowRight, BarChart3, Clock, User, Building2, CreditCard, Globe, FileText, LogOut, Scale, Timer, BookOpen } from "lucide-react";
 
 const TESTING_DEADLINE = new Date("2026-06-18T12:00:00Z").getTime();
 
@@ -111,7 +111,7 @@ export default function DashboardPage() {
               <BarChart3 className="w-5 h-5 text-primary" />
               <div>
                 <p className="text-xs text-muted">Available Modules</p>
-                <p className="text-lg font-bold text-foreground">5</p>
+                <p className="text-lg font-bold text-foreground">6</p>
               </div>
             </div>
           </div>
@@ -255,6 +255,36 @@ export default function DashboardPage() {
                 </div>
               </div>
               <ArrowRight className="w-5 h-5 text-muted group-hover:text-teal-400 transition-colors shrink-0 mt-1" />
+            </div>
+          </button>
+
+          {/* Ledger vs Ledger */}
+          <button
+            onClick={() => router.push("/ledger-vs-ledger")}
+            className="w-full text-left bg-surface hover:bg-surface-light rounded-2xl border border-border hover:border-orange-500/50 p-6 transition-all group cursor-pointer"
+          >
+            <div className="flex items-start justify-between">
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 rounded-xl bg-orange-500/20 flex items-center justify-center shrink-0">
+                  <BookOpen className="w-6 h-6 text-orange-400" />
+                </div>
+                <div>
+                  <h4 className="font-semibold text-foreground group-hover:text-orange-400 transition-colors">
+                    Ledger vs Ledger
+                  </h4>
+                  <p className="text-sm text-muted mt-1">
+                    Compare your company ledger against a vendor or customer ledger.
+                    Upload both as XLS — entries are matched by amount and date.
+                    Unmatched entries from both sides are highlighted for review.
+                  </p>
+                  <div className="flex flex-wrap gap-2 mt-3">
+                    {["Company vs Vendor", "XLS Only", "Amount + Date Match", "Cross-Verify", "Download Report"].map((tag) => (
+                      <span key={tag} className="text-xs px-2.5 py-1 rounded-full bg-orange-500/10 text-orange-400">{tag}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <ArrowRight className="w-5 h-5 text-muted group-hover:text-orange-400 transition-colors shrink-0 mt-1" />
             </div>
           </button>
 
