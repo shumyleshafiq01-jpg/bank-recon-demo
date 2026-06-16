@@ -5,12 +5,13 @@ import { useState, Suspense } from "react";
 import { Landmark, Shield, User, FlaskConical, ArrowRight, Lock, X, AlertTriangle } from "lucide-react";
 
 const USER_CODE = "07860";
-const TESTING_EXPIRY_MS = 72 * 60 * 60 * 1000;
+const TESTING_DEADLINE = new Date("2026-06-19T23:59:59Z").getTime();
 
 function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const expired = searchParams.get("expired") === "1";
+  const testingAvailable = Date.now() < TESTING_DEADLINE;
   const [showCodePrompt, setShowCodePrompt] = useState(false);
   const [code, setCode] = useState("");
   const [codeError, setCodeError] = useState("");
@@ -84,20 +85,22 @@ function LoginContent() {
             <Lock className="w-4 h-4 text-muted group-hover:text-primary transition-colors" />
           </button>
 
-          {/* Testing Account */}
-          <button
-            onClick={handleTesting}
-            className="w-full flex items-center gap-4 bg-surface-light hover:bg-cyan-500/10 border border-border hover:border-cyan-500/50 rounded-xl p-4 transition-all cursor-pointer group text-left"
-          >
-            <div className="w-11 h-11 rounded-xl bg-cyan-500/20 flex items-center justify-center shrink-0">
-              <FlaskConical className="w-5 h-5 text-cyan-400" />
-            </div>
-            <div className="flex-1">
-              <h3 className="font-semibold text-foreground group-hover:text-cyan-400 transition-colors">Testing</h3>
-              <p className="text-xs text-muted mt-0.5">Beta access &middot; expires in 72 hours</p>
-            </div>
-            <ArrowRight className="w-4 h-4 text-muted group-hover:text-cyan-400 transition-colors" />
-          </button>
+          {/* Testing Account — disappears after deadline */}
+          {testingAvailable && (
+            <button
+              onClick={handleTesting}
+              className="w-full flex items-center gap-4 bg-surface-light hover:bg-cyan-500/10 border border-border hover:border-cyan-500/50 rounded-xl p-4 transition-all cursor-pointer group text-left"
+            >
+              <div className="w-11 h-11 rounded-xl bg-cyan-500/20 flex items-center justify-center shrink-0">
+                <FlaskConical className="w-5 h-5 text-cyan-400" />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold text-foreground group-hover:text-cyan-400 transition-colors">Testing</h3>
+                <p className="text-xs text-muted mt-0.5">Beta access &middot; limited time</p>
+              </div>
+              <ArrowRight className="w-4 h-4 text-muted group-hover:text-cyan-400 transition-colors" />
+            </button>
+          )}
         </div>
 
         <p className="text-center text-xs text-muted/50">

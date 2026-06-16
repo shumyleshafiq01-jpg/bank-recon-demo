@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Landmark, ArrowRight, BarChart3, Clock, User, Building2, CreditCard, Globe, FileText, LogOut, Scale } from "lucide-react";
 
-const TESTING_EXPIRY_MS = 72 * 60 * 60 * 1000;
+const TESTING_DEADLINE = new Date("2026-06-19T23:59:59Z").getTime();
 
 type Session = { type: "user" | "testing"; ts: number } | null;
 
@@ -19,7 +19,7 @@ export default function DashboardPage() {
       if (!raw) { router.replace("/"); return; }
       const s = JSON.parse(raw) as Session;
       if (!s) { router.replace("/"); return; }
-      if (s.type === "testing" && Date.now() - s.ts > TESTING_EXPIRY_MS) {
+      if (s.type === "testing" && Date.now() > TESTING_DEADLINE) {
         localStorage.removeItem("session");
         router.replace("/?expired=1");
         return;
