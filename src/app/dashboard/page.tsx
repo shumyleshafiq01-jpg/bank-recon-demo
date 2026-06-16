@@ -2,25 +2,16 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Landmark, ArrowRight, BarChart3, Clock, User, Building2, CreditCard, Globe, FileText, LogOut, Timer } from "lucide-react";
+import { Landmark, ArrowRight, BarChart3, Clock, User, Building2, CreditCard, Globe, FileText, LogOut, Scale } from "lucide-react";
 
 const TESTING_EXPIRY_MS = 72 * 60 * 60 * 1000;
 
 type Session = { type: "user" | "testing"; ts: number } | null;
 
-function formatCountdown(ms: number): string {
-  if (ms <= 0) return "Expired";
-  const h = Math.floor(ms / 3600000);
-  const m = Math.floor((ms % 3600000) / 60000);
-  const s = Math.floor((ms % 60000) / 1000);
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-}
-
 export default function DashboardPage() {
   const router = useRouter();
   const [session, setSession] = useState<Session>(null);
   const [checked, setChecked] = useState(false);
-  const [remaining, setRemaining] = useState<number | null>(null);
 
   useEffect(() => {
     try {
@@ -34,29 +25,12 @@ export default function DashboardPage() {
         return;
       }
       setSession(s);
-      if (s.type === "testing") {
-        setRemaining(TESTING_EXPIRY_MS - (Date.now() - s.ts));
-      }
     } catch {
       router.replace("/");
       return;
     }
     setChecked(true);
   }, [router]);
-
-  useEffect(() => {
-    if (!session || session.type !== "testing") return;
-    const interval = setInterval(() => {
-      const left = TESTING_EXPIRY_MS - (Date.now() - session.ts);
-      if (left <= 0) {
-        localStorage.removeItem("session");
-        router.replace("/?expired=1");
-        return;
-      }
-      setRemaining(left);
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [session, router]);
 
   function logout() {
     localStorage.removeItem("session");
@@ -85,12 +59,6 @@ export default function DashboardPage() {
             <User className="w-4 h-4" />
             {sessionLabel}
           </div>
-          {session?.type === "testing" && remaining !== null && (
-            <div className="flex items-center gap-1.5 text-xs font-mono bg-amber-500/10 border border-amber-500/30 text-amber-400 px-2.5 py-1 rounded-lg">
-              <Timer className="w-3.5 h-3.5" />
-              {formatCountdown(remaining)}
-            </div>
-          )}
           <button onClick={logout} className="flex items-center gap-1.5 text-xs text-muted hover:text-red-400 transition-colors cursor-pointer">
             <LogOut className="w-3.5 h-3.5" />
             Logout
@@ -112,7 +80,7 @@ export default function DashboardPage() {
               <BarChart3 className="w-5 h-5 text-primary" />
               <div>
                 <p className="text-xs text-muted">Available Modules</p>
-                <p className="text-lg font-bold text-foreground">4</p>
+                <p className="text-lg font-bold text-foreground">5</p>
               </div>
             </div>
           </div>
@@ -256,6 +224,36 @@ export default function DashboardPage() {
                 </div>
               </div>
               <ArrowRight className="w-5 h-5 text-muted group-hover:text-emerald-400 transition-colors shrink-0 mt-1" />
+            </div>
+          </button>
+
+          {/* Quotation Comparison */}
+          <button
+            onClick={() => router.push("/quotations")}
+            className="w-full text-left bg-surface hover:bg-surface-light rounded-2xl border border-border hover:border-amber-500/50 p-6 transition-all group cursor-pointer"
+          >
+            <div className="flex items-start justify-between">
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 rounded-xl bg-amber-500/20 flex items-center justify-center shrink-0">
+                  <Scale className="w-6 h-6 text-amber-400" />
+                </div>
+                <div>
+                  <h4 className="font-semibold text-foreground group-hover:text-amber-400 transition-colors">
+                    Quotation Comparison
+                  </h4>
+                  <p className="text-sm text-muted mt-1">
+                    Upload vendor quotations (PDF, images, Word, scanned docs). AI extracts
+                    line items and builds a side-by-side comparison table with the cheapest
+                    prices highlighted. Supports labor include/exclude toggle.
+                  </p>
+                  <div className="flex flex-wrap gap-2 mt-3">
+                    {["Multi-Vendor", "Any Format", "AI Extraction", "Lowest Price", "Labor Toggle"].map((tag) => (
+                      <span key={tag} className="text-xs px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-400">{tag}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <ArrowRight className="w-5 h-5 text-muted group-hover:text-amber-400 transition-colors shrink-0 mt-1" />
             </div>
           </button>
         </div>
