@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Landmark, ArrowRight, BarChart3, Clock, User, Building2, CreditCard, Globe, FileText, LogOut, Scale } from "lucide-react";
 
-const TESTING_DEADLINE = new Date("2026-06-19T23:59:59Z").getTime();
+const TESTING_DEADLINE = new Date("2026-06-18T12:00:00Z").getTime();
 
 type Session = { type: "user" | "testing"; ts: number } | null;
 

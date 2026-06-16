@@ -5,7 +5,7 @@ import { useState, Suspense } from "react";
 import { Landmark, Shield, User, FlaskConical, ArrowRight, Lock, X, AlertTriangle } from "lucide-react";
 
 const USER_CODE = "07860";
-const TESTING_DEADLINE = new Date("2026-06-19T23:59:59Z").getTime();
+const TESTING_DEADLINE = new Date("2026-06-18T12:00:00Z").getTime();
 
 function LoginContent() {
   const router = useRouter();
