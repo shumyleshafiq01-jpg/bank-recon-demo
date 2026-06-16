@@ -240,11 +240,11 @@ export default function DashboardPage() {
                 </div>
                 <div>
                   <h4 className="font-semibold text-foreground group-hover:text-teal-400 transition-colors">
-                    Statement Digitizer
+                    Universal Statement Digitizer
                   </h4>
                   <p className="text-sm text-muted mt-1">
-                    Upload a new bank statement and ledger — AI validates, extracts,
-                    and reconciles transactions in 3 steps. Verify each match and
+                    Upload any bank statement and ledger from any bank worldwide — AI validates,
+                    extracts, and reconciles transactions in 3 steps. Verify each match and
                     teach the system to learn your bank&apos;s format over time.
                   </p>
                   <div className="flex flex-wrap gap-2 mt-3">

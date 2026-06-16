@@ -351,8 +351,8 @@ export default function StatementDigitizerPage() {
           <ArrowLeft className="w-5 h-5" />
         </button>
         <div className="flex-1">
-          <h1 className="text-sm font-bold text-foreground">Statement Digitizer</h1>
-          <p className="text-xs text-muted">AI-powered bank statement & ledger reconciliation</p>
+          <h1 className="text-sm font-bold text-foreground">Universal Statement Digitizer</h1>
+          <p className="text-xs text-muted">AI-powered bank statement & ledger reconciliation — any bank, any format</p>
         </div>
         {/* Step indicators */}
         <div className="flex items-center gap-2">

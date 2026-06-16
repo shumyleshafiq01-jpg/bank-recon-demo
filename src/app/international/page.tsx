@@ -202,12 +202,43 @@ export default function InternationalPage() {
           )}
 
           {error && (
-            <div className="bg-danger/10 border border-danger/30 rounded-xl p-4 text-sm text-danger">{error}</div>
+            <div className="bg-danger/10 border border-danger/30 rounded-xl p-4 space-y-3">
+              <div className="text-sm text-danger">{error}</div>
+              <div className="flex items-center gap-3 bg-teal-500/10 border border-teal-500/30 rounded-xl p-3">
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-teal-400">Try the Universal Statement Digitizer</p>
+                  <p className="text-xs text-muted mt-0.5">AI-powered extraction that works with any bank format worldwide — validates, extracts, and reconciles step by step.</p>
+                </div>
+                <button
+                  onClick={() => router.push("/statement-digitizer")}
+                  className="shrink-0 px-4 py-2 bg-teal-500 hover:bg-teal-500/80 text-white text-sm font-medium rounded-lg cursor-pointer transition-all"
+                >
+                  Open Digitizer
+                </button>
+              </div>
+            </div>
           )}
 
           {/* Results */}
           {results && (
             <>
+              {results.bankTotal === 0 && (
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 space-y-3">
+                  <div className="text-sm text-amber-400">No transactions could be extracted from the bank statement. The format may not be supported by the automated parser.</div>
+                  <div className="flex items-center gap-3 bg-teal-500/10 border border-teal-500/30 rounded-xl p-3">
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-teal-400">Try the Universal Statement Digitizer</p>
+                      <p className="text-xs text-muted mt-0.5">AI-powered extraction that works with any bank format worldwide — validates, extracts, and reconciles step by step.</p>
+                    </div>
+                    <button
+                      onClick={() => router.push("/statement-digitizer")}
+                      className="shrink-0 px-4 py-2 bg-teal-500 hover:bg-teal-500/80 text-white text-sm font-medium rounded-lg cursor-pointer transition-all"
+                    >
+                      Open Digitizer
+                    </button>
+                  </div>
+                </div>
+              )}
               {results.warnings && results.warnings.length > 0 && (
                 <div className="space-y-2">
                   {results.warnings.map((w, i) => (
