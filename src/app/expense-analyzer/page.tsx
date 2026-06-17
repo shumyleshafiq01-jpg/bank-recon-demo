@@ -209,6 +209,7 @@ export default function ExpenseAnalyzerPage() {
   const [error, setError] = useState("");
   const [results, setResults] = useState<Results | null>(null);
   const [useAI, setUseAI] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Currency rates
   const [rates, setRates] = useState<Rates>({ ...DEFAULT_RATES });
@@ -305,6 +306,7 @@ export default function ExpenseAnalyzerPage() {
     setFiles([]); setResults(null); setError("");
     setFilterMonth("all"); setFilterCategory("all"); setFilterCountry("all"); setFilterCurrency("all");
     setChatMessages([{ role: "bot", text: "Ask me anything about the expenses." }]);
+    if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   function sendChat() {
@@ -479,15 +481,26 @@ export default function ExpenseAnalyzerPage() {
                   </div>
                 )}
 
-                <div className="relative">
-                  <input type="file" accept=".pdf" multiple onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
-                  <div className="rounded-xl border-2 border-dashed border-border bg-background p-6 text-center hover:border-emerald-500/50 transition-colors">
+                <div>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".pdf"
+                    multiple
+                    onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }}
+                    className="hidden"
+                    id="ea-file-input"
+                  />
+                  <label
+                    htmlFor="ea-file-input"
+                    className="block rounded-xl border-2 border-dashed border-border bg-background p-6 text-center hover:border-emerald-500/50 transition-colors cursor-pointer"
+                  >
                     <Plus className="w-5 h-5 text-emerald-400 mx-auto mb-1.5" />
                     <p className="text-xs font-medium text-foreground">
                       {files.length === 0 ? "Drop Wise statement PDFs here" : "Add more statements"}
                     </p>
                     <p className="text-[10px] text-muted mt-1">Supports GBP, EUR, USD, PKR accounts</p>
-                  </div>
+                  </label>
                 </div>
 
                 <div className="flex items-center gap-3 pt-2">
