@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Landmark, ArrowRight, BarChart3, Clock, User, Building2, CreditCard, Globe, FileText, LogOut, Scale, Timer, BookOpen } from "lucide-react";
+import { Landmark, ArrowRight, BarChart3, Clock, User, Building2, CreditCard, Globe, FileText, LogOut, Scale, Timer, BookOpen, Wallet } from "lucide-react";
 
 const TESTING_DEADLINE = new Date("2026-06-18T12:00:00Z").getTime();
 
@@ -111,7 +111,7 @@ export default function DashboardPage() {
               <BarChart3 className="w-5 h-5 text-primary" />
               <div>
                 <p className="text-xs text-muted">Available Modules</p>
-                <p className="text-lg font-bold text-foreground">6</p>
+                <p className="text-lg font-bold text-foreground">7</p>
               </div>
             </div>
           </div>
@@ -315,6 +315,36 @@ export default function DashboardPage() {
                 </div>
               </div>
               <ArrowRight className="w-5 h-5 text-muted group-hover:text-amber-400 transition-colors shrink-0 mt-1" />
+            </div>
+          </button>
+
+          {/* Expense Analyzer */}
+          <button
+            onClick={() => router.push("/expense-analyzer")}
+            className="w-full text-left bg-surface hover:bg-surface-light rounded-2xl border border-border hover:border-emerald-500/50 p-6 transition-all group cursor-pointer"
+          >
+            <div className="flex items-start justify-between">
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 rounded-xl bg-emerald-500/20 flex items-center justify-center shrink-0">
+                  <Wallet className="w-6 h-6 text-emerald-400" />
+                </div>
+                <div>
+                  <h4 className="font-semibold text-foreground group-hover:text-emerald-400 transition-colors">
+                    Expense Analyzer
+                  </h4>
+                  <p className="text-sm text-muted mt-1">
+                    Upload Wise card statements (multi-currency). Filter expenses by month,
+                    category, country, and currency. Chat to ask spending questions.
+                    Nothing saved — data stays in your browser only.
+                  </p>
+                  <div className="flex flex-wrap gap-2 mt-3">
+                    {["Wise Card", "Multi-Currency", "Month / Category / Country", "Chat", "Download Report"].map((tag) => (
+                      <span key={tag} className="text-xs px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400">{tag}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <ArrowRight className="w-5 h-5 text-muted group-hover:text-emerald-400 transition-colors shrink-0 mt-1" />
             </div>
           </button>
         </div>
