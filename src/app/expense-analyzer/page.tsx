@@ -232,6 +232,13 @@ export default function ExpenseAnalyzerPage() {
     localStorage.removeItem("ea_unlocked");
     setUnlocked(false);
     setCodeInput("");
+    setFiles([]);
+    setResults(null);
+    setError("");
+    setFilterMonth("all");
+    setFilterCategory("all");
+    setFilterCountry("all");
+    setFilterCurrency("all");
   }
 
   // Filters
