@@ -196,13 +196,8 @@ function answerQuery(query: string, transactions: Transaction[], summary: Summar
   return `I can answer questions like:\n• "How much in July 2025?"\n• "Total in dollars"\n• "Hotel spending"\n• "How much in Germany?"\n• "Total spending"\n• Or search by merchant name\n\nAll answers include PKR conversion.`;
 }
 
-const MODULE_CODE = "khalid123";
-
 export default function ExpenseAnalyzerPage() {
   const router = useRouter();
-  const [unlocked, setUnlocked] = useState(false);
-  const [codeInput, setCodeInput] = useState("");
-  const [codeError, setCodeError] = useState(false);
 
   const [files, setFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
@@ -214,33 +209,6 @@ export default function ExpenseAnalyzerPage() {
   // Currency rates
   const [rates, setRates] = useState<Rates>({ ...DEFAULT_RATES });
   const [showRates, setShowRates] = useState(false);
-
-  useEffect(() => {
-    if (localStorage.getItem("ea_unlocked") === "1") setUnlocked(true);
-  }, []);
-
-  function submitCode() {
-    if (codeInput === MODULE_CODE) {
-      localStorage.setItem("ea_unlocked", "1");
-      setUnlocked(true);
-      setCodeError(false);
-    } else {
-      setCodeError(true);
-    }
-  }
-
-  function lockModule() {
-    localStorage.removeItem("ea_unlocked");
-    setUnlocked(false);
-    setCodeInput("");
-    setFiles([]);
-    setResults(null);
-    setError("");
-    setFilterMonth("all");
-    setFilterCategory("all");
-    setFilterCountry("all");
-    setFilterCurrency("all");
-  }
 
   // Filters
   const [filterMonth, setFilterMonth] = useState("all");
@@ -381,43 +349,6 @@ export default function ExpenseAnalyzerPage() {
 
   const ready = files.length > 0 && !loading;
 
-  if (!unlocked) {
-    return (
-      <div className="flex-1 flex flex-col h-screen items-center justify-center">
-        <div className="bg-surface rounded-2xl border border-border p-8 w-full max-w-sm space-y-5 animate-fade-in">
-          <div className="flex flex-col items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-emerald-500/20 flex items-center justify-center">
-              <Wallet className="w-6 h-6 text-emerald-400" />
-            </div>
-            <h2 className="text-lg font-bold text-foreground">Expense Analyzer</h2>
-            <p className="text-xs text-muted text-center">Enter access code to continue</p>
-          </div>
-          <div className="space-y-3">
-            <input
-              type="password"
-              value={codeInput}
-              onChange={e => { setCodeInput(e.target.value); setCodeError(false); }}
-              onKeyDown={e => e.key === "Enter" && submitCode()}
-              placeholder="Access code"
-              className="w-full text-sm bg-background border border-border rounded-lg px-4 py-2.5 text-foreground placeholder:text-muted focus:outline-none focus:border-emerald-500/50 text-center tracking-widest"
-              autoFocus
-            />
-            {codeError && <p className="text-xs text-red-400 text-center">Incorrect code. Try again.</p>}
-            <button
-              onClick={submitCode}
-              className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold transition-colors cursor-pointer"
-            >
-              Unlock
-            </button>
-          </div>
-          <button onClick={() => router.push("/dashboard")} className="w-full text-xs text-muted hover:text-foreground transition-colors cursor-pointer text-center">
-            ← Back to Dashboard
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="flex-1 flex flex-col h-screen">
       <header className="border-b border-border bg-surface/50 backdrop-blur px-4 md:px-6 py-3 flex items-center gap-3 shrink-0">
@@ -433,9 +364,6 @@ export default function ExpenseAnalyzerPage() {
             {results.summary.totalTransactions} transactions loaded
           </span>
         )}
-        <button onClick={lockModule} className="text-xs text-muted hover:text-red-400 transition-colors cursor-pointer ml-auto">
-          Lock
-        </button>
       </header>
 
       <div className="flex-1 overflow-y-auto p-4 md:p-8">
