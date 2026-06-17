@@ -67,7 +67,7 @@ export async function GET() {
     [],
     ["APPROVAL"],
     [],
-    ["Prepared by:    Bank Reconciliation Agent (Demo by Sheikh Shumyle)"],
+    ["Prepared by:    AI Agent Finance (by Sheikh Shumyle)"],
     ["Date:           " + new Date().toLocaleDateString("en-PK")],
     [],
     ["Reviewed by:    _________________________________________________"],

@@ -313,7 +313,7 @@ export default function DashboardPage() {
             <Landmark className="w-4.5 h-4.5 text-white" />
           </div>
           <div>
-            <h1 className="text-sm font-bold text-gray-900">Bank Reconciliation Demo</h1>
+            <h1 className="text-sm font-bold text-gray-900">AI Agent Finance</h1>
             <p className="text-xs text-gray-500">by Sheikh Shumyle</p>
           </div>
         </div>
@@ -431,7 +431,7 @@ export default function DashboardPage() {
 
         {/* Footer */}
         <p className="text-center text-xs text-gray-400 pb-6">
-          AI-Powered Reconciliation Agent Demo &middot; Sheikh Shumyle &middot; 2026
+          AI Agent Finance &middot; Sheikh Shumyle &middot; 2026
         </p>
       </div>
     </div>

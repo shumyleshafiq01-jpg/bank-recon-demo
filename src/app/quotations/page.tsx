@@ -222,7 +222,7 @@ export default function QuotationsPage() {
         </div>
         <div className="flex items-center gap-2">
           <Landmark className="w-4 h-4 text-muted" />
-          <span className="text-xs text-muted hidden sm:block">Bank Reconciliation Demo</span>
+          <span className="text-xs text-muted hidden sm:block">AI Agent Finance</span>
         </div>
       </header>
 

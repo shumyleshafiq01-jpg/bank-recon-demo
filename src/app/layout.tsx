@@ -13,9 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Bank Reconciliation AI Agent | Sheikh Shumyle",
+  title: "AI Agent Finance | Sheikh Shumyle",
   description:
-    "AI-powered bank reconciliation — upload bank statements and journal ledgers, get intelligent cross-checks, missing data detection, and reconciliation summaries.",
+    "AI Agent Finance — upload bank statements and journal ledgers, get intelligent cross-checks, missing data detection, and reconciliation summaries.",
 };
 
 export default function RootLayout({

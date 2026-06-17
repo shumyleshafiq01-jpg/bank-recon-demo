@@ -1,0 +1,767 @@
+/**
+ * POST /api/multi-bank — Module 4: Multi-Bank Adjustments & Corrections.
+ *
+ * Copy of Module 3's matching logic but accepts multiple bank statement files
+ * in different formats (PDF from various banks, XLS, CSV).
+ *
+ * FormData:
+ *   - bankFiles: one or more bank statement files (PDF/XLS/XLSX/CSV)
+ *   - ledgerFile: single journal ledger (XLS/XLSX/CSV)
+ */
+
+export const maxDuration = 300;
+export const runtime = "nodejs";
+
+import * as XLSX from "xlsx";
+import Anthropic from "@anthropic-ai/sdk";
+
+type BankEntry = {
+  date: string;       // DD-MM-YYYY
+  particulars: string;
+  debit: number;
+  credit: number;
+  source: string;     // filename / detected bank
+};
+
+type LedgerEntry = {
+  date: string;
+  ref: string;
+  doc: string;
+  desc: string;
+  debit: number;
+  credit: number;
+};
+
+const MONTHS: Record<string, number> = {
+  JAN: 1, FEB: 2, MAR: 3, APR: 4, MAY: 5, JUN: 6,
+  JUL: 7, AUG: 8, SEP: 9, OCT: 10, NOV: 11, DEC: 12,
+};
+const pad = (n: number) => String(n).padStart(2, "0");
+
+function parseDate(ddmmyyyy: string): number | null {
+  const m = ddmmyyyy.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  if (!m) return null;
+  return new Date(parseInt(m[3]), parseInt(m[2]) - 1, parseInt(m[1])).getTime();
+}
+
+/* ═══════════════════════════════════════════
+   BANK FORMAT DETECTION & PARSING
+   ═══════════════════════════════════════════ */
+
+type BankFormat = "ABL" | "HBL" | "SONERI" | "FAYSAL" | "HMB" | "JS" | "SCB" | "GENERIC";
+
+function detectBank(text: string): BankFormat {
+  const up = text.toUpperCase();
+  if (up.includes("ALLIED BANK") || up.includes("ABL ")) return "ABL";
+  if (up.includes("HABIB BANK LIMITED") || /\bHBL\b/.test(up)) return "HBL";
+  if (up.includes("SONERI BANK")) return "SONERI";
+  if (up.includes("FAYSAL BANK")) return "FAYSAL";
+  if (up.includes("HABIB METROPOLITAN") || up.includes("HMB ")) return "HMB";
+  if (up.includes("JS BANK")) return "JS";
+  if (up.includes("STANDARD CHARTERED") || up.includes("SCB ")) return "SCB";
+  return "GENERIC";
+}
+
+/* ── Normalize various date formats to DD-MM-YYYY ── */
+function normDate(raw: string): string {
+  // DD MMM YY  (e.g. "01 OCT 25")
+  let m = raw.match(/^(\d{1,2})\s+(\w{3})\s+(\d{2})$/);
+  if (m) {
+    const mon = MONTHS[m[2].toUpperCase()];
+    if (mon) return `${pad(parseInt(m[1]))}-${pad(mon)}-${2000 + parseInt(m[3])}`;
+  }
+  // DD-MMM-YYYY (e.g. "01-Oct-2025")
+  m = raw.match(/^(\d{1,2})-(\w{3})-(\d{4})$/);
+  if (m) {
+    const mon = MONTHS[m[2].toUpperCase()];
+    if (mon) return `${pad(parseInt(m[1]))}-${pad(mon)}-${parseInt(m[3])}`;
+  }
+  // DD-MMM-YY (e.g. "01-Oct-25")
+  m = raw.match(/^(\d{1,2})-(\w{3})-(\d{2})$/);
+  if (m) {
+    const mon = MONTHS[m[2].toUpperCase()];
+    if (mon) return `${pad(parseInt(m[1]))}-${pad(mon)}-${2000 + parseInt(m[3])}`;
+  }
+  // DD/MM/YYYY
+  m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) return `${pad(parseInt(m[1]))}-${pad(parseInt(m[2]))}-${parseInt(m[3])}`;
+  // DD-MM-YYYY (already correct)
+  m = raw.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  if (m) return raw;
+  // DD/MM/YY
+  m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2})$/);
+  if (m) return `${pad(parseInt(m[1]))}-${pad(parseInt(m[2]))}-${2000 + parseInt(m[3])}`;
+  // YYYY-MM-DD (ISO)
+  m = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+  // DD MMM YYYY (e.g. "01 Oct 2025")
+  m = raw.match(/^(\d{1,2})\s+(\w{3})\s+(\d{4})$/);
+  if (m) {
+    const mon = MONTHS[m[2].toUpperCase()];
+    if (mon) return `${pad(parseInt(m[1]))}-${pad(mon)}-${parseInt(m[3])}`;
+  }
+  return raw;
+}
+
+/* ── ABL parser (proven, exact copy from Module 3) ── */
+function parseABL(text: string, source: string): BankEntry[] {
+  const rows: BankEntry[] = [];
+  const skip = [
+    /^-{4,}/, /^KAFI/, /^DATE\s/, /^Page \d/, /^\*REVE/,
+    /^This is a computer/, /^KARACHI/, /^SINDH/, /^032/,
+    /BALANCE AT PERIOD/, /Account Number/, /Account Status/,
+    /Pakistan Rupees/, /Statement Period/, /Branch Name/,
+    /KAFI HOUSE/, /TOTAL DEBIT/, /CLOSING BAL/, /TOTAL WITH/,
+    /^\s*$/,
+  ];
+  for (const line of text.split("\n")) {
+    if (skip.some((p) => p.test(line.trim()))) continue;
+    const m = line.match(
+      /^(\d{2}\s+\w{3}\s+\d{2})\s+(.+?)\s{2,}(\d{2}\s+\w{3}\s+\d{2})(.*)/
+    );
+    if (!m) continue;
+    const date = normDate(m[1].trim());
+    const particulars = m[2].trim();
+    const raw = m[4];
+    const nums: { val: number; pos: number }[] = [];
+    const rx = /([\d,]+\.\d{2})/g;
+    let nm;
+    while ((nm = rx.exec(raw)) !== null)
+      nums.push({ val: parseFloat(nm[1].replace(/,/g, "")), pos: nm.index });
+    let debit = 0, credit = 0;
+    if (nums.length === 3) { debit = nums[0].val; credit = nums[1].val; }
+    else if (nums.length === 2) { nums[0].pos > 18 ? (credit = nums[0].val) : (debit = nums[0].val); }
+    if (debit === 0 && credit === 0) continue;
+    rows.push({ date, particulars, debit, credit, source });
+  }
+  return rows;
+}
+
+/* ── Generic PDF parser — works with most Pakistani bank formats ──
+   Strategy:
+   1. Find lines with a date and at least one amount
+   2. If header row is found, use column positions to map debit/credit
+   3. Otherwise, use position heuristics (earlier = debit, later = credit, last = balance) */
+function parseGenericPDF(text: string, source: string): BankEntry[] {
+  const rows: BankEntry[] = [];
+
+  // Date pattern: matches common date formats at start of line
+  const dateRx = /^(\d{1,2}[\s\/-]\w{3}[\s\/-]\d{2,4}|\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2})/;
+
+  // Detect if there's a header with DEBIT/CREDIT/WITHDRAWAL/DEPOSIT markers
+  const lines = text.split("\n");
+  let debitPos = -1, creditPos = -1;
+
+  for (const line of lines.slice(0, 30)) {
+    const up = line.toUpperCase();
+    if (up.includes("DEBIT") || up.includes("WITHDRAWAL") || up.includes("DR")) {
+      const idx = Math.max(up.indexOf("DEBIT"), up.indexOf("WITHDRAWAL"), up.indexOf("DR"));
+      if (idx > 10) debitPos = idx;
+    }
+    if (up.includes("CREDIT") || up.includes("DEPOSIT") || up.includes("CR")) {
+      const idx = Math.max(up.indexOf("CREDIT"), up.indexOf("DEPOSIT"), up.indexOf("CR"));
+      if (idx > 10) creditPos = idx;
+    }
+    if (debitPos > 0 && creditPos > 0) break;
+  }
+
+  for (const line of lines) {
+    const dm = line.match(dateRx);
+    if (!dm) continue;
+    const date = normDate(dm[1].trim());
+    if (!parseDate(date)) continue; // invalid date
+
+    // Skip headers/totals
+    const up = line.toUpperCase();
+    if (up.includes("TOTAL") || up.includes("OPENING") || up.includes("CLOSING") || up.includes("BALANCE B/F")) continue;
+
+    // Extract description (text between date and first amount)
+    const afterDate = line.substring(dm[0].length);
+    const amounts: { val: number; pos: number; absPos: number }[] = [];
+    const amtRx = /([\d,]+\.\d{2})/g;
+    let am;
+    while ((am = amtRx.exec(afterDate)) !== null) {
+      const val = parseFloat(am[1].replace(/,/g, ""));
+      if (val > 0) {
+        amounts.push({ val, pos: am.index, absPos: dm[0].length + am.index });
+      }
+    }
+
+    if (amounts.length === 0) continue;
+
+    // Extract particulars (text before first amount)
+    const particulars = afterDate.substring(0, amounts[0].pos).trim().replace(/\s{2,}/g, " ");
+
+    let debit = 0, credit = 0;
+
+    if (amounts.length >= 3) {
+      // 3+ amounts: debit, credit, balance (standard layout)
+      debit = amounts[0].val;
+      credit = amounts[1].val;
+    } else if (amounts.length === 2) {
+      // 2 amounts: amount + balance — need to figure out which is debit vs credit
+      if (debitPos > 0 && creditPos > 0) {
+        // Use header positions
+        const dDist = Math.abs(amounts[0].absPos - debitPos);
+        const cDist = Math.abs(amounts[0].absPos - creditPos);
+        if (dDist < cDist) debit = amounts[0].val;
+        else credit = amounts[0].val;
+      } else {
+        // Heuristic: if the amount position is in the first half of the remaining text, it's debit
+        const midpoint = afterDate.length / 2;
+        if (amounts[0].pos < midpoint) debit = amounts[0].val;
+        else credit = amounts[0].val;
+      }
+    } else if (amounts.length === 1) {
+      // Single amount — need DR/CR indicator
+      if (/\bDR\b|\bDEBIT\b/i.test(line)) debit = amounts[0].val;
+      else if (/\bCR\b|\bCREDIT\b/i.test(line)) credit = amounts[0].val;
+      else debit = amounts[0].val; // default to debit
+    }
+
+    if (debit === 0 && credit === 0) continue;
+    rows.push({ date, particulars, debit, credit, source });
+  }
+
+  return rows;
+}
+
+/* ── Bank statement from Excel/CSV ── */
+function parseBankExcel(buffer: Buffer, source: string): BankEntry[] {
+  const wb = XLSX.read(buffer, { type: "buffer" });
+  const rows: BankEntry[] = [];
+
+  for (const name of wb.SheetNames) {
+    const ws = wb.Sheets[name];
+    if (!ws) continue;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1 });
+    if (data.length < 2) continue;
+
+    // Auto-detect columns from header
+    let dateCol = -1, debitCol = -1, creditCol = -1, descCol = -1, amtCol = -1, drcrCol = -1;
+    for (let h = 0; h < Math.min(5, data.length); h++) {
+      const header = data[h];
+      if (!header) continue;
+      const lower = header.map((c: unknown) => String(c ?? "").toLowerCase());
+      dateCol = lower.findIndex((c: string) => c.includes("date") || c.includes("value date"));
+      debitCol = lower.findIndex((c: string) => c === "debit" || c.includes("debit") || c.includes("withdrawal"));
+      creditCol = lower.findIndex((c: string) => c === "credit" || c.includes("credit") || c.includes("deposit"));
+      descCol = lower.findIndex((c: string) => c.includes("desc") || c.includes("particular") || c.includes("narration") || c.includes("detail"));
+      amtCol = lower.findIndex((c: string) => c === "amount" || c.includes("amount"));
+      drcrCol = lower.findIndex((c: string) => c === "dr/cr" || c.includes("dr/cr") || c.includes("type"));
+
+      if (dateCol >= 0 && (debitCol >= 0 || creditCol >= 0 || amtCol >= 0)) {
+        // Parse from row after header
+        for (let i = h + 1; i < data.length; i++) {
+          const row = data[i];
+          if (!row) continue;
+          const rawDate = row[dateCol];
+          if (!rawDate) continue;
+
+          let dateStr = "";
+          if (typeof rawDate === "number") {
+            const d = XLSX.SSF.parse_date_code(rawDate);
+            dateStr = `${pad(d.d)}-${pad(d.m)}-${d.y}`;
+          } else {
+            dateStr = normDate(String(rawDate).trim());
+          }
+          if (!parseDate(dateStr)) continue;
+
+          let debit = 0, credit = 0;
+          if (debitCol >= 0 && creditCol >= 0) {
+            debit = typeof row[debitCol] === "number" ? row[debitCol] : parseFloat(String(row[debitCol] ?? "").replace(/,/g, "")) || 0;
+            credit = typeof row[creditCol] === "number" ? row[creditCol] : parseFloat(String(row[creditCol] ?? "").replace(/,/g, "")) || 0;
+          } else if (amtCol >= 0) {
+            const amt = typeof row[amtCol] === "number" ? row[amtCol] : parseFloat(String(row[amtCol] ?? "").replace(/,/g, "")) || 0;
+            if (amt === 0) continue;
+            if (drcrCol >= 0) {
+              const typ = String(row[drcrCol] ?? "").toUpperCase();
+              if (typ.includes("D")) debit = Math.abs(amt);
+              else credit = Math.abs(amt);
+            } else {
+              // Negative = debit, positive = credit
+              if (amt < 0) debit = Math.abs(amt);
+              else credit = amt;
+            }
+          }
+
+          if (debit === 0 && credit === 0) continue;
+          const particulars = descCol >= 0 ? String(row[descCol] ?? "").trim() : "";
+          rows.push({ date: dateStr, particulars, debit, credit, source });
+        }
+        break; // found header, done with this sheet
+      }
+    }
+  }
+  return rows;
+}
+
+function parseBankCSV(text: string, source: string): BankEntry[] {
+  const rows: BankEntry[] = [];
+  const lines = text.split("\n");
+  let headerIdx = -1;
+  let dateCol = -1, debitCol = -1, creditCol = -1, descCol = -1, amtCol = -1, drcrCol = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    const cells = lines[i].split(",").map((c) => c.trim().replace(/^"|"$/g, ""));
+    if (headerIdx === -1) {
+      const lower = cells.map((c) => c.toLowerCase());
+      dateCol = lower.findIndex((c) => c.includes("date"));
+      debitCol = lower.findIndex((c) => c === "debit" || c.includes("debit") || c.includes("withdrawal"));
+      creditCol = lower.findIndex((c) => c === "credit" || c.includes("credit") || c.includes("deposit"));
+      descCol = lower.findIndex((c) => c.includes("desc") || c.includes("particular") || c.includes("narration"));
+      amtCol = lower.findIndex((c) => c === "amount");
+      drcrCol = lower.findIndex((c) => c.includes("dr/cr") || c.includes("type"));
+      if (dateCol >= 0 && (debitCol >= 0 || creditCol >= 0 || amtCol >= 0)) {
+        headerIdx = i;
+        continue;
+      }
+      continue;
+    }
+
+    const cells2 = lines[i].split(",").map((c) => c.trim().replace(/^"|"$/g, ""));
+    const dateStr = dateCol >= 0 ? normDate(cells2[dateCol] || "") : "";
+    if (!parseDate(dateStr)) continue;
+
+    let debit = 0, credit = 0;
+    if (debitCol >= 0 && creditCol >= 0) {
+      debit = parseFloat(String(cells2[debitCol]).replace(/,/g, "")) || 0;
+      credit = parseFloat(String(cells2[creditCol]).replace(/,/g, "")) || 0;
+    } else if (amtCol >= 0) {
+      const amt = parseFloat(String(cells2[amtCol]).replace(/,/g, "")) || 0;
+      if (drcrCol >= 0) {
+        String(cells2[drcrCol]).toUpperCase().includes("D") ? (debit = Math.abs(amt)) : (credit = Math.abs(amt));
+      } else {
+        amt < 0 ? (debit = Math.abs(amt)) : (credit = amt);
+      }
+    }
+
+    if (debit === 0 && credit === 0) continue;
+    const particulars = descCol >= 0 ? cells2[descCol] || "" : "";
+    rows.push({ date: dateStr, particulars, debit, credit, source });
+  }
+  return rows;
+}
+
+/* ── OCR via Claude vision — for scanned/image PDFs with no text layer ── */
+async function ocrBankPDF(buffer: Buffer, fileName: string): Promise<{ entries: BankEntry[]; bank: string; error?: string; warning?: string }> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    return { entries: [], bank: fileName, error: `${fileName} needs AI extraction but no API key is configured. Upload the Excel/CSV export instead.` };
+  }
+  if (buffer.length > 30 * 1024 * 1024) {
+    return { entries: [], bank: fileName, error: `${fileName} is too large for AI extraction (max 30 MB). Split the statement or upload Excel/CSV.` };
+  }
+
+  const client = new Anthropic({ apiKey });
+
+  try {
+    const response = await client.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 32000,
+      messages: [{
+        role: "user",
+        content: [
+          {
+            type: "document",
+            source: { type: "base64", media_type: "application/pdf", data: buffer.toString("base64") },
+          },
+          {
+            type: "text",
+            text: `This is a bank statement from a Pakistani bank (may be scanned or digital). Extract EVERY transaction row from ALL pages.
+
+Respond with ONLY a JSON object, no other text:
+{
+  "bank": "<bank name as printed on the statement>",
+  "opening_balance": <opening/period-start balance as number, or null if not shown>,
+  "closing_balance": <closing/period-end balance as number, or null if not shown>,
+  "transactions": [
+    { "date": "DD-MM-YYYY", "particulars": "<description, max 50 chars>", "debit": 0, "credit": 0 }
+  ]
+}
+
+Rules:
+- date must be DD-MM-YYYY format regardless of how it appears on the statement. Use the booking/transaction date (the first date column).
+- debit = withdrawal/money out, credit = deposit/money in. Exactly one of them is non-zero per row. Check the column headers carefully to know which column is which.
+- amounts as plain numbers with no commas (e.g. 30000.00). Never confuse the running balance column with the debit/credit amount.
+- Percentages or rates inside descriptions (e.g. "15.00 %") are NOT amounts.
+- One transaction = one JSON row, even if its description wraps across multiple lines on the statement.
+- Skip opening/closing balance rows, totals, and headers — only actual transactions.
+- Do not skip any transaction and do not invent any. Accuracy is critical — this is for bank reconciliation, and the result will be checked: opening_balance + total credits - total debits must equal closing_balance.`,
+          },
+        ],
+      }],
+    });
+
+    const textBlock = response.content.find((b) => b.type === "text");
+    const raw = textBlock && textBlock.type === "text" ? textBlock.text : "";
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      return { entries: [], bank: fileName, error: `AI extraction could not read transactions from ${fileName}.` };
+    }
+
+    const parsed = JSON.parse(jsonMatch[0]) as {
+      bank?: string;
+      opening_balance?: number | null;
+      closing_balance?: number | null;
+      transactions?: { date: string; particulars: string; debit: number; credit: number }[];
+    };
+    const bankName = parsed.bank || "Scanned";
+    const bankLabel = `AI ${bankName}: ${fileName}`;
+    const entries: BankEntry[] = [];
+
+    for (const t of parsed.transactions ?? []) {
+      const date = normDate(String(t.date ?? "").trim());
+      if (!parseDate(date)) continue;
+      const debit = Number(t.debit) || 0;
+      const credit = Number(t.credit) || 0;
+      if (debit === 0 && credit === 0) continue;
+      entries.push({ date, particulars: String(t.particulars ?? "").substring(0, 60), debit, credit, source: bankLabel });
+    }
+
+    if (entries.length === 0) {
+      return { entries, bank: bankLabel, error: `AI extraction ran on ${fileName} but found no transaction rows.` };
+    }
+
+    // Self-check: opening + credits - debits should equal closing balance.
+    let warning: string | undefined;
+    if (typeof parsed.opening_balance === "number" && typeof parsed.closing_balance === "number") {
+      const totalDR = entries.reduce((s, e) => s + e.debit, 0);
+      const totalCR = entries.reduce((s, e) => s + e.credit, 0);
+      const computed = parsed.opening_balance + totalCR - totalDR;
+      const diff = Math.abs(computed - parsed.closing_balance);
+      if (diff > 1) {
+        warning = `${fileName} (${bankName}): extracted figures don't tie to the statement balances — opening ${fmt(parsed.opening_balance)} + credits ${fmt(totalCR)} − debits ${fmt(totalDR)} = ${fmt(computed)}, but statement closing is ${fmt(parsed.closing_balance)} (off by ${fmt(diff)}). Spot-check this file's entries.`;
+      }
+    } else {
+      warning = `${fileName} (${bankName}): statement balances not found, so extraction could not be arithmetically verified. Spot-check this file's entries.`;
+    }
+
+    return { entries, bank: bankLabel, warning };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { entries: [], bank: fileName, error: `AI extraction failed for ${fileName}: ${msg}` };
+  }
+}
+
+/* ═══════════════════════════════════════════
+   PARSE A SINGLE BANK FILE (any format)
+   ═══════════════════════════════════════════ */
+async function parseBankFile(file: File): Promise<{ entries: BankEntry[]; bank: string; error?: string; warning?: string }> {
+  const ext = file.name.toLowerCase().split(".").pop() ?? "";
+  const buffer = Buffer.from(await file.arrayBuffer());
+
+  if (ext === "csv") {
+    const entries = parseBankCSV(buffer.toString("utf-8"), file.name);
+    return { entries, bank: `CSV: ${file.name}` };
+  }
+
+  if (ext === "xls" || ext === "xlsx") {
+    const entries = parseBankExcel(buffer, file.name);
+    return { entries, bank: `Excel: ${file.name}` };
+  }
+
+  if (ext === "pdf") {
+    let text: string;
+    try {
+      const pdfParse = (await import("pdf-parse")).default;
+      text = (await pdfParse(buffer)).text ?? "";
+    } catch {
+      // Unreadable as text PDF — likely scanned. Fall back to OCR.
+      return ocrBankPDF(buffer, file.name);
+    }
+
+    if (text.replace(/\s/g, "").length < 100) {
+      // No text layer — scanned/image PDF. Fall back to OCR.
+      return ocrBankPDF(buffer, file.name);
+    }
+
+    const bankType = detectBank(text);
+
+    // ABL uses the proven fixed-width parser (verified exact against printed totals).
+    // All other banks go through AI vision extraction — their text layers come out
+    // with fused columns and wrapped rows that position-based parsing misreads.
+    if (bankType === "ABL") {
+      const bankLabel = `ABL: ${file.name}`;
+      const entries = parseABL(text, bankLabel);
+      if (entries.length > 0) return { entries, bank: bankLabel };
+    }
+
+    const aiResult = await ocrBankPDF(buffer, file.name);
+    if (aiResult.entries.length > 0 || process.env.ANTHROPIC_API_KEY) return aiResult;
+
+    // No API key — last resort: best-effort text parsing.
+    const bankLabel = bankType === "GENERIC" ? `PDF: ${file.name}` : `${bankType}: ${file.name}`;
+    const entries = parseGenericPDF(text, bankLabel);
+    if (entries.length === 0) {
+      return { entries, bank: bankLabel, error: `Could not extract transactions from ${file.name} (detected: ${bankType}).` };
+    }
+    return { entries, bank: bankLabel, warning: `${file.name}: parsed with best-effort text parsing (no API key for AI extraction) — verify the entries.` };
+  }
+
+  return { entries: [], bank: file.name, error: `Unsupported file format: .${ext}. Use PDF, XLS, XLSX, or CSV.` };
+}
+
+/* ═══════════════════════════════════════════
+   LEDGER PARSING (same as Module 3)
+   ═══════════════════════════════════════════ */
+function parseLedgerExcel(buffer: Buffer): LedgerEntry[] {
+  const wb = XLSX.read(buffer, { type: "buffer" });
+  const rows: LedgerEntry[] = [];
+  for (const name of wb.SheetNames) {
+    const ws = wb.Sheets[name];
+    if (!ws) continue;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1 });
+    for (const row of data) {
+      if (!row || row.length < 8 || row[0] === "Date") continue;
+      const rawDate = row[0];
+      const ref = String(row[1] ?? "");
+      const desc = String(row[2] ?? "");
+      const doc = String(row[3] ?? "");
+      const debit = typeof row[5] === "number" ? row[5] : 0;
+      const credit = typeof row[6] === "number" ? row[6] : 0;
+      if (debit === 0 && credit === 0) continue;
+      let dateStr = "";
+      if (typeof rawDate === "number") {
+        const d = XLSX.SSF.parse_date_code(rawDate);
+        dateStr = `${pad(d.m)}-${pad(d.d)}-${d.y}`;
+      } else if (typeof rawDate === "string") {
+        dateStr = rawDate;
+      }
+      rows.push({ date: dateStr, ref, doc, desc, debit, credit });
+    }
+  }
+  return rows;
+}
+
+function parseLedgerCSV(text: string): LedgerEntry[] {
+  const rows: LedgerEntry[] = [];
+  const lines = text.split("\n");
+  let headerIdx = -1;
+  let debitCol = -1, creditCol = -1, dateCol = -1, refCol = -1, descCol = -1, docCol = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const cells = lines[i].split(",").map((c) => c.trim().replace(/^"|"$/g, ""));
+    if (headerIdx === -1) {
+      const lower = cells.map((c) => c.toLowerCase());
+      dateCol = lower.findIndex((c) => c.includes("date"));
+      refCol = lower.findIndex((c) => c.includes("ref"));
+      descCol = lower.findIndex((c) => c.includes("desc") || c.includes("account"));
+      docCol = lower.findIndex((c) => c.includes("doc") || c.includes("document"));
+      debitCol = lower.findIndex((c) => c === "debit" || c.includes("debit"));
+      creditCol = lower.findIndex((c) => c === "credit" || c.includes("credit"));
+      if (debitCol >= 0 || creditCol >= 0) { headerIdx = i; continue; }
+      continue;
+    }
+    const debit = debitCol >= 0 ? parseFloat(String(cells[debitCol]).replace(/,/g, "")) || 0 : 0;
+    const credit = creditCol >= 0 ? parseFloat(String(cells[creditCol]).replace(/,/g, "")) || 0 : 0;
+    if (debit === 0 && credit === 0) continue;
+    rows.push({
+      date: dateCol >= 0 ? cells[dateCol] || "" : "",
+      ref: refCol >= 0 ? cells[refCol] || "" : "",
+      doc: docCol >= 0 ? cells[docCol] || "" : "",
+      desc: descCol >= 0 ? cells[descCol] || "" : "",
+      debit, credit,
+    });
+  }
+  return rows;
+}
+
+/* ═══════════════════════════════════════════
+   MATCHING LOGIC (same as Module 3)
+   ═══════════════════════════════════════════ */
+function amountOnlyCount(bankEntries: BankEntry[], ledgerEntries: LedgerEntry[]) {
+  const key = (n: number) => n.toFixed(2);
+  function buildFreq(amounts: number[]) {
+    const map = new Map<string, number>();
+    for (const a of amounts) { const k = key(a); map.set(k, (map.get(k) || 0) + 1); }
+    return map;
+  }
+  const bankFreq = buildFreq(bankEntries.map((r) => r.debit || r.credit));
+  const ledgerFreq = buildFreq(ledgerEntries.map((r) => r.debit || r.credit));
+  let bankMissing = 0;
+  const lfc = new Map(ledgerFreq);
+  for (const r of bankEntries) { const k = key(r.debit || r.credit); const c = lfc.get(k) || 0; if (c > 0) lfc.set(k, c - 1); else bankMissing++; }
+  let ledgerMissing = 0;
+  const bfc = new Map(bankFreq);
+  for (const r of ledgerEntries) { const k = key(r.debit || r.credit); const c = bfc.get(k) || 0; if (c > 0) bfc.set(k, c - 1); else ledgerMissing++; }
+  return { bankMissing, ledgerMissing };
+}
+
+function pairByDate(
+  bankItems: { idx: number; date: string }[],
+  ledgerItems: { idx: number; date: string }[],
+): { bankIdx: number; ledgerIdx: number }[] {
+  const pairs: { bankIdx: number; ledgerIdx: number }[] = [];
+  const limit = Math.min(bankItems.length, ledgerItems.length);
+  const usedBank = new Set<number>();
+  const usedLedger = new Set<number>();
+
+  function pass(maxDays: number | null) {
+    for (const bk of bankItems) {
+      if (usedBank.has(bk.idx) || pairs.length >= limit) continue;
+      const bkMs = parseDate(bk.date);
+      let bestIdx = -1, bestDelta = Infinity;
+      for (const lg of ledgerItems) {
+        if (usedLedger.has(lg.idx)) continue;
+        if (maxDays === null) {
+          const lgMs = parseDate(lg.date);
+          if (bkMs && lgMs) { const d = Math.abs(bkMs - lgMs); if (d < bestDelta) { bestDelta = d; bestIdx = lg.idx; } }
+          else { bestIdx = lg.idx; break; }
+        } else if (maxDays === 0) {
+          if (bk.date === lg.date) { bestIdx = lg.idx; break; }
+        } else {
+          const lgMs = parseDate(lg.date);
+          if (bkMs && lgMs) { const d = Math.abs(bkMs - lgMs); if (d <= maxDays * 86400000 && d < bestDelta) { bestDelta = d; bestIdx = lg.idx; } }
+        }
+      }
+      if (bestIdx >= 0) { pairs.push({ bankIdx: bk.idx, ledgerIdx: bestIdx }); usedBank.add(bk.idx); usedLedger.add(bestIdx); }
+    }
+  }
+  pass(0); pass(3); pass(7); pass(null);
+  return pairs;
+}
+
+function dateAwareMatch(bankEntries: BankEntry[], ledgerEntries: LedgerEntry[]) {
+  const amtKey = (n: number) => n.toFixed(2);
+  type BankItem = { idx: number; entry: BankEntry };
+  type LedgerItem = { idx: number; entry: LedgerEntry };
+
+  const bankGroups = new Map<string, BankItem[]>();
+  bankEntries.forEach((e, idx) => {
+    const k = amtKey(e.debit || e.credit);
+    (bankGroups.get(k) ?? bankGroups.set(k, []).get(k)!).push({ idx, entry: e });
+  });
+  const ledgerGroups = new Map<string, LedgerItem[]>();
+  ledgerEntries.forEach((e, idx) => {
+    const k = amtKey(e.debit || e.credit);
+    (ledgerGroups.get(k) ?? ledgerGroups.set(k, []).get(k)!).push({ idx, entry: e });
+  });
+
+  const bankMissing: BankEntry[] = [];
+  const ledgerMissing: LedgerEntry[] = [];
+  const allKeys = new Set([...bankGroups.keys(), ...ledgerGroups.keys()]);
+
+  for (const k of allKeys) {
+    const bList = bankGroups.get(k) ?? [];
+    const lList = ledgerGroups.get(k) ?? [];
+    if (bList.length === lList.length) continue;
+
+    if (bList.length > lList.length) {
+      if (lList.length === 0) { for (const b of bList) bankMissing.push(b.entry); continue; }
+      const paired = pairByDate(
+        bList.map((b) => ({ idx: b.idx, date: b.entry.date })),
+        lList.map((l) => ({ idx: l.idx, date: l.entry.date })),
+      );
+      const pairedBankIdxs = new Set(paired.map((p) => p.bankIdx));
+      for (const b of bList) if (!pairedBankIdxs.has(b.idx)) bankMissing.push(b.entry);
+    } else {
+      if (bList.length === 0) { for (const l of lList) ledgerMissing.push(l.entry); continue; }
+      const paired = pairByDate(
+        bList.map((b) => ({ idx: b.idx, date: b.entry.date })),
+        lList.map((l) => ({ idx: l.idx, date: l.entry.date })),
+      );
+      const pairedLedgerIdxs = new Set(paired.map((p) => p.ledgerIdx));
+      for (const l of lList) if (!pairedLedgerIdxs.has(l.idx)) ledgerMissing.push(l.entry);
+    }
+  }
+  return { bankUnresolved: bankMissing, ledgerUnresolved: ledgerMissing };
+}
+
+const fmt = (n: number) =>
+  n === 0 ? "" : n.toLocaleString("en-PK", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/* ═══════════════════════════════════════════
+   ENDPOINT
+   ═══════════════════════════════════════════ */
+export async function POST(request: Request) {
+  try {
+    const formData = await request.formData();
+    const bankFiles = formData.getAll("bankFiles") as File[];
+    const ledgerFile = formData.get("ledgerFile") as File | null;
+
+    if (bankFiles.length === 0 || !ledgerFile) {
+      return Response.json({ error: "At least one bank statement and a ledger file are required." }, { status: 400 });
+    }
+
+    // Parse all bank files
+    const allBankEntries: BankEntry[] = [];
+    const bankSources: { name: string; bank: string; count: number; error?: string }[] = [];
+    const warnings: string[] = [];
+
+    for (const file of bankFiles) {
+      const result = await parseBankFile(file);
+      bankSources.push({ name: file.name, bank: result.bank, count: result.entries.length, error: result.error });
+      if (result.error) warnings.push(result.error);
+      if (result.warning) warnings.push(result.warning);
+      allBankEntries.push(...result.entries);
+    }
+
+    if (allBankEntries.length === 0) {
+      return Response.json({
+        error: "No transactions could be extracted from any bank statement file.",
+        warnings,
+      }, { status: 400 });
+    }
+
+    // Parse ledger
+    const ledgerBuffer = Buffer.from(await ledgerFile.arrayBuffer());
+    const ext = ledgerFile.name.toLowerCase().split(".").pop() ?? "";
+    let ledgerEntries: LedgerEntry[];
+    if (ext === "csv") ledgerEntries = parseLedgerCSV(ledgerBuffer.toString("utf-8"));
+    else if (ext === "xls" || ext === "xlsx") ledgerEntries = parseLedgerExcel(ledgerBuffer);
+    else return Response.json({ error: "Ledger must be .xls, .xlsx, or .csv" }, { status: 400 });
+
+    if (ledgerEntries.length === 0) {
+      return Response.json({ error: "No entries found in ledger." }, { status: 400 });
+    }
+
+    // Module 2 reference counts
+    const m2 = amountOnlyCount(allBankEntries, ledgerEntries);
+
+    // Date-aware matching
+    const { bankUnresolved, ledgerUnresolved } = dateAwareMatch(allBankEntries, ledgerEntries);
+
+    const resolvedFromBank = m2.bankMissing - bankUnresolved.length;
+    const resolvedFromLedger = m2.ledgerMissing - ledgerUnresolved.length;
+
+    return Response.json({
+      bankTotal: allBankEntries.length,
+      ledgerTotal: ledgerEntries.length,
+      bankSources,
+      warnings,
+      module2BankMissing: m2.bankMissing,
+      module2LedgerMissing: m2.ledgerMissing,
+      resolvedCount: resolvedFromBank + resolvedFromLedger,
+      bankUnresolved: bankUnresolved.map((r) => ({
+        date: r.date,
+        particulars: r.particulars,
+        debit: r.debit,
+        credit: r.credit,
+        source: r.source,
+      })),
+      ledgerUnresolved: ledgerUnresolved.map((r) => ({
+        date: r.date,
+        ref: r.ref,
+        doc: r.doc,
+        desc: r.desc.substring(0, 60),
+        debit: r.debit,
+        credit: r.credit,
+      })),
+      summary: {
+        resolvedFromBank,
+        resolvedFromLedger,
+        bankUnresolvedCount: bankUnresolved.length,
+        bankUnresolvedDR: fmt(bankUnresolved.reduce((s, r) => s + r.debit, 0)),
+        bankUnresolvedCR: fmt(bankUnresolved.reduce((s, r) => s + r.credit, 0)),
+        ledgerUnresolvedCount: ledgerUnresolved.length,
+        ledgerUnresolvedDR: fmt(ledgerUnresolved.reduce((s, r) => s + r.debit, 0)),
+        ledgerUnresolvedCR: fmt(ledgerUnresolved.reduce((s, r) => s + r.credit, 0)),
+      },
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return Response.json({ error: `Server error: ${msg}` }, { status: 500 });
+  }
+}

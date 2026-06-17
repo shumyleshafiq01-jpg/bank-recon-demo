@@ -25,7 +25,7 @@ export default function ReconPage() {
     {
       role: "assistant",
       content:
-        "Hi! I'm your Bank Reconciliation Agent. Let's get started.\n\nPlease upload your bank statement — I accept PDF, scanned images (PNG/JPG), Excel, or CSV files.",
+        "Hi! I'm your AI Agent Finance. Let's get started.\n\nPlease upload your bank statement — I accept PDF, scanned images (PNG/JPG), Excel, or CSV files.",
     },
   ]);
   const [chatInput, setChatInput] = useState("");
@@ -181,7 +181,7 @@ export default function ReconPage() {
           <div className="w-7 h-7 rounded-lg bg-primary/20 flex items-center justify-center">
             <Landmark className="w-3.5 h-3.5 text-primary" />
           </div>
-          <span className="text-sm font-bold text-foreground">Bank Reconciliation</span>
+          <span className="text-sm font-bold text-foreground">AI Agent Finance</span>
         </div>
         <button
           onClick={() => setChatOpen(!chatOpen)}

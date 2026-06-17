@@ -172,10 +172,10 @@ function LoginContent() {
             <Landmark className="w-8 h-8 text-white" />
           </div>
           <h1 className="text-2xl font-bold text-gray-900">
-            Bank Reconciliation
+            AI Agent Finance
           </h1>
           <p className="text-gray-500 text-sm">
-            AI-Powered Reconciliation Agent Demo
+            AI-Powered Finance Agent
           </p>
           <p className="text-gray-400 text-xs">
             by Sheikh Shumyle &middot; Created: 9 June 2026
@@ -232,7 +232,7 @@ function LoginContent() {
 
         <p className="text-center text-xs text-gray-400">
           This is a demo application showcasing AI agent capabilities
-          for automated bank reconciliation workflows.
+          for automated finance workflows.
         </p>
       </div>
 

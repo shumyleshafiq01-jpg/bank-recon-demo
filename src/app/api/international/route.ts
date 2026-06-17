@@ -1,5 +1,5 @@
 /**
- * POST /api/international — Module 6: International Bank Reconciliation.
+ * POST /api/international — Module 6: International Reconciliation.
  *
  * Universal AI-based parser for international bank statements (UAE, USA, UK, etc.)
  * with multi-currency support. No bank dropdown — AI auto-detects format and currency.

@@ -110,7 +110,7 @@ export default function InternationalPage() {
         <div className="w-7 h-7 rounded-lg bg-cyan-500/20 flex items-center justify-center">
           <Globe className="w-3.5 h-3.5 text-cyan-400" />
         </div>
-        <span className="text-sm font-bold text-foreground">International Bank Reconciliation</span>
+        <span className="text-sm font-bold text-foreground">International Reconciliation</span>
       </header>
 
       <div className="flex-1 overflow-y-auto p-4 md:p-8">

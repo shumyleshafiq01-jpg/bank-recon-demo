@@ -1,5 +1,5 @@
 /**
- * POST /api/chat — Bank Reconciliation chat agent.
+ * POST /api/chat — AI Agent Finance chat agent.
  * Only discusses bank reconciliation topics.
  */
 
@@ -7,7 +7,7 @@ import Anthropic from "@anthropic-ai/sdk";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
-const SYSTEM_PROMPT = `You are a Bank Reconciliation AI Agent. You ONLY discuss bank reconciliation topics — nothing else. If the user asks about anything unrelated, politely redirect them back to bank reconciliation.
+const SYSTEM_PROMPT = `You are a AI Agent Finance AI Agent. You ONLY discuss bank reconciliation topics — nothing else. If the user asks about anything unrelated, politely redirect them back to bank reconciliation.
 
 Your role:
 1. Guide the user through the bank reconciliation process step by step
@@ -95,7 +95,7 @@ These entries will be applied to produce an updated journal ledger once you conf
   }
 
   if (lower.includes("hello") || lower.includes("hi") || lower.includes("hey")) {
-    return "Hello! I'm your Bank Reconciliation Agent. I'm here to help you match your bank statements against your journal ledger, identify discrepancies, and suggest corrections. How can I help you today?";
+    return "Hello! I'm your AI Agent Finance Agent. I'm here to help you match your bank statements against your journal ledger, identify discrepancies, and suggest corrections. How can I help you today?";
   }
 
   if (lower.includes("what") && (lower.includes("recon") || lower.includes("do"))) {
@@ -112,5 +112,5 @@ I help by:
 Let's start — upload your bank statement using the panel on the left.`;
   }
 
-  return "I'm your Bank Reconciliation Agent. I can help you with anything related to matching your bank statement with your journal ledger. Please use the panel on the left to upload your documents, or ask me any questions about the reconciliation process.";
+  return "I'm your AI Agent Finance Agent. I can help you with anything related to matching your bank statement with your journal ledger. Please use the panel on the left to upload your documents, or ask me any questions about the reconciliation process.";
 }
