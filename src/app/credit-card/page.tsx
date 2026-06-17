@@ -183,7 +183,6 @@ export default function CreditCardPage() {
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Credit Card Verification");
-    // Set column widths
     ws["!cols"] = [
       { wch: 14 }, // Date
       { wch: 40 }, // Merchant
@@ -191,6 +190,57 @@ export default function CreditCardPage() {
       { wch: 16 }, // Type
       { wch: 20 }, // Status
     ];
+
+    // SCB Format sheet
+    const allTxns = results.groups.flatMap(g => g.transactions);
+    const debits = allTxns.filter(t => t.type === "debit");
+    const credits = allTxns.filter(t => t.type === "credit");
+
+    const totalSpendRaw = debits.reduce((s, t) => s + t.amountRaw, 0);
+    const totalPaymentsRaw = credits.reduce((s, t) => s + t.amountRaw, 0);
+
+    const scbRows: (string | number | null)[][] = [];
+    scbRows.push(["Khalid Mahmood Paracha"]);
+    scbRows.push(["SCB Credit Card # 1255"]);
+
+    const months = [...new Set(debits.map(t => t.date).filter(Boolean))];
+    const firstDate = months.length > 0 ? months[0] : "";
+    let monthLabel = "";
+    if (firstDate) {
+      const parts = firstDate.match(/(\d{2})-(\d{2})-(\d{4})/);
+      if (parts) {
+        const monthNames = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+        monthLabel = `${monthNames[parseInt(parts[2]) - 1]}-${parts[3]}`;
+      }
+    }
+    scbRows.push([`Month Of ${monthLabel || "N/A"}`]);
+    scbRows.push([""]);
+    scbRows.push(["S.No", "Date", "Description", "USD Transction ", "Amount"]);
+
+    let sno = 0;
+    let lastDate = "";
+    for (const txn of debits) {
+      sno++;
+      const showDate = txn.date !== lastDate ? txn.date : null;
+      if (txn.date) lastDate = txn.date;
+      scbRows.push([sno, showDate, txn.merchant, null, txn.amountRaw]);
+    }
+
+    scbRows.push([]);
+    scbRows.push([null, null, "Total", null, totalSpendRaw]);
+    scbRows.push([null, null, "ADVANCE PAYMENTS", null, totalPaymentsRaw]);
+    scbRows.push([null, null, "Payable ", null, totalSpendRaw - totalPaymentsRaw]);
+
+    const ws2 = XLSX.utils.aoa_to_sheet(scbRows);
+    ws2["!cols"] = [
+      { wch: 6 },  // S.No
+      { wch: 14 }, // Date
+      { wch: 35 }, // Description
+      { wch: 18 }, // USD Transaction
+      { wch: 16 }, // Amount
+    ];
+    XLSX.utils.book_append_sheet(wb, ws2, "SCB Format");
+
     XLSX.writeFile(wb, "credit-card-verification.xlsx");
   }
 
