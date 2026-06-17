@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useCallback } from "react";
 import {
   Landmark, DollarSign, Package, Users, Bot,
-  ArrowRight, Sparkles,
+  ArrowRight, Sparkles, UserCheck, ClipboardList,
 } from "lucide-react";
 
 type Node = { x: number; y: number; vx: number; vy: number; radius: number };
@@ -152,7 +152,7 @@ const AGENTS = [
     desc: "Budget planning, cost tracking, variance analysis, and forecasting",
     icon: DollarSign,
     iconBg: "bg-gray-100",
-    iconColor: "text-gray-300",
+    iconColor: "text-gray-400",
     route: null,
   },
   {
@@ -163,7 +163,7 @@ const AGENTS = [
     desc: "Inventory management, procurement automation, supplier analytics",
     icon: Package,
     iconBg: "bg-gray-100",
-    iconColor: "text-gray-300",
+    iconColor: "text-gray-400",
     route: null,
   },
   {
@@ -174,7 +174,29 @@ const AGENTS = [
     desc: "Customer relationship management, lead tracking, sales pipeline",
     icon: Users,
     iconBg: "bg-gray-100",
-    iconColor: "text-gray-300",
+    iconColor: "text-gray-400",
+    route: null,
+  },
+  {
+    name: "AI Human Resource Manager",
+    status: "tba",
+    statusLabel: "TBA",
+    statusColor: "bg-gray-100 text-gray-400",
+    desc: "Recruitment, employee onboarding, attendance, payroll analytics",
+    icon: UserCheck,
+    iconBg: "bg-gray-100",
+    iconColor: "text-gray-400",
+    route: null,
+  },
+  {
+    name: "AI Project Manager",
+    status: "tba",
+    statusLabel: "TBA",
+    statusColor: "bg-gray-100 text-gray-400",
+    desc: "Task tracking, milestone planning, team coordination, progress reports",
+    icon: ClipboardList,
+    iconBg: "bg-gray-100",
+    iconColor: "text-gray-400",
     route: null,
   },
   {
@@ -185,7 +207,7 @@ const AGENTS = [
     desc: "Email management, scheduling, task automation, smart reminders",
     icon: Bot,
     iconBg: "bg-gray-100",
-    iconColor: "text-gray-300",
+    iconColor: "text-gray-400",
     route: null,
   },
 ];
@@ -224,7 +246,7 @@ export default function HubPage() {
                   className={`w-full flex items-center gap-4 p-5 text-left transition-all ${
                     active
                       ? "hover:bg-blue-50/80 cursor-pointer group"
-                      : "opacity-45 cursor-default"
+                      : "opacity-60 cursor-default"
                   }`}
                 >
                   <div className={`w-11 h-11 rounded-xl ${agent.iconBg} flex items-center justify-center shrink-0`}>
@@ -232,14 +254,14 @@ export default function HubPage() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <h3 className={`font-semibold ${active ? "text-gray-900 group-hover:text-blue-600" : "text-gray-400"} transition-colors`}>
+                      <h3 className={`font-semibold ${active ? "text-gray-900 group-hover:text-blue-600" : "text-gray-500"} transition-colors`}>
                         {agent.name}
                       </h3>
                       <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${agent.statusColor}`}>
                         {agent.statusLabel}
                       </span>
                     </div>
-                    <p className={`text-xs mt-0.5 ${active ? "text-gray-500" : "text-gray-300"}`}>
+                    <p className={`text-xs mt-0.5 ${active ? "text-gray-500" : "text-gray-400"}`}>
                       {agent.desc}
                     </p>
                   </div>
