@@ -1,11 +1,11 @@
 "use client";
 
-import { useRouter, useSearchParams } from "next/navigation";
-import { useState, useEffect, useRef, useCallback, Suspense } from "react";
-import { Landmark, Shield, User, FlaskConical, ArrowRight, Lock, X, AlertTriangle } from "lucide-react";
-
-const USER_CODE = "07860";
-const TESTING_DEADLINE = new Date("2026-06-20T12:00:00Z").getTime();
+import { useRouter } from "next/navigation";
+import { useEffect, useRef, useCallback } from "react";
+import {
+  Landmark, DollarSign, Package, Users, Bot,
+  ArrowRight, Sparkles,
+} from "lucide-react";
 
 type Node = { x: number; y: number; vx: number; vy: number; radius: number };
 
@@ -132,158 +132,136 @@ function NeuronBackground() {
   );
 }
 
-function LoginContent() {
+const AGENTS = [
+  {
+    name: "AI Agent Finance",
+    status: "wip",
+    statusLabel: "WIP",
+    statusColor: "bg-blue-100 text-blue-600",
+    desc: "Bank reconciliation, credit card verification, expense analysis, quotation comparison",
+    icon: Landmark,
+    iconBg: "bg-blue-100",
+    iconColor: "text-blue-600",
+    route: "/login",
+  },
+  {
+    name: "AI Agent Cost / Budgeting",
+    status: "tba",
+    statusLabel: "TBA",
+    statusColor: "bg-gray-100 text-gray-400",
+    desc: "Budget planning, cost tracking, variance analysis, and forecasting",
+    icon: DollarSign,
+    iconBg: "bg-gray-100",
+    iconColor: "text-gray-300",
+    route: null,
+  },
+  {
+    name: "AI Supply Chain Agent",
+    status: "tba",
+    statusLabel: "TBA",
+    statusColor: "bg-gray-100 text-gray-400",
+    desc: "Inventory management, procurement automation, supplier analytics",
+    icon: Package,
+    iconBg: "bg-gray-100",
+    iconColor: "text-gray-300",
+    route: null,
+  },
+  {
+    name: "AI Agent CRM",
+    status: "tba",
+    statusLabel: "TBA",
+    statusColor: "bg-gray-100 text-gray-400",
+    desc: "Customer relationship management, lead tracking, sales pipeline",
+    icon: Users,
+    iconBg: "bg-gray-100",
+    iconColor: "text-gray-300",
+    route: null,
+  },
+  {
+    name: "AI Personal Assistant",
+    status: "tba",
+    statusLabel: "TBA",
+    statusColor: "bg-gray-100 text-gray-400",
+    desc: "Email management, scheduling, task automation, smart reminders",
+    icon: Bot,
+    iconBg: "bg-gray-100",
+    iconColor: "text-gray-300",
+    route: null,
+  },
+];
+
+export default function HubPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const expired = searchParams.get("expired") === "1";
-  const testingAvailable = Date.now() < TESTING_DEADLINE;
-  const [showCodePrompt, setShowCodePrompt] = useState(false);
-  const [code, setCode] = useState("");
-  const [codeError, setCodeError] = useState("");
-
-  function handleUser() {
-    setShowCodePrompt(true);
-    setCode("");
-    setCodeError("");
-  }
-
-  function submitCode() {
-    if (code === USER_CODE) {
-      localStorage.setItem("session", JSON.stringify({ type: "user", ts: Date.now() }));
-      router.push("/dashboard");
-    } else {
-      setCodeError("Invalid code. Please try again.");
-    }
-  }
-
-  function handleTesting() {
-    localStorage.setItem("session", JSON.stringify({ type: "testing", ts: Date.now() }));
-    router.push("/dashboard");
-  }
 
   return (
     <div className="flex-1 flex items-center justify-center p-6 min-h-screen" style={{ background: "#e8ecf1" }}>
       <NeuronBackground />
 
-      <div className="relative z-10 w-full max-w-md space-y-8 animate-fade-in">
-        {/* Logo */}
+      <div className="relative z-10 w-full max-w-lg space-y-8 animate-fade-in">
+        {/* Title */}
         <div className="text-center space-y-3">
           <div className="mx-auto w-16 h-16 rounded-2xl bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-600/20">
-            <Landmark className="w-8 h-8 text-white" />
+            <Sparkles className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">
-            AI Agent Finance
-          </h1>
+          <h1 className="text-3xl font-bold text-gray-900">AI Agent</h1>
           <p className="text-gray-500 text-sm">
-            AI-Powered Finance Agent
-          </p>
-          <p className="text-gray-400 text-xs">
-            by Sheikh Shumyle &middot; Created: 9 June 2026
+            Enterprise AI Agents by Sheikh Shumyle
           </p>
         </div>
 
-        {/* Expired Banner */}
-        {expired && (
-          <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-700">
-            <AlertTriangle className="w-4 h-4 shrink-0" />
-            Your testing session has expired. Please select an access type to continue.
-          </div>
-        )}
+        {/* Agent List */}
+        <div className="bg-white/70 backdrop-blur-xl rounded-2xl border border-gray-200/80 overflow-hidden shadow-lg shadow-black/5">
+          {AGENTS.map((agent, i) => {
+            const Icon = agent.icon;
+            const active = agent.route !== null;
 
-        {/* Account Selection */}
-        <div className="bg-white/70 backdrop-blur-xl rounded-2xl border border-gray-200/80 p-6 space-y-4 shadow-lg shadow-black/5">
-          <div className="flex items-center gap-3 text-sm text-gray-500">
-            <Shield className="w-4 h-4 text-blue-500" />
-            <span>Select your access type</span>
-          </div>
-
-          {/* User Account */}
-          <button
-            onClick={handleUser}
-            className="w-full flex items-center gap-4 bg-gray-50/80 hover:bg-blue-50 border border-gray-200 hover:border-blue-300 rounded-xl p-4 transition-all cursor-pointer group text-left"
-          >
-            <div className="w-11 h-11 rounded-xl bg-blue-100 flex items-center justify-center shrink-0">
-              <User className="w-5 h-5 text-blue-600" />
-            </div>
-            <div className="flex-1">
-              <h3 className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">User</h3>
-              <p className="text-xs text-gray-400 mt-0.5">Team access with code</p>
-            </div>
-            <Lock className="w-4 h-4 text-gray-300 group-hover:text-blue-500 transition-colors" />
-          </button>
-
-          {/* Testing Account */}
-          {testingAvailable && (
-            <button
-              onClick={handleTesting}
-              className="w-full flex items-center gap-4 bg-gray-50/80 hover:bg-cyan-50 border border-gray-200 hover:border-cyan-300 rounded-xl p-4 transition-all cursor-pointer group text-left"
-            >
-              <div className="w-11 h-11 rounded-xl bg-cyan-100 flex items-center justify-center shrink-0">
-                <FlaskConical className="w-5 h-5 text-cyan-600" />
+            return (
+              <div key={agent.name}>
+                {i > 0 && <div className="border-t border-gray-200/60" />}
+                <button
+                  onClick={() => active && router.push(agent.route!)}
+                  disabled={!active}
+                  className={`w-full flex items-center gap-4 p-5 text-left transition-all ${
+                    active
+                      ? "hover:bg-blue-50/80 cursor-pointer group"
+                      : "opacity-45 cursor-default"
+                  }`}
+                >
+                  <div className={`w-11 h-11 rounded-xl ${agent.iconBg} flex items-center justify-center shrink-0`}>
+                    <Icon className={`w-5 h-5 ${agent.iconColor}`} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <h3 className={`font-semibold ${active ? "text-gray-900 group-hover:text-blue-600" : "text-gray-400"} transition-colors`}>
+                        {agent.name}
+                      </h3>
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${agent.statusColor}`}>
+                        {agent.statusLabel}
+                      </span>
+                    </div>
+                    <p className={`text-xs mt-0.5 ${active ? "text-gray-500" : "text-gray-300"}`}>
+                      {agent.desc}
+                    </p>
+                  </div>
+                  {active && (
+                    <ArrowRight className="w-4 h-4 text-gray-300 group-hover:text-blue-500 transition-colors shrink-0" />
+                  )}
+                </button>
               </div>
-              <div className="flex-1">
-                <h3 className="font-semibold text-gray-900 group-hover:text-cyan-600 transition-colors">Testing</h3>
-                <p className="text-xs text-gray-400 mt-0.5">Beta access &middot; expires in {Math.max(0, Math.ceil((TESTING_DEADLINE - Date.now()) / 3600000))} hours</p>
-              </div>
-              <ArrowRight className="w-4 h-4 text-gray-300 group-hover:text-cyan-500 transition-colors" />
-            </button>
-          )}
+            );
+          })}
+
+          {/* More coming */}
+          <div className="border-t border-gray-200/60" />
+          <div className="px-5 py-3 text-center">
+            <p className="text-xs text-gray-300 italic">More agents coming soon...</p>
+          </div>
         </div>
 
         <p className="text-center text-xs text-gray-400">
-          This is a demo application showcasing AI agent capabilities
-          for automated finance workflows.
+          Powered by NeuroGrid Labs &middot; 2026
         </p>
       </div>
-
-      {/* Code Prompt Modal */}
-      {showCodePrompt && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-white border border-gray-200 rounded-2xl p-6 w-full max-w-sm space-y-4 animate-fade-in shadow-2xl">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg bg-blue-100 flex items-center justify-center">
-                  <Lock className="w-4 h-4 text-blue-600" />
-                </div>
-                <h3 className="font-semibold text-gray-900">Enter Access Code</h3>
-              </div>
-              <button onClick={() => setShowCodePrompt(false)} className="text-gray-400 hover:text-gray-600 transition-colors cursor-pointer">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <input
-              type="password"
-              value={code}
-              onChange={(e) => { setCode(e.target.value); setCodeError(""); }}
-              onKeyDown={(e) => e.key === "Enter" && submitCode()}
-              placeholder="Enter code"
-              autoFocus
-              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 text-center text-lg tracking-widest"
-            />
-
-            {codeError && (
-              <p className="text-sm text-red-500 text-center">{codeError}</p>
-            )}
-
-            <button
-              onClick={submitCode}
-              className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl transition-all cursor-pointer shadow-md shadow-blue-600/20"
-            >
-              Unlock
-              <ArrowRight className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      )}
     </div>
-  );
-}
-
-export default function LoginPage() {
-  return (
-    <Suspense>
-      <LoginContent />
-    </Suspense>
   );
 }

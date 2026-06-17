@@ -261,17 +261,17 @@ export default function DashboardPage() {
   useEffect(() => {
     try {
       const raw = localStorage.getItem("session");
-      if (!raw) { router.replace("/"); return; }
+      if (!raw) { router.replace("/login"); return; }
       const s = JSON.parse(raw) as Session;
-      if (!s) { router.replace("/"); return; }
+      if (!s) { router.replace("/login"); return; }
       if (s.type === "testing" && Date.now() > TESTING_DEADLINE) {
         localStorage.removeItem("session");
-        router.replace("/?expired=1");
+        router.replace("/login?expired=1");
         return;
       }
       setSession(s);
     } catch {
-      router.replace("/");
+      router.replace("/login");
       return;
     }
     setChecked(true);
@@ -283,7 +283,7 @@ export default function DashboardPage() {
       const left = TESTING_DEADLINE - Date.now();
       if (left <= 0) {
         localStorage.removeItem("session");
-        router.replace("/?expired=1");
+        router.replace("/login?expired=1");
         return;
       }
       setRemaining(formatCountdown(left));
@@ -295,7 +295,7 @@ export default function DashboardPage() {
 
   function logout() {
     localStorage.removeItem("session");
-    router.replace("/");
+    router.replace("/login");
   }
 
   if (!checked) return null;
