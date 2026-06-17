@@ -1,17 +1,17 @@
 @import "tailwindcss";
 
 :root {
-  --background: #0f172a;
-  --foreground: #e2e8f0;
-  --surface: #1e293b;
-  --surface-light: #334155;
+  --background: #e8ecf1;
+  --foreground: #1e293b;
+  --surface: rgba(255, 255, 255, 0.7);
+  --surface-light: rgba(255, 255, 255, 0.9);
   --primary: #3b82f6;
   --primary-hover: #2563eb;
   --accent: #10b981;
   --danger: #ef4444;
   --warning: #f59e0b;
-  --border: #334155;
-  --muted: #94a3b8;
+  --border: rgba(209, 213, 219, 0.8);
+  --muted: #6b7280;
 }
 
 @theme inline {
@@ -38,8 +38,8 @@ body {
 
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: var(--surface); }
-::-webkit-scrollbar-thumb { background: var(--surface-light); border-radius: 3px; }
+::-webkit-scrollbar-track { background: #e2e6eb; }
+::-webkit-scrollbar-thumb { background: #c1c7cf; border-radius: 3px; }
 
 /* Animations */
 @keyframes fade-in {
