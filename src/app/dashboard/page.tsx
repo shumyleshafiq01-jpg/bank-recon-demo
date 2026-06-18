@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, useRef, useCallback } from "react";
 import {
   Landmark, ArrowRight, Clock, User, Building2, CreditCard,
-  Globe, FileText, LogOut, Scale, Timer, BookOpen, Wallet,
+  Globe, FileText, LogOut, Scale, Timer, BookOpen, Wallet, Banknote,
 } from "lucide-react";
 
 const TESTING_DEADLINE = new Date("2026-06-20T12:00:00Z").getTime();
@@ -250,6 +250,21 @@ const MODULES = [
     image: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%2310b981' stop-opacity='0.3'/%3E%3Cstop offset='1' stop-color='%2310b981' stop-opacity='0.05'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='200' height='200' fill='url(%23g)'/%3E%3Ccircle cx='100' cy='90' r='40' fill='none' stroke='%2310b981' stroke-width='2' opacity='0.25'/%3E%3Ctext x='100' y='98' text-anchor='middle' font-size='28' font-weight='bold' fill='%2310b981' opacity='0.4'%3E$%3C/text%3E%3Crect x='40' y='145' width='25' height='25' rx='4' fill='%2310b981' opacity='0.2'/%3E%3Crect x='72' y='135' width='25' height='35' rx='4' fill='%2310b981' opacity='0.25'/%3E%3Crect x='104' y='125' width='25' height='45' rx='4' fill='%2310b981' opacity='0.3'/%3E%3Crect x='136' y='140' width='25' height='30' rx='4' fill='%2310b981' opacity='0.15'/%3E%3C/svg%3E",
     tags: ["Wise Card", "Chat & Filter"],
   },
+  {
+    key: "fund-estimator",
+    route: "/fund-estimator",
+    title: "Fund Estimation Work Space",
+    desc: "Live collaborative ledger — multi-bank balances, PDC tracking, real-time workspace",
+    icon: Banknote,
+    color: "indigo",
+    gradient: "from-indigo-600/20 to-indigo-900/40",
+    border: "hover:border-indigo-400/60",
+    iconBg: "bg-indigo-500/20",
+    iconColor: "text-indigo-400",
+    tagBg: "bg-indigo-500/10 text-indigo-300",
+    image: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%236366f1' stop-opacity='0.3'/%3E%3Cstop offset='1' stop-color='%236366f1' stop-opacity='0.05'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='200' height='200' fill='url(%23g)'/%3E%3Crect x='25' y='40' width='150' height='120' rx='8' fill='%236366f1' opacity='0.15'/%3E%3Crect x='35' y='55' width='130' height='8' rx='2' fill='%236366f1' opacity='0.25'/%3E%3Crect x='35' y='75' width='60' height='6' rx='2' fill='%236366f1' opacity='0.2'/%3E%3Crect x='105' y='75' width='60' height='6' rx='2' fill='%236366f1' opacity='0.2'/%3E%3Crect x='35' y='90' width='60' height='6' rx='2' fill='%236366f1' opacity='0.15'/%3E%3Crect x='105' y='90' width='60' height='6' rx='2' fill='%236366f1' opacity='0.15'/%3E%3Crect x='35' y='105' width='60' height='6' rx='2' fill='%236366f1' opacity='0.1'/%3E%3Crect x='105' y='105' width='60' height='6' rx='2' fill='%236366f1' opacity='0.1'/%3E%3Crect x='35' y='130' width='130' height='8' rx='2' fill='%236366f1' opacity='0.3'/%3E%3C/svg%3E",
+    tags: ["WIP", "Live Workspace"],
+  },
 ];
 
 export default function DashboardPage() {
@@ -351,7 +366,7 @@ export default function DashboardPage() {
               </div>
               <div>
                 <p className="text-[11px] text-gray-400 uppercase tracking-wide font-medium">Modules</p>
-                <p className="text-xl font-bold text-gray-900">7</p>
+                <p className="text-xl font-bold text-gray-900">8</p>
               </div>
             </div>
           </div>
