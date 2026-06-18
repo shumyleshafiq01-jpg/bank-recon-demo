@@ -50,6 +50,12 @@ interface StatementMeta {
   cardLast4: string;
   statementMonth: string;
   paymentDueDate: string;
+  previousBalance: number | null;
+  purchases: number | null;
+  feeAndCharges: number | null;
+  payments: number | null;
+  currentBalance: number | null;
+  minimumAmountDue: number | null;
 }
 
 interface GroupedHeader {
@@ -103,7 +109,7 @@ function normalizemerchant(raw: string): string {
 const pad = (n: number) => String(n).padStart(2, "0");
 
 function extractMetaFromRows(rows: unknown[][]): StatementMeta {
-  const meta: StatementMeta = { cardholderName: "", cardLast4: "", statementMonth: "", paymentDueDate: "" };
+  const meta: StatementMeta = { cardholderName: "", cardLast4: "", statementMonth: "", paymentDueDate: "", previousBalance: null, purchases: null, feeAndCharges: null, payments: null, currentBalance: null, minimumAmountDue: null };
   for (let i = 0; i < Math.min(15, rows.length); i++) {
     const cell = String(rows[i]?.[0] ?? "").trim();
     if (!cell) continue;
@@ -126,7 +132,7 @@ function extractMetaFromRows(rows: unknown[][]): StatementMeta {
 function parseExcel(buffer: Buffer): { transactions: Transaction[]; meta: StatementMeta } {
   const wb = XLSX.read(buffer, { type: "buffer" });
   const transactions: Transaction[] = [];
-  let meta: StatementMeta = { cardholderName: "", cardLast4: "", statementMonth: "", paymentDueDate: "" };
+  let meta: StatementMeta = { cardholderName: "", cardLast4: "", statementMonth: "", paymentDueDate: "", previousBalance: null, purchases: null, feeAndCharges: null, payments: null, currentBalance: null, minimumAmountDue: null };
   let idCounter = 1;
 
   for (const name of wb.SheetNames) {
@@ -307,7 +313,13 @@ Return a JSON object with this exact structure:
     "cardholderName": "Full Name as printed on statement",
     "cardLast4": "1234",
     "statementMonth": "JUN-2026",
-    "paymentDueDate": "26-JUL-2026"
+    "paymentDueDate": "26-JUL-2026",
+    "previousBalance": 269194.84,
+    "purchases": 197103.73,
+    "feeAndCharges": 1288.87,
+    "payments": 269195.00,
+    "currentBalance": 198392.44,
+    "minimumAmountDue": 3249.00
   },
   "transactions": [
     { "date": "DD-MM-YYYY", "merchant": "Merchant Name", "amount": 1234.56, "type": "debit" }
@@ -317,6 +329,13 @@ Return a JSON object with this exact structure:
 - "meta.cardLast4": the last 4 digits of the credit card number
 - "meta.statementMonth": the billing month in MMM-YYYY format (e.g. DEC-2025)
 - "meta.paymentDueDate": the payment due date in DD-MMM-YYYY format (e.g. 26-JAN-2026)
+- "meta.previousBalance": the previous balance / opening balance from the account summary
+- "meta.purchases": total purchases amount from the account summary
+- "meta.feeAndCharges": total fee and charges from the account summary
+- "meta.payments": total payments made from the account summary
+- "meta.currentBalance": the current balance from the account summary
+- "meta.minimumAmountDue": the minimum amount due from the account summary
+- All amounts must be positive numbers (or 0)
 - "type" is "debit" for purchases/charges, "credit" for payments/refunds
 - Amount must always be positive
 - Include every single transaction, do not skip any
@@ -341,11 +360,18 @@ Return a JSON object with this exact structure:
       transactions?: { date: string; merchant: string; amount: number; type?: string }[];
     };
 
+    const toNum = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
     const meta: StatementMeta = {
       cardholderName: String(parsed.meta?.cardholderName ?? "").trim(),
       cardLast4: String(parsed.meta?.cardLast4 ?? "").trim(),
       statementMonth: String(parsed.meta?.statementMonth ?? "").trim(),
       paymentDueDate: String(parsed.meta?.paymentDueDate ?? "").trim(),
+      previousBalance: toNum(parsed.meta?.previousBalance),
+      purchases: toNum(parsed.meta?.purchases),
+      feeAndCharges: toNum(parsed.meta?.feeAndCharges),
+      payments: toNum(parsed.meta?.payments),
+      currentBalance: toNum(parsed.meta?.currentBalance),
+      minimumAmountDue: toNum(parsed.meta?.minimumAmountDue),
     };
 
     let idCounter = 1;
@@ -420,7 +446,7 @@ export async function POST(request: Request) {
     const ext = file.name.toLowerCase().split(".").pop() ?? "";
 
     let transactions: Transaction[] = [];
-    let meta: StatementMeta = { cardholderName: "", cardLast4: "", statementMonth: "", paymentDueDate: "" };
+    let meta: StatementMeta = { cardholderName: "", cardLast4: "", statementMonth: "", paymentDueDate: "", previousBalance: null, purchases: null, feeAndCharges: null, payments: null, currentBalance: null, minimumAmountDue: null };
     let extractionWarning: string | undefined;
 
     if (ext === "csv") {

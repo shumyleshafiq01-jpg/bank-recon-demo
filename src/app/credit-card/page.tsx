@@ -34,6 +34,12 @@ interface StatementMeta {
   cardLast4: string;
   statementMonth: string;
   paymentDueDate: string;
+  previousBalance: number | null;
+  purchases: number | null;
+  feeAndCharges: number | null;
+  payments: number | null;
+  currentBalance: number | null;
+  minimumAmountDue: number | null;
 }
 
 interface Results {
@@ -241,9 +247,12 @@ export default function CreditCardPage() {
     });
 
     scbRows.push([]);
-    scbRows.push([null, "Total", totalSpendRaw]);
-    scbRows.push([null, "ADVANCE PAYMENTS", totalPaymentsRaw]);
-    scbRows.push([null, "Payable ", totalSpendRaw - totalPaymentsRaw]);
+    if (meta?.previousBalance != null) scbRows.push([null, "Previous Balance", meta.previousBalance]);
+    scbRows.push([null, "Purchases", meta?.purchases ?? totalSpendRaw]);
+    if (meta?.feeAndCharges != null && meta.feeAndCharges > 0) scbRows.push([null, "Fee & Charges", meta.feeAndCharges]);
+    scbRows.push([null, "Payments", meta?.payments ?? totalPaymentsRaw]);
+    scbRows.push([null, "Current Balance", meta?.currentBalance ?? (totalSpendRaw - totalPaymentsRaw)]);
+    if (meta?.minimumAmountDue != null) scbRows.push([null, "Minimum Amount Due", meta.minimumAmountDue]);
 
     const ws2 = XLSX.utils.aoa_to_sheet(scbRows);
     ws2["!cols"] = [
@@ -685,19 +694,37 @@ export default function CreditCardPage() {
                     {/* Spacer */}
                     <tr><td colSpan={3} className="py-2" /></tr>
 
-                    {/* Totals */}
-                    <tr className="border-t-2 border-gray-400 font-semibold">
-                      <td colSpan={2} className="px-3 py-2 text-right">Total</td>
-                      <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt(totalSpendRaw)}</td>
+                    {/* Summary */}
+                    {meta?.previousBalance != null && (
+                      <tr className="border-t-2 border-gray-400">
+                        <td colSpan={2} className="px-3 py-2 font-semibold text-gray-700">Previous Balance</td>
+                        <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt(meta.previousBalance)}</td>
+                      </tr>
+                    )}
+                    <tr className={meta?.previousBalance == null ? "border-t-2 border-gray-400" : ""}>
+                      <td colSpan={2} className="px-3 py-2 font-semibold text-gray-700">Purchases</td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt(meta?.purchases ?? totalSpendRaw)}</td>
                     </tr>
-                    <tr className="font-semibold">
-                      <td colSpan={2} className="px-3 py-2 text-right">ADVANCE PAYMENTS</td>
-                      <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt(totalPaymentsRaw)}</td>
+                    {meta?.feeAndCharges != null && meta.feeAndCharges > 0 && (
+                      <tr>
+                        <td colSpan={2} className="px-3 py-2 font-semibold text-gray-700">Fee &amp; Charges</td>
+                        <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt(meta.feeAndCharges)}</td>
+                      </tr>
+                    )}
+                    <tr>
+                      <td colSpan={2} className="px-3 py-2 font-semibold text-gray-700">Payments</td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt(meta?.payments ?? totalPaymentsRaw)}</td>
                     </tr>
-                    <tr className="font-bold border-t border-gray-300">
-                      <td colSpan={2} className="px-3 py-2 text-right">Payable</td>
-                      <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt(totalSpendRaw - totalPaymentsRaw)}</td>
+                    <tr className="border-t border-gray-300 font-bold">
+                      <td colSpan={2} className="px-3 py-2 text-gray-900">Current Balance</td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt(meta?.currentBalance ?? (totalSpendRaw - totalPaymentsRaw))}</td>
                     </tr>
+                    {meta?.minimumAmountDue != null && (
+                      <tr>
+                        <td colSpan={2} className="px-3 py-2 font-semibold text-gray-700">Minimum Amount Due</td>
+                        <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt(meta.minimumAmountDue)}</td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
