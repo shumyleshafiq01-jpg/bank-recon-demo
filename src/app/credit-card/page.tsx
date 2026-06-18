@@ -4,7 +4,7 @@ import { useState, useCallback } from "react";
 import {
   ArrowLeft, Upload, Loader2, CreditCard,
   ChevronDown, ChevronUp, Download, AlertTriangle,
-  Check, X, ShoppingBag, Clock, CheckCircle2,
+  Check, X, ShoppingBag, Clock, CheckCircle2, Eye,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
@@ -29,6 +29,13 @@ interface MerchantGroup {
   transactions: TxnRow[];
 }
 
+interface StatementMeta {
+  cardholderName: string;
+  cardLast4: string;
+  statementMonth: string;
+  paymentDueDate: string;
+}
+
 interface Results {
   transactionCount: number;
   groupCount: number;
@@ -36,6 +43,7 @@ interface Results {
   totalPayments: string;
   netAmount: string;
   groups: MerchantGroup[];
+  meta?: StatementMeta;
   warning?: string;
 }
 
@@ -61,6 +69,8 @@ export default function CreditCardPage() {
   // Password support
   const [passwordPrompt, setPasswordPrompt] = useState(false);
   const [passwordInput, setPasswordInput] = useState("");
+  // Format preview
+  const [showPreview, setShowPreview] = useState(false);
 
   const toggleGroup = useCallback((header: string) => {
     setExpanded((prev) => {
@@ -199,22 +209,30 @@ export default function CreditCardPage() {
     const totalSpendRaw = debits.reduce((s, t) => s + t.amountRaw, 0);
     const totalPaymentsRaw = credits.reduce((s, t) => s + t.amountRaw, 0);
 
-    const scbRows: (string | number | null)[][] = [];
-    scbRows.push(["Khalid Mahmood Paracha"]);
-    scbRows.push(["SCB Credit Card # 1255"]);
+    const meta = results.meta;
+    const cardholderName = meta?.cardholderName || "N/A";
+    const cardLast4 = meta?.cardLast4 || "XXXX";
 
-    const months = [...new Set(debits.map(t => t.date).filter(Boolean))];
-    const firstDate = months.length > 0 ? months[0] : "";
-    let monthLabel = "";
-    if (firstDate) {
-      const parts = firstDate.match(/(\d{2})-(\d{2})-(\d{4})/);
-      if (parts) {
-        const monthNames = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
-        monthLabel = `${monthNames[parseInt(parts[2]) - 1]}-${parts[3]}`;
+    let monthLabel = meta?.statementMonth || "";
+    if (!monthLabel) {
+      const months = [...new Set(debits.map(t => t.date).filter(Boolean))];
+      const firstDate = months.length > 0 ? months[0] : "";
+      if (firstDate) {
+        const parts = firstDate.match(/(\d{2})-(\d{2})-(\d{4})/);
+        if (parts) {
+          const monthNames = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+          monthLabel = `${monthNames[parseInt(parts[2]) - 1]}-${parts[3]}`;
+        }
       }
     }
+
+    const paymentDueDate = meta?.paymentDueDate || "";
+
+    const scbRows: (string | number | null)[][] = [];
+    scbRows.push([cardholderName]);
+    scbRows.push([`SCB Credit Card # ${cardLast4}`]);
     scbRows.push([`Month Of ${monthLabel || "N/A"}`]);
-    scbRows.push([""]);
+    scbRows.push([paymentDueDate ? `Payment Due Date  : ${paymentDueDate}` : ""]);
     scbRows.push(["S.No", "Date", "Description", "USD Transction ", "Amount"]);
 
     let sno = 0;
@@ -239,7 +257,7 @@ export default function CreditCardPage() {
       { wch: 18 }, // USD Transaction
       { wch: 16 }, // Amount
     ];
-    XLSX.utils.book_append_sheet(wb, ws2, "SCB Format");
+    XLSX.utils.book_append_sheet(wb, ws2, "Kafi Commodities Format");
 
     XLSX.writeFile(wb, "credit-card-verification.xlsx");
   }
@@ -424,6 +442,14 @@ export default function CreditCardPage() {
                 </span>
               </button>
               <button
+                onClick={() => setShowPreview(true)}
+                className="px-4 py-2 rounded-lg text-sm bg-primary/20 text-primary hover:bg-primary/30 transition cursor-pointer"
+              >
+                <span className="flex items-center gap-2">
+                  <Eye className="w-4 h-4" /> View Format
+                </span>
+              </button>
+              <button
                 onClick={downloadExcel}
                 className="px-4 py-2 rounded-lg text-sm bg-accent/20 text-accent hover:bg-accent/30 transition cursor-pointer"
               >
@@ -579,6 +605,124 @@ export default function CreditCardPage() {
           </>
         )}
       </div>
+
+      {/* Kafi Commodities Format Preview Modal */}
+      {showPreview && results && (() => {
+        const allTxns = results.groups.flatMap(g => g.transactions);
+        const debits = allTxns.filter(t => t.type === "debit");
+        const credits = allTxns.filter(t => t.type === "credit");
+        const totalSpendRaw = debits.reduce((s, t) => s + t.amountRaw, 0);
+        const totalPaymentsRaw = credits.reduce((s, t) => s + t.amountRaw, 0);
+        const meta = results.meta;
+        const cardholderName = meta?.cardholderName || "N/A";
+        const cardLast4 = meta?.cardLast4 || "XXXX";
+        let monthLabel = meta?.statementMonth || "";
+        if (!monthLabel) {
+          const dates = [...new Set(debits.map(t => t.date).filter(Boolean))];
+          const fd = dates.length > 0 ? dates[0] : "";
+          if (fd) {
+            const parts = fd.match(/(\d{2})-(\d{2})-(\d{4})/);
+            if (parts) {
+              const mn = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+              monthLabel = `${mn[parseInt(parts[2]) - 1]}-${parts[3]}`;
+            }
+          }
+        }
+        const paymentDueDate = meta?.paymentDueDate || "";
+        let lastDate = "";
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
+              {/* Modal Header */}
+              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+                <h2 className="text-lg font-semibold text-gray-900">Kafi Commodities Format</h2>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => { setShowPreview(false); downloadExcel(); }}
+                    className="px-3 py-1.5 rounded-lg text-sm bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Download className="w-3.5 h-3.5" /> Download
+                  </button>
+                  <button
+                    onClick={() => setShowPreview(false)}
+                    className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition cursor-pointer"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Modal Body */}
+              <div className="overflow-auto flex-1 p-6">
+                <table className="w-full border-collapse text-sm text-gray-800">
+                  {/* Meta rows */}
+                  <tbody>
+                    <tr>
+                      <td colSpan={5} className="py-1.5 text-base font-bold text-gray-900">{cardholderName}</td>
+                    </tr>
+                    <tr>
+                      <td colSpan={5} className="py-1.5 font-semibold text-gray-700">SCB Credit Card # {cardLast4}</td>
+                    </tr>
+                    <tr>
+                      <td colSpan={5} className="py-1.5 text-gray-600">Month Of {monthLabel || "N/A"}</td>
+                    </tr>
+                    <tr>
+                      <td colSpan={5} className="py-1.5 pb-4 text-gray-600">
+                        {paymentDueDate ? `Payment Due Date  : ${paymentDueDate}` : ""}
+                      </td>
+                    </tr>
+
+                    {/* Table header */}
+                    <tr className="bg-gray-100 border-y border-gray-300">
+                      <th className="px-3 py-2 text-left font-semibold w-12">S.No</th>
+                      <th className="px-3 py-2 text-left font-semibold w-28">Date</th>
+                      <th className="px-3 py-2 text-left font-semibold">Description</th>
+                      <th className="px-3 py-2 text-left font-semibold w-32">USD Txn</th>
+                      <th className="px-3 py-2 text-right font-semibold w-28">Amount</th>
+                    </tr>
+
+                    {/* Transaction rows */}
+                    {debits.map((txn, i) => {
+                      const showDate = txn.date !== lastDate;
+                      if (txn.date) lastDate = txn.date;
+                      return (
+                        <tr key={txn.id} className="border-b border-gray-200 hover:bg-gray-50">
+                          <td className="px-3 py-1.5 text-gray-500">{i + 1}</td>
+                          <td className="px-3 py-1.5">{showDate ? txn.date : ""}</td>
+                          <td className="px-3 py-1.5">{txn.merchant}</td>
+                          <td className="px-3 py-1.5 text-gray-400"></td>
+                          <td className="px-3 py-1.5 text-right font-mono tabular-nums">{fmt(txn.amountRaw)}</td>
+                        </tr>
+                      );
+                    })}
+
+                    {/* Spacer */}
+                    <tr><td colSpan={5} className="py-2" /></tr>
+
+                    {/* Totals */}
+                    <tr className="border-t-2 border-gray-400 font-semibold">
+                      <td colSpan={3} className="px-3 py-2 text-right">Total</td>
+                      <td></td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt(totalSpendRaw)}</td>
+                    </tr>
+                    <tr className="font-semibold">
+                      <td colSpan={3} className="px-3 py-2 text-right">ADVANCE PAYMENTS</td>
+                      <td></td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt(totalPaymentsRaw)}</td>
+                    </tr>
+                    <tr className="font-bold border-t border-gray-300">
+                      <td colSpan={3} className="px-3 py-2 text-right">Payable</td>
+                      <td></td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt(totalSpendRaw - totalPaymentsRaw)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

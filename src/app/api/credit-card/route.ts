@@ -45,6 +45,13 @@ interface Transaction {
   type: "debit" | "credit";
 }
 
+interface StatementMeta {
+  cardholderName: string;
+  cardLast4: string;
+  statementMonth: string;
+  paymentDueDate: string;
+}
+
 interface GroupedHeader {
   header: string;
   total: number;
@@ -95,9 +102,31 @@ function normalizemerchant(raw: string): string {
    ═══════════════════════════════════════════ */
 const pad = (n: number) => String(n).padStart(2, "0");
 
-function parseExcel(buffer: Buffer): Transaction[] {
+function extractMetaFromRows(rows: unknown[][]): StatementMeta {
+  const meta: StatementMeta = { cardholderName: "", cardLast4: "", statementMonth: "", paymentDueDate: "" };
+  for (let i = 0; i < Math.min(15, rows.length); i++) {
+    const cell = String(rows[i]?.[0] ?? "").trim();
+    if (!cell) continue;
+
+    if (/credit\s*card\s*#\s*\d+/i.test(cell)) {
+      const m = cell.match(/(\d{4})\s*$/);
+      if (m) meta.cardLast4 = m[1];
+    } else if (/^month\s+of\s+/i.test(cell)) {
+      meta.statementMonth = cell.replace(/^month\s+of\s+/i, "").trim();
+    } else if (/payment\s*due\s*date/i.test(cell)) {
+      const m = cell.match(/:\s*(.+)$/);
+      if (m) meta.paymentDueDate = m[1].trim();
+    } else if (i === 0 && !cell.includes("#") && /^[A-Za-z ]+$/.test(cell) && cell.length > 3) {
+      meta.cardholderName = cell;
+    }
+  }
+  return meta;
+}
+
+function parseExcel(buffer: Buffer): { transactions: Transaction[]; meta: StatementMeta } {
   const wb = XLSX.read(buffer, { type: "buffer" });
   const transactions: Transaction[] = [];
+  let meta: StatementMeta = { cardholderName: "", cardLast4: "", statementMonth: "", paymentDueDate: "" };
   let idCounter = 1;
 
   for (const name of wb.SheetNames) {
@@ -106,6 +135,9 @@ function parseExcel(buffer: Buffer): Transaction[] {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const data: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1 });
     if (data.length < 2) continue;
+
+    const sheetMeta = extractMetaFromRows(data);
+    if (sheetMeta.cardholderName || sheetMeta.cardLast4) meta = sheetMeta;
 
     // Find header row
     let dateCol = -1, descCol = -1, amtCol = -1, debitCol = -1, creditCol = -1;
@@ -186,7 +218,7 @@ function parseExcel(buffer: Buffer): Transaction[] {
     }
   }
 
-  return transactions;
+  return { transactions, meta };
 }
 
 function parseCSV(text: string): Transaction[] {
@@ -246,7 +278,7 @@ function parseCSV(text: string): Transaction[] {
 /* ═══════════════════════════════════════════
    AI PDF EXTRACTION
    ═══════════════════════════════════════════ */
-async function aiExtractTransactions(buffer: Buffer, fileName: string, password?: string): Promise<{ transactions: Transaction[]; error?: string; passwordRequired?: boolean }> {
+async function aiExtractTransactions(buffer: Buffer, fileName: string, password?: string): Promise<{ transactions: Transaction[]; meta?: StatementMeta; error?: string; passwordRequired?: boolean }> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return { transactions: [], error: `${fileName} needs AI extraction but no API key is configured.` };
@@ -268,13 +300,23 @@ async function aiExtractTransactions(buffer: Buffer, fileName: string, password?
 
     content.push({
       type: "text",
-      text: `Extract ALL transactions from this credit card statement.
+      text: `Extract ALL transactions AND statement metadata from this credit card statement.
 Return a JSON object with this exact structure:
 {
+  "meta": {
+    "cardholderName": "Full Name as printed on statement",
+    "cardLast4": "1234",
+    "statementMonth": "JUN-2026",
+    "paymentDueDate": "26-JUL-2026"
+  },
   "transactions": [
     { "date": "DD-MM-YYYY", "merchant": "Merchant Name", "amount": 1234.56, "type": "debit" }
   ]
 }
+- "meta.cardholderName": the account/cardholder name shown on the statement
+- "meta.cardLast4": the last 4 digits of the credit card number
+- "meta.statementMonth": the billing month in MMM-YYYY format (e.g. DEC-2025)
+- "meta.paymentDueDate": the payment due date in DD-MMM-YYYY format (e.g. 26-JAN-2026)
 - "type" is "debit" for purchases/charges, "credit" for payments/refunds
 - Amount must always be positive
 - Include every single transaction, do not skip any
@@ -295,7 +337,15 @@ Return a JSON object with this exact structure:
     }
 
     const parsed = JSON.parse(jsonMatch[0]) as {
+      meta?: { cardholderName?: string; cardLast4?: string; statementMonth?: string; paymentDueDate?: string };
       transactions?: { date: string; merchant: string; amount: number; type?: string }[];
+    };
+
+    const meta: StatementMeta = {
+      cardholderName: String(parsed.meta?.cardholderName ?? "").trim(),
+      cardLast4: String(parsed.meta?.cardLast4 ?? "").trim(),
+      statementMonth: String(parsed.meta?.statementMonth ?? "").trim(),
+      paymentDueDate: String(parsed.meta?.paymentDueDate ?? "").trim(),
     };
 
     let idCounter = 1;
@@ -312,7 +362,7 @@ Return a JSON object with this exact structure:
       });
     }
 
-    return { transactions };
+    return { transactions, meta };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { transactions: [], error: `AI extraction failed for ${fileName}: ${msg}` };
@@ -370,18 +420,22 @@ export async function POST(request: Request) {
     const ext = file.name.toLowerCase().split(".").pop() ?? "";
 
     let transactions: Transaction[] = [];
+    let meta: StatementMeta = { cardholderName: "", cardLast4: "", statementMonth: "", paymentDueDate: "" };
     let extractionWarning: string | undefined;
 
     if (ext === "csv") {
       transactions = parseCSV(buffer.toString("utf-8"));
     } else if (ext === "xls" || ext === "xlsx") {
-      transactions = parseExcel(buffer);
+      const result = parseExcel(buffer);
+      transactions = result.transactions;
+      meta = result.meta;
     } else if (ext === "pdf") {
       const result = await aiExtractTransactions(buffer, file.name, password);
       if (result.passwordRequired) {
         return Response.json({ passwordRequired: true, fileName: file.name }, { status: 200 });
       }
       transactions = result.transactions;
+      if (result.meta) meta = result.meta;
       if (result.error) extractionWarning = result.error;
     } else {
       return Response.json({ error: `Unsupported file format: .${ext}. Use PDF, XLS, XLSX, or CSV.` }, { status: 400 });
@@ -401,6 +455,7 @@ export async function POST(request: Request) {
       totalSpend: fmt(totalSpend),
       totalPayments: fmt(totalPayments),
       netAmount: fmt(totalSpend - totalPayments),
+      meta,
       groups: grouped.map((g) => ({
         header: g.header,
         total: fmt(Math.abs(g.total)),
