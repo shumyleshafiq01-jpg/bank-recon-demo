@@ -356,7 +356,7 @@ Return a JSON object with this exact structure:
     }
 
     const parsed = JSON.parse(jsonMatch[0]) as {
-      meta?: { cardholderName?: string; cardLast4?: string; statementMonth?: string; paymentDueDate?: string };
+      meta?: { cardholderName?: string; cardLast4?: string; statementMonth?: string; paymentDueDate?: string; previousBalance?: number; purchases?: number; feeAndCharges?: number; payments?: number; currentBalance?: number; minimumAmountDue?: number };
       transactions?: { date: string; merchant: string; amount: number; type?: string }[];
     };
 
