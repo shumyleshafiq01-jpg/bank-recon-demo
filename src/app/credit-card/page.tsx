@@ -233,29 +233,23 @@ export default function CreditCardPage() {
     scbRows.push([`SCB Credit Card # ${cardLast4}`]);
     scbRows.push([`Month Of ${monthLabel || "N/A"}`]);
     scbRows.push([paymentDueDate ? `Payment Due Date  : ${paymentDueDate}` : ""]);
-    scbRows.push(["S.No", "Date", "Description", "USD Transction ", "Amount"]);
+    scbRows.push(["S.No", "Description", "Amount"]);
 
-    let sno = 0;
-    let lastDate = "";
-    for (const txn of debits) {
-      sno++;
-      const showDate = txn.date !== lastDate ? txn.date : null;
-      if (txn.date) lastDate = txn.date;
-      scbRows.push([sno, showDate, txn.merchant, null, txn.amountRaw]);
-    }
+    const debitGroups = results.groups.filter(g => g.totalRaw > 0);
+    debitGroups.forEach((group, i) => {
+      scbRows.push([i + 1, group.header, Math.abs(group.totalRaw)]);
+    });
 
     scbRows.push([]);
-    scbRows.push([null, null, "Total", null, totalSpendRaw]);
-    scbRows.push([null, null, "ADVANCE PAYMENTS", null, totalPaymentsRaw]);
-    scbRows.push([null, null, "Payable ", null, totalSpendRaw - totalPaymentsRaw]);
+    scbRows.push([null, "Total", totalSpendRaw]);
+    scbRows.push([null, "ADVANCE PAYMENTS", totalPaymentsRaw]);
+    scbRows.push([null, "Payable ", totalSpendRaw - totalPaymentsRaw]);
 
     const ws2 = XLSX.utils.aoa_to_sheet(scbRows);
     ws2["!cols"] = [
       { wch: 6 },  // S.No
-      { wch: 14 }, // Date
-      { wch: 35 }, // Description
-      { wch: 18 }, // USD Transaction
-      { wch: 16 }, // Amount
+      { wch: 40 }, // Description
+      { wch: 18 }, // Amount
     ];
     XLSX.utils.book_append_sheet(wb, ws2, "Kafi Commodities Format");
 
@@ -629,7 +623,6 @@ export default function CreditCardPage() {
           }
         }
         const paymentDueDate = meta?.paymentDueDate || "";
-        let lastDate = "";
 
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -659,16 +652,16 @@ export default function CreditCardPage() {
                   {/* Meta rows */}
                   <tbody>
                     <tr>
-                      <td colSpan={5} className="py-1.5 text-base font-bold text-gray-900">{cardholderName}</td>
+                      <td colSpan={3} className="py-1.5 text-base font-bold text-gray-900">{cardholderName}</td>
                     </tr>
                     <tr>
-                      <td colSpan={5} className="py-1.5 font-semibold text-gray-700">SCB Credit Card # {cardLast4}</td>
+                      <td colSpan={3} className="py-1.5 font-semibold text-gray-700">SCB Credit Card # {cardLast4}</td>
                     </tr>
                     <tr>
-                      <td colSpan={5} className="py-1.5 text-gray-600">Month Of {monthLabel || "N/A"}</td>
+                      <td colSpan={3} className="py-1.5 text-gray-600">Month Of {monthLabel || "N/A"}</td>
                     </tr>
                     <tr>
-                      <td colSpan={5} className="py-1.5 pb-4 text-gray-600">
+                      <td colSpan={3} className="py-1.5 pb-4 text-gray-600">
                         {paymentDueDate ? `Payment Due Date  : ${paymentDueDate}` : ""}
                       </td>
                     </tr>
@@ -676,44 +669,33 @@ export default function CreditCardPage() {
                     {/* Table header */}
                     <tr className="bg-gray-100 border-y border-gray-300">
                       <th className="px-3 py-2 text-left font-semibold w-12">S.No</th>
-                      <th className="px-3 py-2 text-left font-semibold w-28">Date</th>
                       <th className="px-3 py-2 text-left font-semibold">Description</th>
-                      <th className="px-3 py-2 text-left font-semibold w-32">USD Txn</th>
                       <th className="px-3 py-2 text-right font-semibold w-28">Amount</th>
                     </tr>
 
-                    {/* Transaction rows */}
-                    {debits.map((txn, i) => {
-                      const showDate = txn.date !== lastDate;
-                      if (txn.date) lastDate = txn.date;
-                      return (
-                        <tr key={txn.id} className="border-b border-gray-200 hover:bg-gray-50">
-                          <td className="px-3 py-1.5 text-gray-500">{i + 1}</td>
-                          <td className="px-3 py-1.5">{showDate ? txn.date : ""}</td>
-                          <td className="px-3 py-1.5">{txn.merchant}</td>
-                          <td className="px-3 py-1.5 text-gray-400"></td>
-                          <td className="px-3 py-1.5 text-right font-mono tabular-nums">{fmt(txn.amountRaw)}</td>
-                        </tr>
-                      );
-                    })}
+                    {/* Grouped merchant rows */}
+                    {results.groups.filter(g => g.totalRaw > 0).map((group, i) => (
+                      <tr key={group.header} className="border-b border-gray-200 hover:bg-gray-50">
+                        <td className="px-3 py-1.5 text-gray-500">{i + 1}</td>
+                        <td className="px-3 py-1.5">{group.header}</td>
+                        <td className="px-3 py-1.5 text-right font-mono tabular-nums">{fmt(Math.abs(group.totalRaw))}</td>
+                      </tr>
+                    ))}
 
                     {/* Spacer */}
-                    <tr><td colSpan={5} className="py-2" /></tr>
+                    <tr><td colSpan={3} className="py-2" /></tr>
 
                     {/* Totals */}
                     <tr className="border-t-2 border-gray-400 font-semibold">
-                      <td colSpan={3} className="px-3 py-2 text-right">Total</td>
-                      <td></td>
+                      <td colSpan={2} className="px-3 py-2 text-right">Total</td>
                       <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt(totalSpendRaw)}</td>
                     </tr>
                     <tr className="font-semibold">
-                      <td colSpan={3} className="px-3 py-2 text-right">ADVANCE PAYMENTS</td>
-                      <td></td>
+                      <td colSpan={2} className="px-3 py-2 text-right">ADVANCE PAYMENTS</td>
                       <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt(totalPaymentsRaw)}</td>
                     </tr>
                     <tr className="font-bold border-t border-gray-300">
-                      <td colSpan={3} className="px-3 py-2 text-right">Payable</td>
-                      <td></td>
+                      <td colSpan={2} className="px-3 py-2 text-right">Payable</td>
                       <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt(totalSpendRaw - totalPaymentsRaw)}</td>
                     </tr>
                   </tbody>
