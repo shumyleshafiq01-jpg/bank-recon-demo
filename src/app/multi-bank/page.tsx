@@ -4,7 +4,7 @@ import { useState } from "react";
 import {
   ArrowLeft, Upload, FileText, Loader2,
   ChevronRight, X, Building2, ChevronDown, ChevronUp,
-  Download, AlertTriangle, CircleCheck, Plus,
+  Download, AlertTriangle, CircleCheck, Plus, Eye,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
@@ -50,6 +50,7 @@ export default function MultiBankPage() {
   const [showLedgerUn, setShowLedgerUn] = useState(true);
   const [expandedDoc, setExpandedDoc] = useState<number | null>(null);
   const [expandedDesc, setExpandedDesc] = useState<number | null>(null);
+  const [showHeadPreview, setShowHeadPreview] = useState(false);
   const [passwords, setPasswords] = useState<Record<string, string>>({});
   const [passwordPrompt, setPasswordPrompt] = useState<string[] | null>(null);
   const [passwordInputs, setPasswordInputs] = useState<Record<string, string>>({});
@@ -117,6 +118,18 @@ export default function MultiBankPage() {
     setBankFiles([]); setBankSelections({}); setLedgerFile(null); setResults(null); setError("");
   }
 
+  function getBankHeadGroups() {
+    if (!results) return [];
+    const map: Record<string, { debit: number; credit: number }> = {};
+    for (const r of results.bankUnresolved) {
+      const key = r.particulars.trim();
+      if (!map[key]) map[key] = { debit: 0, credit: 0 };
+      map[key].debit += r.debit;
+      map[key].credit += r.credit;
+    }
+    return Object.entries(map).map(([name, totals]) => ({ name, ...totals }));
+  }
+
   function downloadXLS() {
     if (!results) return;
     const wb = XLSX.utils.book_new();
@@ -138,6 +151,16 @@ export default function MultiBankPage() {
     const ws2 = XLSX.utils.aoa_to_sheet(ledgerRows);
     ws2["!cols"] = [{ wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 30 }, { wch: 16 }, { wch: 16 }];
     XLSX.utils.book_append_sheet(wb, ws2, "Ledger Unresolved");
+
+    const groups = getBankHeadGroups();
+    const headRows: (string | number)[][] = [
+      ["S.No", "Particulars", "Debit", "Credit"],
+      ...groups.map((g, i) => [i + 1, g.name, g.debit || "", g.credit || ""] as (string | number)[]),
+      ["", "TOTAL", groups.reduce((s, g) => s + g.debit, 0), groups.reduce((s, g) => s + g.credit, 0)],
+    ];
+    const ws3 = XLSX.utils.aoa_to_sheet(headRows);
+    ws3["!cols"] = [{ wch: 6 }, { wch: 35 }, { wch: 16 }, { wch: 16 }];
+    XLSX.utils.book_append_sheet(wb, ws3, "TOTAL HEAD");
 
     XLSX.writeFile(wb, "Multi-Bank-Adjustments-Report.xlsx");
   }
@@ -510,8 +533,60 @@ export default function MultiBankPage() {
                 )}
               </div>
 
+              {/* Total Head Preview Modal */}
+              {showHeadPreview && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowHeadPreview(false)}>
+                  <div className="bg-surface rounded-2xl border border-border max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+                      <h3 className="text-sm font-semibold text-foreground">TOTAL HEAD — Bank Entries by Particulars</h3>
+                      <div className="flex items-center gap-2">
+                        <button onClick={downloadXLS} className="text-xs px-3 py-1.5 bg-violet-500 hover:bg-violet-500/80 text-white rounded-lg cursor-pointer transition-colors flex items-center gap-1.5">
+                          <Download className="w-3 h-3" /> Download XLS
+                        </button>
+                        <button onClick={() => setShowHeadPreview(false)} className="text-muted hover:text-foreground cursor-pointer"><X className="w-4 h-4" /></button>
+                      </div>
+                    </div>
+                    <div className="overflow-auto p-5">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="bg-violet-500/10 text-violet-400">
+                            <th className="px-3 py-2.5 text-left font-semibold w-[50px]">S.No</th>
+                            <th className="px-3 py-2.5 text-left font-semibold">Particulars</th>
+                            <th className="px-3 py-2.5 text-right font-semibold w-[120px]">Debit</th>
+                            <th className="px-3 py-2.5 text-right font-semibold w-[120px]">Credit</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {getBankHeadGroups().map((g, i) => (
+                            <tr key={i} className={i % 2 === 0 ? "" : "bg-surface-light/20"}>
+                              <td className="px-3 py-2 text-muted">{i + 1}</td>
+                              <td className="px-3 py-2 text-foreground">{g.name}</td>
+                              <td className="px-3 py-2 text-right text-red-400 font-mono">{fmt(g.debit)}</td>
+                              <td className="px-3 py-2 text-right text-emerald-400 font-mono">{fmt(g.credit)}</td>
+                            </tr>
+                          ))}
+                          {(() => { const groups = getBankHeadGroups(); return (
+                            <tr className="bg-violet-500/5 font-semibold border-t border-border">
+                              <td className="px-3 py-2.5" />
+                              <td className="px-3 py-2.5 text-foreground">TOTAL</td>
+                              <td className="px-3 py-2.5 text-right text-red-400 font-mono">{fmt(groups.reduce((s, g) => s + g.debit, 0))}</td>
+                              <td className="px-3 py-2.5 text-right text-emerald-400 font-mono">{fmt(groups.reduce((s, g) => s + g.credit, 0))}</td>
+                            </tr>
+                          ); })()}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Actions */}
               <div className="flex gap-3">
+                <button onClick={() => setShowHeadPreview(true)}
+                  className="flex items-center justify-center gap-2 bg-surface hover:bg-surface-light border border-violet-500/30 text-violet-400 font-semibold py-3 px-5 rounded-xl transition-all cursor-pointer">
+                  <Eye className="w-4 h-4" />
+                  View Total Head
+                </button>
                 <button onClick={downloadXLS}
                   className="flex-1 flex items-center justify-center gap-2 bg-violet-500 hover:bg-violet-500/80 text-white font-semibold py-3 rounded-xl transition-all cursor-pointer">
                   <Download className="w-4 h-4" />
