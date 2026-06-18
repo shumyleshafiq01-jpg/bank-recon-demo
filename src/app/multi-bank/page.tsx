@@ -48,6 +48,8 @@ export default function MultiBankPage() {
   const [results, setResults] = useState<Results | null>(null);
   const [showBankUn, setShowBankUn] = useState(true);
   const [showLedgerUn, setShowLedgerUn] = useState(true);
+  const [expandedDoc, setExpandedDoc] = useState<number | null>(null);
+  const [expandedDesc, setExpandedDesc] = useState<number | null>(null);
   const [passwords, setPasswords] = useState<Record<string, string>>({});
   const [passwordPrompt, setPasswordPrompt] = useState<string[] | null>(null);
   const [passwordInputs, setPasswordInputs] = useState<Record<string, string>>({});
@@ -382,7 +384,15 @@ export default function MultiBankPage() {
                 </button>
                 {showBankUn && results.bankUnresolved.length > 0 && (
                   <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
+                    <table className="w-full text-xs table-fixed">
+                      <colgroup>
+                        <col className="w-[40px]" />
+                        <col className="w-[90px]" />
+                        <col />
+                        <col className="w-[80px]" />
+                        <col className="w-[110px]" />
+                        <col className="w-[110px]" />
+                      </colgroup>
                       <thead>
                         <tr className="bg-violet-500/10 text-violet-400">
                           <th className="px-3 py-2.5 text-left font-semibold">#</th>
@@ -398,10 +408,10 @@ export default function MultiBankPage() {
                           <tr key={i} className={i % 2 === 0 ? "" : "bg-surface-light/20"}>
                             <td className="px-3 py-2 text-muted">{i + 1}</td>
                             <td className="px-3 py-2 text-muted whitespace-nowrap">{r.date}</td>
-                            <td className="px-3 py-2 text-foreground">{r.particulars}</td>
-                            <td className="px-3 py-2 text-violet-400 text-xs whitespace-nowrap">{r.source}</td>
-                            <td className="px-3 py-2 text-right text-red-400 font-mono">{fmt(r.debit)}</td>
-                            <td className="px-3 py-2 text-right text-emerald-400 font-mono">{fmt(r.credit)}</td>
+                            <td className="px-3 py-2 text-foreground truncate" title={r.particulars}>{r.particulars}</td>
+                            <td className="px-3 py-2 text-violet-400 text-xs truncate">{r.source}</td>
+                            <td className="px-3 py-2 text-right text-red-400 font-mono whitespace-nowrap">{fmt(r.debit)}</td>
+                            <td className="px-3 py-2 text-right text-emerald-400 font-mono whitespace-nowrap">{fmt(r.credit)}</td>
                           </tr>
                         ))}
                         <tr className="bg-violet-500/5 font-semibold border-t border-border">
@@ -433,7 +443,16 @@ export default function MultiBankPage() {
                 </button>
                 {showLedgerUn && results.ledgerUnresolved.length > 0 && (
                   <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
+                    <table className="w-full text-xs table-fixed">
+                      <colgroup>
+                        <col className="w-[40px]" />
+                        <col className="w-[80px]" />
+                        <col className="w-[70px]" />
+                        <col />
+                        <col className="w-[200px]" />
+                        <col className="w-[110px]" />
+                        <col className="w-[110px]" />
+                      </colgroup>
                       <thead>
                         <tr className="bg-warning/10 text-warning">
                           <th className="px-3 py-2.5 text-left font-semibold">#</th>
@@ -450,11 +469,31 @@ export default function MultiBankPage() {
                           <tr key={i} className={i % 2 === 0 ? "" : "bg-surface-light/20"}>
                             <td className="px-3 py-2 text-muted">{i + 1}</td>
                             <td className="px-3 py-2 text-muted whitespace-nowrap">{r.date}</td>
-                            <td className="px-3 py-2 text-foreground whitespace-nowrap">{r.ref || "—"}</td>
-                            <td className="px-3 py-2 text-foreground whitespace-nowrap">{r.doc || "—"}</td>
-                            <td className="px-3 py-2 text-foreground truncate max-w-[200px]">{r.desc}</td>
-                            <td className="px-3 py-2 text-right text-red-400 font-mono">{fmt(r.debit)}</td>
-                            <td className="px-3 py-2 text-right text-emerald-400 font-mono">{fmt(r.credit)}</td>
+                            <td className="px-3 py-2 text-foreground truncate">{r.ref || "—"}</td>
+                            <td className="px-3 py-2 text-foreground">
+                              {r.doc ? (
+                                <button
+                                  onClick={() => setExpandedDoc(expandedDoc === i ? null : i)}
+                                  className={`text-left cursor-pointer hover:text-violet-400 transition-colors ${expandedDoc === i ? "whitespace-normal break-all" : "truncate block w-full"}`}
+                                  title={r.doc}
+                                >
+                                  {r.doc}
+                                </button>
+                              ) : "—"}
+                            </td>
+                            <td className="px-3 py-2 text-foreground">
+                              {r.desc ? (
+                                <button
+                                  onClick={() => setExpandedDesc(expandedDesc === i ? null : i)}
+                                  className={`text-left cursor-pointer hover:text-violet-400 transition-colors ${expandedDesc === i ? "whitespace-normal break-all" : "truncate block w-full"}`}
+                                  title={r.desc}
+                                >
+                                  {r.desc}
+                                </button>
+                              ) : "—"}
+                            </td>
+                            <td className="px-3 py-2 text-right text-red-400 font-mono whitespace-nowrap">{fmt(r.debit)}</td>
+                            <td className="px-3 py-2 text-right text-emerald-400 font-mono whitespace-nowrap">{fmt(r.credit)}</td>
                           </tr>
                         ))}
                         <tr className="bg-warning/5 font-semibold border-t border-border">
