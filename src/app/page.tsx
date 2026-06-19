@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useCallback } from "react";
 import {
   Landmark, DollarSign, Package, Users, Bot,
-  ArrowRight, Sparkles, UserCheck, ClipboardList, Banknote,
+  ArrowRight, Sparkles, UserCheck, ClipboardList,
 } from "lucide-react";
 
 type Node = { x: number; y: number; vx: number; vy: number; radius: number };
@@ -143,17 +143,6 @@ const AGENTS = [
     iconBg: "bg-blue-100",
     iconColor: "text-blue-600",
     route: "/login",
-  },
-  {
-    name: "Fund Estimation Work Space",
-    status: "wip",
-    statusLabel: "WIP",
-    statusColor: "bg-indigo-100 text-indigo-600",
-    desc: "Live collaborative ledger — multi-bank balances, PDC tracking, real-time workspace",
-    icon: Banknote,
-    iconBg: "bg-indigo-100",
-    iconColor: "text-indigo-600",
-    route: "/fund-estimator",
   },
   {
     name: "AI Agent Cost / Budgeting",
