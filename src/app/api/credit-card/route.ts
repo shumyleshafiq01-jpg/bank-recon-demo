@@ -43,8 +43,25 @@ async function extractPdfText(buffer: Buffer, password?: string): Promise<{ text
 /* ═══════════════════════════════════════════
    OCR FOR SCANNED PDFs
    ═══════════════════════════════════════════ */
-async function ocrPdf(buffer: Buffer, password?: string): Promise<{ text: string; needsPassword: boolean }> {
+function ocrAvailable(): boolean {
   try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require("canvas");
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require("tesseract.js");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function ocrPdf(buffer: Buffer, password?: string): Promise<{ text: string; needsPassword: boolean; error?: string }> {
+  if (!ocrAvailable()) {
+    return { text: "", needsPassword: false, error: "OCR is not available in this environment. Please enable AI mode for scanned PDFs." };
+  }
+
+  const TIMEOUT_MS = 120_000;
+  const ocrWork = async (): Promise<{ text: string; needsPassword: boolean }> => {
     const PDFJS = getPDFJS();
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { createCanvas } = require("canvas");
@@ -75,12 +92,23 @@ async function ocrPdf(buffer: Buffer, password?: string): Promise<{ text: string
 
     doc.destroy();
     return { text: fullText, needsPassword: false };
+  };
+
+  try {
+    const result = await Promise.race([
+      ocrWork(),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("OCR_TIMEOUT")), TIMEOUT_MS)),
+    ]);
+    return result;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (/password/i.test(msg) || /PasswordException/i.test(msg) || /encrypted/i.test(msg)) {
       return { text: "", needsPassword: true };
     }
-    return { text: "", needsPassword: false };
+    if (msg === "OCR_TIMEOUT") {
+      return { text: "", needsPassword: false, error: "OCR timed out — this PDF has too many pages for local processing. Please enable AI mode." };
+    }
+    return { text: "", needsPassword: false, error: `OCR failed: ${msg}` };
   }
 }
 
@@ -692,6 +720,9 @@ export async function POST(request: Request) {
           const ocr = await ocrPdf(buffer, password);
           if (ocr.needsPassword) {
             return Response.json({ passwordRequired: true, fileName: file.name }, { status: 200 });
+          }
+          if (ocr.error) {
+            extractionWarning = ocr.error;
           }
           textForParsing = ocr.text;
         }
