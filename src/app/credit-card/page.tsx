@@ -125,6 +125,9 @@ export default function CreditCardPage() {
       if (!res.ok) throw new Error(data.error ?? "Upload failed");
       setResults(data);
       setExpanded(new Set(data.groups.map((g: MerchantGroup) => g.header)));
+      if (data.usage) {
+        fetch("/api/usage", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ module: "Credit Card", model: data.usage.model, input_tokens: data.usage.input_tokens, output_tokens: data.usage.output_tokens }) }).catch(() => {});
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

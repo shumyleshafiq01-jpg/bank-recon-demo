@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import * as XLSX from "xlsx";
+import { calcCost } from "@/lib/usage-tracker";
 
 /* ═══════════════════════════════════════════
    PDF WITH PASSWORD SUPPORT
@@ -526,7 +527,9 @@ function parsePdfLocal(pdfText: string): { transactions: Transaction[]; meta: St
 /* ═══════════════════════════════════════════
    AI PDF EXTRACTION
    ═══════════════════════════════════════════ */
-async function aiExtractTransactions(buffer: Buffer, fileName: string, password?: string): Promise<{ transactions: Transaction[]; meta?: StatementMeta; error?: string; passwordRequired?: boolean }> {
+interface TokenUsage { input_tokens: number; output_tokens: number; model: string; }
+
+async function aiExtractTransactions(buffer: Buffer, fileName: string, password?: string): Promise<{ transactions: Transaction[]; meta?: StatementMeta; error?: string; passwordRequired?: boolean; usage?: TokenUsage }> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return { transactions: [], error: `${fileName} needs AI extraction but no API key is configured.` };
@@ -590,11 +593,17 @@ Return a JSON object with this exact structure:
       messages: [{ role: "user", content }],
     }).finalMessage();
 
+    const usage: TokenUsage = {
+      input_tokens: response.usage?.input_tokens ?? 0,
+      output_tokens: response.usage?.output_tokens ?? 0,
+      model: "claude-sonnet-4-6",
+    };
+
     const textBlock = response.content.find((b) => b.type === "text");
     const raw = textBlock && textBlock.type === "text" ? textBlock.text : "";
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      return { transactions: [], error: `Could not extract transactions from ${fileName}.` };
+      return { transactions: [], error: `Could not extract transactions from ${fileName}.`, usage };
     }
 
     const parsed = JSON.parse(jsonMatch[0]) as {
@@ -630,7 +639,7 @@ Return a JSON object with this exact structure:
       });
     }
 
-    return { transactions, meta };
+    return { transactions, meta, usage };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { transactions: [], error: `AI extraction failed for ${fileName}: ${msg}` };
@@ -691,6 +700,7 @@ export async function POST(request: Request) {
     let transactions: Transaction[] = [];
     let meta: StatementMeta = { cardholderName: "", cardLast4: "", statementMonth: "", paymentDueDate: "", previousBalance: null, purchases: null, feeAndCharges: null, payments: null, currentBalance: null, minimumAmountDue: null };
     let extractionWarning: string | undefined;
+    let apiUsage: TokenUsage | undefined;
 
     if (ext === "csv") {
       transactions = parseCSV(buffer.toString("utf-8"));
@@ -712,6 +722,7 @@ export async function POST(request: Request) {
         transactions = result.transactions;
         if (result.meta) meta = result.meta;
         if (result.error) extractionWarning = result.error;
+        if (result.usage) apiUsage = result.usage;
       } else {
         const hasText = pdfText.replace(/\s/g, "").length > 100;
         let textForParsing = pdfText;
@@ -768,6 +779,7 @@ export async function POST(request: Request) {
         })),
       })),
       warning: extractionWarning,
+      usage: apiUsage ? { ...apiUsage, cost_usd: Math.round(calcCost(apiUsage.model, apiUsage.input_tokens, apiUsage.output_tokens) * 10000) / 10000 } : null,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

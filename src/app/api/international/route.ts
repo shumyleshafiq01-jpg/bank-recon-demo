@@ -14,6 +14,7 @@ export const runtime = "nodejs";
 
 import * as XLSX from "xlsx";
 import Anthropic from "@anthropic-ai/sdk";
+import { logUsage } from "@/lib/usage-tracker";
 
 type BankEntry = {
   date: string;
@@ -263,6 +264,10 @@ async function parseBankPdf(buffer: Buffer, fileName: string): Promise<AIResult>
       max_tokens: 32000,
       messages: [{ role: "user", content: [block, { type: "text", text: AI_EXTRACT_PROMPT }] }],
     }).finalMessage();
+
+    if (response.usage) {
+      logUsage("International", "claude-sonnet-4-6", response.usage.input_tokens, response.usage.output_tokens);
+    }
 
     const textBlock = response.content.find((b) => b.type === "text");
     const raw = textBlock && textBlock.type === "text" ? textBlock.text : "";

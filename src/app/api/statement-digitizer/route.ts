@@ -16,6 +16,7 @@ export const maxDuration = 300;
 export const runtime = "nodejs";
 
 import Anthropic from "@anthropic-ai/sdk";
+import { logUsage } from "@/lib/usage-tracker";
 
 /* ── PDF text extraction with password support ── */
 
@@ -203,6 +204,10 @@ async function callAI(
     max_tokens: 32000,
     messages: [{ role: "user", content: blocks }],
   }).finalMessage();
+
+  if (response.usage) {
+    logUsage("Statement Digitizer", "claude-sonnet-4-6", response.usage.input_tokens, response.usage.output_tokens);
+  }
 
   const textBlock = response.content.find((b) => b.type === "text");
   return textBlock && textBlock.type === "text" ? textBlock.text : "";

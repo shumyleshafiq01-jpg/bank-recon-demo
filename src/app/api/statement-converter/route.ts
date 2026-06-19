@@ -15,6 +15,7 @@ export const runtime = "nodejs";
 
 import * as XLSX from "xlsx";
 import Anthropic from "@anthropic-ai/sdk";
+import { logUsage } from "@/lib/usage-tracker";
 
 const CONVERT_PROMPT = `This is a bank statement from a Pakistani bank. Extract EVERY transaction row from ALL pages.
 
@@ -119,6 +120,10 @@ async function convertFile(file: File, bankHint: string): Promise<ConvertResult>
       max_tokens: 32000,
       messages: [{ role: "user", content: [block, { type: "text", text: prompt }] }],
     }).finalMessage();
+
+    if (response.usage) {
+      logUsage("Statement Converter", "claude-sonnet-4-6", response.usage.input_tokens, response.usage.output_tokens);
+    }
 
     const textBlock = response.content.find((b) => b.type === "text");
     const raw = textBlock && textBlock.type === "text" ? textBlock.text : "";

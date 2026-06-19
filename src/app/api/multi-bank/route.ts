@@ -14,6 +14,7 @@ export const runtime = "nodejs";
 
 import * as XLSX from "xlsx";
 import Anthropic from "@anthropic-ai/sdk";
+import { logUsage } from "@/lib/usage-tracker";
 
 type BankEntry = {
   date: string;       // DD-MM-YYYY
@@ -926,6 +927,10 @@ async function aiExtractCall(
     max_tokens: 32000,
     messages: [{ role: "user", content: [firstBlock, { type: "text", text: EXTRACT_PROMPT }] }],
   }).finalMessage();
+
+  if (response.usage) {
+    logUsage("Multi-Bank", "claude-sonnet-4-6", response.usage.input_tokens, response.usage.output_tokens);
+  }
 
   const textBlock = response.content.find((b) => b.type === "text");
   const raw = textBlock && textBlock.type === "text" ? textBlock.text : "";

@@ -14,6 +14,7 @@ export const maxDuration = 300;
 export const runtime = "nodejs";
 
 import Anthropic from "@anthropic-ai/sdk";
+import { logUsage } from "@/lib/usage-tracker";
 
 const EXTRACT_PROMPT = `You are extracting line items from a vendor quotation / price quote.
 
@@ -159,6 +160,10 @@ async function parseQuotation(file: File, category: string): Promise<ParsedQuota
       max_tokens: 16000,
       messages: [{ role: "user", content: contentBlocks }],
     }).finalMessage();
+
+    if (response.usage) {
+      logUsage("Quotations", "claude-sonnet-4-6", response.usage.input_tokens, response.usage.output_tokens);
+    }
 
     const textBlock = response.content.find((b) => b.type === "text");
     const raw = textBlock && textBlock.type === "text" ? textBlock.text : "";

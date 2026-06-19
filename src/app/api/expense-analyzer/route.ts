@@ -2,6 +2,7 @@ export const maxDuration = 300;
 export const runtime = "nodejs";
 
 import Anthropic from "@anthropic-ai/sdk";
+import { logUsage } from "@/lib/usage-tracker";
 
 const anthropic = new Anthropic();
 
@@ -340,6 +341,10 @@ Statement text:
 ${text}`
     }],
   });
+
+  if (resp.usage) {
+    logUsage("Expense Analyzer", "claude-sonnet-4-6", resp.usage.input_tokens, resp.usage.output_tokens);
+  }
 
   const content = resp.content[0];
   if (content.type !== "text") return [];

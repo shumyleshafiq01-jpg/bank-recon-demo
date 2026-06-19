@@ -4,6 +4,7 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
+import { logUsage } from "@/lib/usage-tracker";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
@@ -57,6 +58,10 @@ export async function POST(request: Request) {
       system: SYSTEM_PROMPT + contextStr,
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
     });
+
+    if (response.usage) {
+      logUsage("Chat", "claude-sonnet-4-5", response.usage.input_tokens, response.usage.output_tokens);
+    }
 
     const reply = response.content
       .filter((b): b is Anthropic.TextBlock => b.type === "text")

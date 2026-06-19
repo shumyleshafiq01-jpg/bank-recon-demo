@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, useRef, useCallback } from "react";
 import {
   Landmark, ArrowRight, Clock, User, Building2, CreditCard,
-  Globe, FileText, LogOut, Scale, Timer, BookOpen, Wallet, Banknote,
+  Globe, FileText, LogOut, Scale, Timer, BookOpen, Wallet, Banknote, Zap,
 } from "lucide-react";
 
 const TESTING_DEADLINE = new Date("2026-06-20T12:00:00Z").getTime();
@@ -272,6 +272,7 @@ export default function DashboardPage() {
   const [session, setSession] = useState<Session>(null);
   const [checked, setChecked] = useState(false);
   const [remaining, setRemaining] = useState("");
+  const [apiUsage, setApiUsage] = useState<{ totalCost: number; totalCalls: number } | null>(null);
 
   useEffect(() => {
     try {
@@ -291,6 +292,10 @@ export default function DashboardPage() {
     }
     setChecked(true);
   }, [router]);
+
+  useEffect(() => {
+    fetch("/api/usage").then((r) => r.json()).then((d) => setApiUsage(d)).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!session || session.type !== "testing") return;
@@ -383,12 +388,17 @@ export default function DashboardPage() {
           </div>
           <div className="bg-white/70 backdrop-blur rounded-xl border border-gray-200/80 p-4 shadow-sm">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-emerald-100 flex items-center justify-center">
-                <Landmark className="w-4 h-4 text-emerald-600" />
+              <div className="w-9 h-9 rounded-lg bg-purple-100 flex items-center justify-center">
+                <Zap className="w-4 h-4 text-purple-600" />
               </div>
               <div>
-                <p className="text-[11px] text-gray-400 uppercase tracking-wide font-medium">Status</p>
-                <p className="text-xl font-bold text-emerald-600">Ready</p>
+                <p className="text-[11px] text-gray-400 uppercase tracking-wide font-medium">API Credits Used</p>
+                <p className="text-xl font-bold text-purple-600">
+                  ${apiUsage ? apiUsage.totalCost.toFixed(4) : "—"}
+                </p>
+                {apiUsage && apiUsage.totalCalls > 0 && (
+                  <p className="text-[10px] text-gray-400">{apiUsage.totalCalls} AI call{apiUsage.totalCalls !== 1 ? "s" : ""}</p>
+                )}
               </div>
             </div>
           </div>
