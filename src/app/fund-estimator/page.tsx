@@ -213,7 +213,7 @@ export default function FundEstimatorPage() {
     if (selectedBank === id) setSelectedBank("");
   }
 
-  function updateRow(rowId: string, field: keyof LedgerRow, value: string | number | null) {
+  function updateRow(rowId: string, field: keyof LedgerRow, value: string | number | boolean | null) {
     if (!selectedBank) return;
     setLedger((prev) => ({
       ...prev,
