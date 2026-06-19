@@ -60,7 +60,7 @@ async function ocrPdf(buffer: Buffer, password?: string): Promise<{ text: string
     return { text: "", needsPassword: false, error: "OCR is not available in this environment. Please enable AI mode for scanned PDFs." };
   }
 
-  const TIMEOUT_MS = 120_000;
+  const TIMEOUT_MS = 30_000;
   const ocrWork = async (): Promise<{ text: string; needsPassword: boolean }> => {
     const PDFJS = getPDFJS();
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -730,7 +730,7 @@ export async function POST(request: Request) {
         const result = parsePdfLocal(textForParsing);
         transactions = result.transactions;
         meta = result.meta;
-        if (transactions.length === 0) {
+        if (transactions.length === 0 && !extractionWarning) {
           extractionWarning = "Local parser could not extract transactions from this PDF. Try enabling AI mode.";
         }
       }
