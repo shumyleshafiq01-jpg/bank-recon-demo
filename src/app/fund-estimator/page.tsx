@@ -39,10 +39,10 @@ interface LedgerRow {
   description: string;
   debit: number | null;
   credit: number | null;
-  aa1Tick: boolean;
-  aa1At: string;
-  aa2Tick: boolean;
-  aa2At: string;
+  aa1Tick?: boolean;
+  aa1At?: string;
+  aa2Tick?: boolean;
+  aa2At?: string;
 }
 
 interface LedgerData {
