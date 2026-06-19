@@ -366,7 +366,7 @@ export default function DashboardPage() {
               </div>
               <div>
                 <p className="text-[11px] text-gray-400 uppercase tracking-wide font-medium">Modules</p>
-                <p className="text-xl font-bold text-gray-900">7</p>
+                <p className="text-xl font-bold text-gray-900">{MODULES.length}</p>
               </div>
             </div>
           </div>
