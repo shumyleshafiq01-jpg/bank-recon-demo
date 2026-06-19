@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   ArrowLeft, Plus, Pencil, Trash2, Building2, ChevronDown,
-  Download, Save, X, Banknote, Eye,
+  Download, Save, X, Banknote, Eye, Lock, Unlock,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
@@ -92,6 +92,7 @@ export default function FundEstimatorPage() {
   const [showBankModal, setShowBankModal] = useState(false);
   const [editingBank, setEditingBank] = useState<BankAccount | null>(null);
   const [showSummary, setShowSummary] = useState(true);
+  const [editMode, setEditMode] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
   // Load from localStorage (seed demo data if empty)
@@ -313,7 +314,7 @@ export default function FundEstimatorPage() {
                 {banks.map((bank) => (
                   <div
                     key={bank.id}
-                    onClick={() => { setSelectedBank(bank.id); setShowSummary(false); }}
+                    onClick={() => { setSelectedBank(bank.id); setShowSummary(false); setEditMode(false); }}
                     className={`relative group p-3 rounded-xl border cursor-pointer transition-all ${
                       selectedBank === bank.id
                         ? "border-indigo-500/60 bg-indigo-500/5"
@@ -427,6 +428,22 @@ export default function FundEstimatorPage() {
                 </div>
               </div>
 
+              {/* Edit Toggle */}
+              <div className="px-5 py-2.5 border-b border-border/50 flex items-center justify-between">
+                <button
+                  onClick={() => setEditMode(!editMode)}
+                  className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg cursor-pointer transition-all font-semibold ${
+                    editMode
+                      ? "bg-amber-500/15 text-amber-400 border border-amber-500/30"
+                      : "bg-surface-light/50 text-muted border border-border hover:text-foreground"
+                  }`}
+                >
+                  {editMode ? <Unlock className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
+                  {editMode ? "Editing — Click to Lock" : "Edit Ledger"}
+                </button>
+                {editMode && <span className="text-[10px] text-amber-400">Ledger is unlocked for editing</span>}
+              </div>
+
               {/* Ledger Table */}
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
@@ -461,7 +478,8 @@ export default function FundEstimatorPage() {
                               type="date"
                               value={row.date}
                               onChange={(e) => updateRow(row.id, "date", e.target.value)}
-                              className="w-full bg-transparent border border-transparent hover:border-border focus:border-indigo-500/50 rounded px-1.5 py-1 text-foreground focus:outline-none text-xs"
+                              disabled={!editMode}
+                              className={`w-full bg-transparent rounded px-1.5 py-1 text-foreground focus:outline-none text-xs ${editMode ? "border border-transparent hover:border-border focus:border-indigo-500/50" : "border border-transparent cursor-default"}`}
                             />
                           </td>
                           <td className="px-2 py-1.5">
@@ -469,7 +487,8 @@ export default function FundEstimatorPage() {
                               type="date"
                               value={row.pdcDate}
                               onChange={(e) => updateRow(row.id, "pdcDate", e.target.value)}
-                              className="w-full bg-transparent border border-transparent hover:border-border focus:border-indigo-500/50 rounded px-1.5 py-1 text-foreground focus:outline-none text-xs"
+                              disabled={!editMode}
+                              className={`w-full bg-transparent rounded px-1.5 py-1 text-foreground focus:outline-none text-xs ${editMode ? "border border-transparent hover:border-border focus:border-indigo-500/50" : "border border-transparent cursor-default"}`}
                             />
                           </td>
                           <td className="px-2 py-1.5">
@@ -482,7 +501,8 @@ export default function FundEstimatorPage() {
                                 updateRow(row.id, "chequeNo", v);
                               }}
                               placeholder="—"
-                              className="w-full bg-transparent border border-transparent hover:border-border focus:border-indigo-500/50 rounded px-1.5 py-1 text-foreground focus:outline-none text-xs"
+                              readOnly={!editMode}
+                              className={`w-full bg-transparent rounded px-1.5 py-1 text-foreground focus:outline-none text-xs ${editMode ? "border border-transparent hover:border-border focus:border-indigo-500/50" : "border border-transparent cursor-default"}`}
                             />
                           </td>
                           <td className="px-2 py-1.5">
@@ -493,8 +513,9 @@ export default function FundEstimatorPage() {
                                 const v = e.target.value.replace(/[^a-zA-Z0-9\s\-/.#&(),@:;'"+=$%!]/g, "");
                                 updateRow(row.id, "description", v);
                               }}
-                              placeholder="Enter description..."
-                              className="w-full bg-transparent border border-transparent hover:border-border focus:border-indigo-500/50 rounded px-1.5 py-1 text-foreground focus:outline-none text-xs"
+                              placeholder={editMode ? "Enter description..." : ""}
+                              readOnly={!editMode}
+                              className={`w-full bg-transparent rounded px-1.5 py-1 text-foreground focus:outline-none text-xs ${editMode ? "border border-transparent hover:border-border focus:border-indigo-500/50" : "border border-transparent cursor-default"}`}
                             />
                           </td>
                           <td className="px-2 py-1.5">
@@ -506,8 +527,9 @@ export default function FundEstimatorPage() {
                                 const v = e.target.value.replace(/[^0-9.]/g, "");
                                 updateRow(row.id, "debit", v === "" ? null : parseFloat(v) || 0);
                               }}
-                              placeholder="—"
-                              className="w-full bg-transparent border border-transparent hover:border-border focus:border-indigo-500/50 rounded px-1.5 py-1 text-right text-red-400 font-mono focus:outline-none text-xs"
+                              placeholder={editMode ? "—" : ""}
+                              readOnly={!editMode}
+                              className={`w-full bg-transparent rounded px-1.5 py-1 text-right text-red-400 font-mono focus:outline-none text-xs ${editMode ? "border border-transparent hover:border-border focus:border-indigo-500/50" : "border border-transparent cursor-default"}`}
                             />
                           </td>
                           <td className="px-2 py-1.5">
@@ -519,8 +541,9 @@ export default function FundEstimatorPage() {
                                 const v = e.target.value.replace(/[^0-9.]/g, "");
                                 updateRow(row.id, "credit", v === "" ? null : parseFloat(v) || 0);
                               }}
-                              placeholder="—"
-                              className="w-full bg-transparent border border-transparent hover:border-border focus:border-indigo-500/50 rounded px-1.5 py-1 text-right text-emerald-400 font-mono focus:outline-none text-xs"
+                              placeholder={editMode ? "—" : ""}
+                              readOnly={!editMode}
+                              className={`w-full bg-transparent rounded px-1.5 py-1 text-right text-emerald-400 font-mono focus:outline-none text-xs ${editMode ? "border border-transparent hover:border-border focus:border-indigo-500/50" : "border border-transparent cursor-default"}`}
                             />
                           </td>
                           <td className={`px-2 py-1.5 text-right font-mono font-semibold ${balance < 0 ? "text-red-400" : "text-foreground"}`}>
@@ -528,9 +551,11 @@ export default function FundEstimatorPage() {
                             {isPdcFuture && <span className="text-[9px] text-amber-400 block">PDC</span>}
                           </td>
                           <td className="px-2 py-1.5">
-                            <button onClick={() => deleteRow(row.id)} className="p-1 text-muted hover:text-red-400 cursor-pointer opacity-0 group-hover:opacity-100 hover:opacity-100 transition-opacity">
-                              <Trash2 className="w-3 h-3" />
-                            </button>
+                            {editMode && (
+                              <button onClick={() => deleteRow(row.id)} className="p-1 text-muted hover:text-red-400 cursor-pointer opacity-0 group-hover:opacity-100 hover:opacity-100 transition-opacity">
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            )}
                           </td>
                         </tr>
                       );
@@ -552,11 +577,13 @@ export default function FundEstimatorPage() {
               )}
 
               {/* Add Row */}
-              <div className="px-5 py-3 border-t border-border">
-                <button onClick={addRow} className="flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 cursor-pointer transition-colors">
-                  <Plus className="w-3 h-3" /> Add Row
-                </button>
-              </div>
+              {editMode && (
+                <div className="px-5 py-3 border-t border-border">
+                  <button onClick={addRow} className="flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 cursor-pointer transition-colors">
+                    <Plus className="w-3 h-3" /> Add Row
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
