@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   ArrowLeft, Plus, Pencil, Trash2, Building2, ChevronDown,
-  Download, Save, X, Banknote, Eye, Lock, Unlock,
+  Download, Save, X, Banknote, Eye, Lock, Unlock, Check, CheckCheck,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
@@ -39,6 +39,10 @@ interface LedgerRow {
   description: string;
   debit: number | null;
   credit: number | null;
+  aa1Tick: boolean;
+  aa1At: string;
+  aa2Tick: boolean;
+  aa2At: string;
 }
 
 interface LedgerData {
@@ -81,6 +85,10 @@ const emptyRow = (): LedgerRow => ({
   description: "",
   debit: null,
   credit: null,
+  aa1Tick: false,
+  aa1At: "",
+  aa2Tick: false,
+  aa2At: "",
 });
 
 /* ═══════════════════════════════════════════
@@ -456,13 +464,15 @@ export default function FundEstimatorPage() {
                       <th className="px-2 py-2.5 text-right font-semibold w-[120px]">Debit</th>
                       <th className="px-2 py-2.5 text-right font-semibold w-[120px]">Credit</th>
                       <th className="px-2 py-2.5 text-right font-semibold w-[130px]">Balance</th>
+                      <th className="px-2 py-2.5 text-center font-semibold w-[50px]" title="Assistant Accountant 1 — Recorded in physical diary">AA1</th>
+                      <th className="px-2 py-2.5 text-center font-semibold w-[50px]" title="Assistant Accountant 2 — Verified physical diary entry">AA2</th>
                       <th className="px-2 py-2.5 w-[36px]"></th>
                     </tr>
                   </thead>
                   <tbody>
                     {currentRows.length === 0 && (
                       <tr>
-                        <td colSpan={10} className="px-4 py-8 text-center text-muted">No entries yet. Click &quot;Add Row&quot; to start.</td>
+                        <td colSpan={12} className="px-4 py-8 text-center text-muted">No entries yet. Click &quot;Add Row&quot; to start.</td>
                       </tr>
                     )}
                     {currentRows.map((row, i) => {
@@ -562,6 +572,48 @@ export default function FundEstimatorPage() {
                           <td className={`px-2 py-1.5 text-right font-mono font-semibold ${balance < 0 ? "text-red-400" : "text-foreground"}`}>
                             {fmt(balance)}
                             {hasPdc && <span className="text-[9px] text-amber-400 block">PDC</span>}
+                          </td>
+                          {/* AA1 — tick for credit or IBFT entries */}
+                          <td className="px-2 py-1.5 text-center">
+                            {(row.credit !== null && row.credit > 0) || row.ibftNo ? (
+                              row.aa1Tick ? (
+                                <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-emerald-500/20" title={`Recorded by AA1${row.aa1At ? ` on ${new Date(row.aa1At).toLocaleString()}` : ""}`}>
+                                  <Check className="w-3 h-3 text-emerald-400" />
+                                </span>
+                              ) : (
+                                <button
+                                  onClick={() => {
+                                    updateRow(row.id, "aa1Tick", true);
+                                    updateRow(row.id, "aa1At", new Date().toISOString());
+                                  }}
+                                  className="inline-flex items-center justify-center w-5 h-5 rounded border border-dashed border-amber-400/50 hover:border-amber-400 hover:bg-amber-500/10 cursor-pointer transition-colors"
+                                  title="Click to confirm entry recorded in physical diary"
+                                >
+                                  <span className="text-[9px] text-amber-400">&#x2713;</span>
+                                </button>
+                              )
+                            ) : null}
+                          </td>
+                          {/* AA2 — verify AA1's tick */}
+                          <td className="px-2 py-1.5 text-center">
+                            {row.aa1Tick ? (
+                              row.aa2Tick ? (
+                                <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-blue-500/20" title={`Verified by AA2${row.aa2At ? ` on ${new Date(row.aa2At).toLocaleString()}` : ""}`}>
+                                  <CheckCheck className="w-3 h-3 text-blue-400" />
+                                </span>
+                              ) : (
+                                <button
+                                  onClick={() => {
+                                    updateRow(row.id, "aa2Tick", true);
+                                    updateRow(row.id, "aa2At", new Date().toISOString());
+                                  }}
+                                  className="inline-flex items-center justify-center w-5 h-5 rounded border border-dashed border-blue-400/50 hover:border-blue-400 hover:bg-blue-500/10 cursor-pointer transition-colors"
+                                  title="Click to confirm physical diary entry verified"
+                                >
+                                  <span className="text-[9px] text-blue-400">&#x2713;</span>
+                                </button>
+                              )
+                            ) : null}
                           </td>
                           <td className="px-2 py-1.5">
                             {editMode && (
