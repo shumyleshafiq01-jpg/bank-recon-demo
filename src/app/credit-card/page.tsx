@@ -5,6 +5,7 @@ import {
   ArrowLeft, Upload, Loader2, CreditCard,
   ChevronDown, ChevronUp, Download, AlertTriangle,
   Check, X, ShoppingBag, Clock, CheckCircle2, Eye,
+  Sparkles, FileText,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
@@ -67,6 +68,7 @@ export default function CreditCardPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [results, setResults] = useState<Results | null>(null);
+  const [useAI, setUseAI] = useState(true);
 
   // Verification state: txnId -> status
   const [verifications, setVerifications] = useState<Record<string, VerifyStatus>>({});
@@ -111,6 +113,7 @@ export default function CreditCardPage() {
     try {
       const fd = new FormData();
       fd.append("statementFile", file);
+      fd.append("useAI", String(useAI));
       if (password) fd.append("password", password);
       const res = await fetch("/api/credit-card", { method: "POST", body: fd });
       const data = await res.json();
@@ -318,6 +321,23 @@ export default function CreditCardPage() {
               )}
             </div>
 
+            {/* AI Toggle */}
+            <div className="flex items-center justify-between bg-background/50 rounded-xl border border-border px-4 py-3">
+              <div className="flex items-center gap-2.5">
+                {useAI ? <Sparkles className="w-4 h-4 text-violet-400" /> : <FileText className="w-4 h-4 text-muted" />}
+                <div>
+                  <p className="text-sm font-semibold text-foreground">{useAI ? "AI Extraction" : "Local Parser"}</p>
+                  <p className="text-[11px] text-muted">{useAI ? "Uses Anthropic API for accurate PDF parsing" : "Regex-based extraction — no API needed"}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setUseAI(!useAI)}
+                className={`relative w-11 h-6 rounded-full transition-colors cursor-pointer ${useAI ? "bg-violet-500" : "bg-muted/30"}`}
+              >
+                <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${useAI ? "translate-x-5" : "translate-x-0"}`} />
+              </button>
+            </div>
+
             {/* Analyze Button */}
             <button
               onClick={() => runAnalysis()}
@@ -327,7 +347,7 @@ export default function CreditCardPage() {
               {loading ? (
                 <span className="flex items-center justify-center gap-2">
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  Parsing Statement…
+                  {useAI ? "Parsing Statement…" : "Processing — OCR may take up to 2 minutes for scanned PDFs…"}
                 </span>
               ) : (
                 <span className="flex items-center justify-center gap-2">

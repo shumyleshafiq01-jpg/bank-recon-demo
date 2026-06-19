@@ -34,6 +34,7 @@ interface LedgerRow {
   id: string;
   date: string;
   pdcDate: string;
+  ibftNo: string;
   chequeNo: string;
   description: string;
   debit: number | null;
@@ -75,6 +76,7 @@ const emptyRow = (): LedgerRow => ({
   id: genId(),
   date: "",
   pdcDate: "",
+  ibftNo: "",
   chequeNo: "",
   description: "",
   debit: null,
@@ -122,21 +124,21 @@ export default function FundEstimatorPage() {
         };
         const demoLedger: LedgerData = {
           demo_soneri_sav: [
-            { id: "s1", date: "2026-06-02", pdcDate: "", chequeNo: "", description: "Profit from 01-Jun to 30-Jun-2026", debit: null, credit: 1250 },
-            { id: "s2", date: "2026-06-02", pdcDate: "", chequeNo: "", description: "15% W/H Tax Deducted", debit: 188, credit: null },
-            { id: "s3", date: "2026-06-05", pdcDate: "", chequeNo: "101001", description: "Cash Cheque Issued to Vendor - Office Supplies", debit: 15000, credit: null },
-            { id: "s4", date: "2026-06-10", pdcDate: "", chequeNo: "", description: "IBFT Received from HMB-156030 Fund Transfer", debit: null, credit: 200000 },
-            { id: "s5", date: "2026-06-12", pdcDate: "2026-07-01", chequeNo: "101002", description: "PDC Cheque to Allied Logistics - Freight Charges Export Inv #2050", debit: 85000, credit: null },
-            { id: "s6", date: "2026-06-15", pdcDate: "", chequeNo: "", description: "Standing Instruction Transfer from HMB-155861", debit: null, credit: 350000 },
+            { id: "s1", date: "2026-06-02", pdcDate: "", ibftNo: "", chequeNo: "", description: "Profit from 01-Jun to 30-Jun-2026", debit: null, credit: 1250 },
+            { id: "s2", date: "2026-06-02", pdcDate: "", ibftNo: "", chequeNo: "", description: "15% W/H Tax Deducted", debit: 188, credit: null },
+            { id: "s3", date: "2026-06-05", pdcDate: "", ibftNo: "", chequeNo: "101001", description: "Cash Cheque Issued to Vendor - Office Supplies", debit: 15000, credit: null },
+            { id: "s4", date: "2026-06-10", pdcDate: "", ibftNo: "98712345", chequeNo: "", description: "IBFT Received from HMB-156030 Fund Transfer", debit: null, credit: 200000 },
+            { id: "s5", date: "2026-06-12", pdcDate: "2026-07-01", ibftNo: "", chequeNo: "101002", description: "PDC Cheque to Allied Logistics - Freight Charges Export Inv #2050", debit: 85000, credit: null },
+            { id: "s6", date: "2026-06-15", pdcDate: "", ibftNo: "98756789", chequeNo: "", description: "Standing Instruction Transfer from HMB-155861", debit: null, credit: 350000 },
           ],
           demo_hmb_curr: [
-            { id: "h1", date: "2026-06-01", pdcDate: "", chequeNo: "", description: "Export Remittance FBDC #1620050 USD 18,500 @ 280", debit: null, credit: 5180000 },
-            { id: "h2", date: "2026-06-01", pdcDate: "", chequeNo: "", description: "Bank Charges against Export Invoice KAFI-2050", debit: 62000, credit: null },
-            { id: "h3", date: "2026-06-03", pdcDate: "", chequeNo: "102001650", description: "Fund Transfer to SONERI SAVING Kafi Commodities A/c", debit: 200000, credit: null },
-            { id: "h4", date: "2026-06-05", pdcDate: "", chequeNo: "", description: "Sindh Sales Tax on Service", debit: 10, credit: null },
-            { id: "h5", date: "2026-06-05", pdcDate: "", chequeNo: "", description: "SOC - GSM Subscription Charges Monthly", debit: 75, credit: null },
-            { id: "h6", date: "2026-06-08", pdcDate: "", chequeNo: "102001651", description: "Cash Cheque to Petty Cash - Office Use", debit: 50000, credit: null },
-            { id: "h7", date: "2026-06-10", pdcDate: "", chequeNo: "102001652", description: "Fund Transfer to HMB-156107 Kafi Commodities for Cement Purchase", debit: 1500000, credit: null },
+            { id: "h1", date: "2026-06-01", pdcDate: "", ibftNo: "", chequeNo: "", description: "Export Remittance FBDC #1620050 USD 18,500 @ 280", debit: null, credit: 5180000 },
+            { id: "h2", date: "2026-06-01", pdcDate: "", ibftNo: "", chequeNo: "", description: "Bank Charges against Export Invoice KAFI-2050", debit: 62000, credit: null },
+            { id: "h3", date: "2026-06-03", pdcDate: "", ibftNo: "", chequeNo: "102001650", description: "Fund Transfer to SONERI SAVING Kafi Commodities A/c", debit: 200000, credit: null },
+            { id: "h4", date: "2026-06-05", pdcDate: "", ibftNo: "", chequeNo: "", description: "Sindh Sales Tax on Service", debit: 10, credit: null },
+            { id: "h5", date: "2026-06-05", pdcDate: "", ibftNo: "", chequeNo: "", description: "SOC - GSM Subscription Charges Monthly", debit: 75, credit: null },
+            { id: "h6", date: "2026-06-08", pdcDate: "", ibftNo: "", chequeNo: "102001651", description: "Cash Cheque to Petty Cash - Office Use", debit: 50000, credit: null },
+            { id: "h7", date: "2026-06-10", pdcDate: "", ibftNo: "", chequeNo: "102001652", description: "Fund Transfer to HMB-156107 Kafi Commodities for Cement Purchase", debit: 1500000, credit: null },
           ],
         };
         setBanks([demo1, demo2]);
@@ -161,12 +163,8 @@ export default function FundEstimatorPage() {
   const calcBalance = useCallback((rows: LedgerRow[], openingBalance: number): number[] => {
     const balances: number[] = [];
     let running = openingBalance;
-    const today = new Date().toISOString().slice(0, 10);
     for (const row of rows) {
-      const isPdcFuture = row.pdcDate && row.pdcDate > today;
-      if (!isPdcFuture) {
-        running += (row.credit ?? 0) - (row.debit ?? 0);
-      }
+      running += (row.credit ?? 0) - (row.debit ?? 0);
       balances.push(running);
     }
     return balances;
@@ -258,11 +256,11 @@ export default function FundEstimatorPage() {
         ["IBAN #", bank.iban, "", "", "Opening Balance", "", bank.openingBalance, "", "Signature Authority", bank.signatureAuthority],
         ["Account Type", bank.accountType, "", "", "Debit", "Credit", "Balance", "", "Mandate Holder", bank.mandateHolder],
         ["Branch Number", bank.branchCode, "", "", rows.reduce((s, r) => s + (r.debit ?? 0), 0), rows.reduce((s, r) => s + (r.credit ?? 0), 0), balances.length > 0 ? balances[balances.length - 1] : bank.openingBalance, "", "Maintain Balance", bank.maintainBalance],
-        ["DATE", "PDC DATE", "CHQ NO.", "DESCRIPTION", "DEBIT", "CREDIT", "BALANCE", ""],
-        ...rows.map((r, i) => [r.date, r.pdcDate, r.chequeNo, r.description, r.debit ?? "", r.credit ?? "", balances[i], ""]),
+        ["DATE", "PDC DATE", "IBFT #", "CHQ NO.", "DESCRIPTION", "DEBIT", "CREDIT", "BALANCE", ""],
+        ...rows.map((r, i) => [r.date, r.pdcDate, r.ibftNo ?? "", r.chequeNo, r.description, r.debit ?? "", r.credit ?? "", balances[i], ""]),
       ];
       const ws = XLSX.utils.aoa_to_sheet(sheetRows);
-      ws["!cols"] = [{ wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 50 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 2 }, { wch: 20 }, { wch: 25 }];
+      ws["!cols"] = [{ wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 50 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 2 }, { wch: 20 }, { wch: 25 }];
       const sheetName = `${bank.bankName}-${bank.accountNo}`.slice(0, 31);
       XLSX.utils.book_append_sheet(wb, ws, sheetName);
     }
@@ -452,6 +450,7 @@ export default function FundEstimatorPage() {
                       <th className="px-2 py-2.5 text-left font-semibold w-[36px]">#</th>
                       <th className="px-2 py-2.5 text-left font-semibold w-[110px]">Date</th>
                       <th className="px-2 py-2.5 text-left font-semibold w-[110px]">PDC Date</th>
+                      <th className="px-2 py-2.5 text-left font-semibold w-[100px]">IBFT #</th>
                       <th className="px-2 py-2.5 text-left font-semibold w-[100px]">Cheque No.</th>
                       <th className="px-2 py-2.5 text-left font-semibold">Description</th>
                       <th className="px-2 py-2.5 text-right font-semibold w-[120px]">Debit</th>
@@ -463,15 +462,15 @@ export default function FundEstimatorPage() {
                   <tbody>
                     {currentRows.length === 0 && (
                       <tr>
-                        <td colSpan={9} className="px-4 py-8 text-center text-muted">No entries yet. Click &quot;Add Row&quot; to start.</td>
+                        <td colSpan={10} className="px-4 py-8 text-center text-muted">No entries yet. Click &quot;Add Row&quot; to start.</td>
                       </tr>
                     )}
                     {currentRows.map((row, i) => {
                       const balances = calcBalance(currentRows, selectedAccount.openingBalance);
                       const balance = balances[i];
-                      const isPdcFuture = row.pdcDate && row.pdcDate > new Date().toISOString().slice(0, 10);
+                      const hasPdc = !!row.pdcDate;
                       return (
-                        <tr key={row.id} className={`${i % 2 === 0 ? "" : "bg-surface-light/20"} ${isPdcFuture ? "opacity-60" : ""}`}>
+                        <tr key={row.id} className={`${i % 2 === 0 ? "" : "bg-surface-light/20"}`}>
                           <td className="px-2 py-1.5 text-muted">{i + 1}</td>
                           <td className="px-2 py-1.5">
                             <input
@@ -488,6 +487,20 @@ export default function FundEstimatorPage() {
                               value={row.pdcDate}
                               onChange={(e) => updateRow(row.id, "pdcDate", e.target.value)}
                               disabled={!editMode}
+                              className={`w-full bg-transparent rounded px-1.5 py-1 text-foreground focus:outline-none text-xs ${editMode ? "border border-transparent hover:border-border focus:border-indigo-500/50" : "border border-transparent cursor-default"}`}
+                            />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              value={row.ibftNo}
+                              onChange={(e) => {
+                                const v = e.target.value.replace(/\D/g, "");
+                                updateRow(row.id, "ibftNo", v);
+                              }}
+                              placeholder="—"
+                              readOnly={!editMode}
                               className={`w-full bg-transparent rounded px-1.5 py-1 text-foreground focus:outline-none text-xs ${editMode ? "border border-transparent hover:border-border focus:border-indigo-500/50" : "border border-transparent cursor-default"}`}
                             />
                           </td>
@@ -548,7 +561,7 @@ export default function FundEstimatorPage() {
                           </td>
                           <td className={`px-2 py-1.5 text-right font-mono font-semibold ${balance < 0 ? "text-red-400" : "text-foreground"}`}>
                             {fmt(balance)}
-                            {isPdcFuture && <span className="text-[9px] text-amber-400 block">PDC</span>}
+                            {hasPdc && <span className="text-[9px] text-amber-400 block">PDC</span>}
                           </td>
                           <td className="px-2 py-1.5">
                             {editMode && (
@@ -575,6 +588,22 @@ export default function FundEstimatorPage() {
                   </div>
                 </div>
               )}
+
+              {/* PDC Note */}
+              {(() => {
+                const pdcRows = currentRows.filter((r) => r.pdcDate);
+                if (pdcRows.length === 0) return null;
+                return (
+                  <div className="px-5 py-3 border-t border-border bg-amber-500/5">
+                    <p className="text-xs text-amber-400 font-semibold mb-1.5">Please note the PDC cheques issued:</p>
+                    {pdcRows.map((r, i) => (
+                      <p key={r.id} className="text-xs text-amber-300/80 font-mono ml-2">
+                        #{i + 1} {r.chequeNo ? `Cheque #${r.chequeNo}` : "—"} &nbsp;·&nbsp; Amount = {fmt(r.debit ?? r.credit ?? 0)} &nbsp;·&nbsp; PDC Date: {r.pdcDate} &nbsp;·&nbsp; {r.description}
+                      </p>
+                    ))}
+                  </div>
+                );
+              })()}
 
               {/* Add Row */}
               {editMode && (

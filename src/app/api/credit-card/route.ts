@@ -4,10 +4,16 @@ import * as XLSX from "xlsx";
 /* ═══════════════════════════════════════════
    PDF WITH PASSWORD SUPPORT
    ═══════════════════════════════════════════ */
+function getPDFJS() {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const PDFJS = require("pdf-parse/lib/pdf.js/v2.0.550/build/pdf.js");
+  PDFJS.disableWorker = true;
+  return PDFJS;
+}
+
 async function extractPdfText(buffer: Buffer, password?: string): Promise<{ text: string; needsPassword: boolean }> {
   try {
-    const PDFJS = require("pdf-parse/lib/pdf.js/v2.0.550/build/pdf.js");
-    PDFJS.disableWorker = true;
+    const PDFJS = getPDFJS();
     const source = password ? { data: new Uint8Array(buffer), password } : new Uint8Array(buffer);
     const doc = await PDFJS.getDocument(source);
     let text = "";
@@ -25,6 +31,50 @@ async function extractPdfText(buffer: Buffer, password?: string): Promise<{ text
     }
     doc.destroy();
     return { text, needsPassword: false };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/password/i.test(msg) || /PasswordException/i.test(msg) || /encrypted/i.test(msg)) {
+      return { text: "", needsPassword: true };
+    }
+    return { text: "", needsPassword: false };
+  }
+}
+
+/* ═══════════════════════════════════════════
+   OCR FOR SCANNED PDFs
+   ═══════════════════════════════════════════ */
+async function ocrPdf(buffer: Buffer, password?: string): Promise<{ text: string; needsPassword: boolean }> {
+  try {
+    const PDFJS = getPDFJS();
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { createCanvas } = require("canvas");
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const Tesseract = require("tesseract.js");
+
+    const source = password ? { data: new Uint8Array(buffer), password } : new Uint8Array(buffer);
+    const doc = await PDFJS.getDocument(source);
+
+    class CanvasFactory {
+      create(w: number, h: number) { const c = createCanvas(w, h); return { canvas: c, context: c.getContext("2d") }; }
+      reset(cc: { canvas: { width: number; height: number } }, w: number, h: number) { cc.canvas.width = w; cc.canvas.height = h; }
+      destroy() {}
+    }
+
+    let fullText = "";
+    const factory = new CanvasFactory();
+
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i);
+      const vp = page.getViewport(2.0);
+      const { canvas, context } = factory.create(vp.width, vp.height);
+      await page.render({ canvasContext: context, viewport: vp, canvasFactory: factory });
+      const png = canvas.toBuffer("image/png");
+      const { data } = await Tesseract.recognize(png, "eng");
+      fullText += data.text + "\n\n";
+    }
+
+    doc.destroy();
+    return { text: fullText, needsPassword: false };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (/password/i.test(msg) || /PasswordException/i.test(msg) || /encrypted/i.test(msg)) {
@@ -282,6 +332,170 @@ function parseCSV(text: string): Transaction[] {
 }
 
 /* ═══════════════════════════════════════════
+   LOCAL PDF EXTRACTION (NO AI)
+   ═══════════════════════════════════════════ */
+function parsePdfLocal(pdfText: string): { transactions: Transaction[]; meta: StatementMeta } {
+  const meta: StatementMeta = {
+    cardholderName: "", cardLast4: "", statementMonth: "", paymentDueDate: "",
+    previousBalance: null, purchases: null, feeAndCharges: null, payments: null,
+    currentBalance: null, minimumAmountDue: null,
+  };
+
+  const lines = pdfText.split("\n").map((l) => l.trim()).filter(Boolean);
+  const MONTHS: Record<string, string> = { JAN: "01", FEB: "02", MAR: "03", APR: "04", MAY: "05", JUN: "06", JUL: "07", AUG: "08", SEP: "09", OCT: "10", NOV: "11", DEC: "12" };
+
+  // --- Extract meta (scan all lines — OCR scatters meta across pages) ---
+  const extractAmt = (line: string): number | null => {
+    const m = line.match(/([\d,]+\.\d{2})/);
+    return m ? parseFloat(m[1].replace(/,/g, "")) : null;
+  };
+
+  for (const line of lines) {
+    if (!meta.cardLast4 && /\d{4}\s*7[68]\*+\d{4}/i.test(line)) {
+      const m = line.match(/(\d{4})\s*$/);
+      if (m) meta.cardLast4 = m[1];
+    }
+    if (!meta.cardLast4 && /credit\s*card\s*#?\s*[\d*\sXx]+/i.test(line)) {
+      const m = line.match(/(\d{4})\s*$/);
+      if (m) meta.cardLast4 = m[1];
+    }
+    if (!meta.cardholderName && /^MR\s+[A-Z ]{5,}/i.test(line)) {
+      meta.cardholderName = line.replace(/\d{4}.*$/, "").trim();
+    }
+    if (meta.previousBalance === null && /previous\s+balance/i.test(line)) {
+      meta.previousBalance = extractAmt(line);
+    }
+    if (meta.currentBalance === null && /current\s+balance/i.test(line)) {
+      meta.currentBalance = extractAmt(line);
+    }
+    if (meta.minimumAmountDue === null && /minimum\s+amount/i.test(line)) {
+      meta.minimumAmountDue = extractAmt(line);
+    }
+    if (meta.payments === null && /advance\s*payment/i.test(line)) {
+      meta.payments = extractAmt(line);
+    }
+    if (!meta.statementMonth) {
+      const sm = line.match(/statement\s+date\b.*?(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})/i);
+      if (sm) {
+        meta.statementMonth = `${sm[2].toUpperCase()}-${sm[3]}`;
+      }
+    }
+    if (!meta.paymentDueDate) {
+      const pd = line.match(/(?:payment\s+)?due\s+date\b.*?(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})/i);
+      if (pd) {
+        meta.paymentDueDate = `${pd[1]}-${pd[2].toUpperCase()}-${pd[3]}`;
+      }
+    }
+  }
+
+  // Scan for the summary row: "269,194.84 197,103.73 0.00 1,288.87 269,195.00 0.00 198,392.44"
+  for (const line of lines) {
+    const amts = line.match(/[\d,]+\.\d{2}/g);
+    if (amts && amts.length >= 5) {
+      const nums = amts.map((a) => parseFloat(a.replace(/,/g, "")));
+      if (nums[0] > 10000 && nums.length >= 7) {
+        if (meta.previousBalance === null) meta.previousBalance = nums[0];
+        if (meta.purchases === null) meta.purchases = nums[1];
+        if (meta.feeAndCharges === null && nums[3] < 10000) meta.feeAndCharges = nums[3];
+        if (meta.payments === null) meta.payments = nums[4];
+        if (meta.currentBalance === null) meta.currentBalance = nums[6];
+        break;
+      }
+    }
+  }
+
+  // --- Extract transactions ---
+  // OCR patterns: "16 MAY CARD REPLACEMENT FEE —— — 1000.00"
+  //               "09 MAY TRANSFORMATION INTERNA, KARACHI, PAK = === 4000.00"
+  //               "10fAY| SHOTANT FIMLING STAT, KARACHI, BAK ... 511.00"
+  // Clean OCR artifacts before matching
+  const amountInLine = /([\d,]+\s*\.\s*\d{2})/;
+
+  const transactions: Transaction[] = [];
+  let idCounter = 1;
+  const seen = new Set<string>();
+
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i];
+    if (line.length < 12) continue;
+
+    // Match: DD MMM ... amount  (with optional OCR noise)
+    const dateMatch = line.match(/^(\d{1,2})\s*([A-Za-z]{3})\b/);
+    if (!dateMatch) continue;
+
+    // Validate month
+    const monthKey = dateMatch[2].toUpperCase().replace(/[^A-Z]/g, "");
+    const closestMonth = Object.keys(MONTHS).find((m) =>
+      m === monthKey || (monthKey.length >= 2 && m.startsWith(monthKey.slice(0, 2)))
+    );
+    if (!closestMonth) continue;
+
+    // Strip OCR artifacts: dashes, equals, pipes, dots (but not inside amounts)
+    line = line.replace(/[—–=|]+/g, " ").replace(/\s{2,}/g, " ");
+
+    // Find amount(s) in line
+    const amtMatch = line.match(amountInLine);
+    if (!amtMatch) continue;
+
+    const rawAmt = parseFloat(amtMatch[1].replace(/,/g, "").replace(/\s/g, ""));
+    if (rawAmt === 0 || isNaN(rawAmt)) continue;
+
+    // Check CR suffix for credit detection
+    const isCredit = /\bCR\b/i.test(line.slice((amtMatch.index ?? 0) + amtMatch[0].length));
+
+    // Merchant: between date and first amount
+    const dateEnd = (dateMatch.index ?? 0) + dateMatch[0].length;
+    const amtStart = amtMatch.index ?? line.length;
+    let merchant = line.slice(dateEnd, amtStart).trim();
+
+    // Clean OCR artifacts from merchant
+    merchant = merchant
+      .replace(/[,]\s*(PAK|KHI|KW|KARACHI|LHR|ISB|SGP)\b.*/i, ", $1")
+      .replace(/\s*[—–=|_.]+\s*/g, " ")
+      .replace(/\b(oe|ee|mcs|rite|ced|meee|eee|mmm|sis|eno|tssass|ses|cttmtincceciss|immmmmsmscrmion)\b/gi, "")
+      .replace(/\bPKR\s+[\d,.]+/g, "")
+      .replace(/\bAmount\s+USD.*$/i, "")
+      .replace(/\bUS\s+Rate.*$/i, "")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+
+    if (merchant.length < 2) continue;
+
+    // Skip non-transaction lines (fees, taxes, summary rows)
+    if (/previous\s+balance|current\s+balance|minimum\s+amount|payment\s+due|total\s+purchase|credit\s*limit|available|advance\s*pay|^balance$/i.test(merchant)) continue;
+    if (/^MR\s+[A-Z]/i.test(merchant)) continue;
+    if (/statement\s+date|chartered|coupon/i.test(merchant)) continue;
+    if (/Sindh[\s.]*ST|Adv[\s.]*Tax|STWH[\s.]*IT/i.test(merchant)) continue;
+    if (/card\s*replacement\s*fee/i.test(merchant)) continue;
+
+    // Detect payments/credits
+    const type: "debit" | "credit" = isCredit || /1BILL\s*PAYMENT|PAYMENT\s+PK/i.test(merchant)
+      ? "credit" : "debit";
+
+    // Date string
+    const day = dateMatch[1].padStart(2, "0");
+    const mon = MONTHS[closestMonth];
+    const year = new Date().getFullYear();
+    const dateStr = `${day}-${mon}-${year}`;
+
+    // Dedup: same date+merchant+amount
+    const key = `${dateStr}|${merchant}|${rawAmt}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    transactions.push({
+      id: `TXN-${String(idCounter++).padStart(3, "0")}`,
+      date: dateStr,
+      merchant,
+      amount: rawAmt,
+      type,
+    });
+  }
+
+  return { transactions, meta };
+}
+
+/* ═══════════════════════════════════════════
    AI PDF EXTRACTION
    ═══════════════════════════════════════════ */
 async function aiExtractTransactions(buffer: Buffer, fileName: string, password?: string): Promise<{ transactions: Transaction[]; meta?: StatementMeta; error?: string; passwordRequired?: boolean }> {
@@ -437,6 +651,7 @@ export async function POST(request: Request) {
     const formData = await request.formData();
     const file = formData.get("statementFile") as File | null;
     const password = (formData.get("password") as string) || undefined;
+    const useAI = formData.get("useAI") !== "false";
 
     if (!file) {
       return Response.json({ error: "Please upload a credit card statement." }, { status: 400 });
@@ -456,13 +671,38 @@ export async function POST(request: Request) {
       transactions = result.transactions;
       meta = result.meta;
     } else if (ext === "pdf") {
-      const result = await aiExtractTransactions(buffer, file.name, password);
-      if (result.passwordRequired) {
+      const { text: pdfText, needsPassword } = await extractPdfText(buffer, password);
+      if (needsPassword) {
         return Response.json({ passwordRequired: true, fileName: file.name }, { status: 200 });
       }
-      transactions = result.transactions;
-      if (result.meta) meta = result.meta;
-      if (result.error) extractionWarning = result.error;
+
+      if (useAI) {
+        const result = await aiExtractTransactions(buffer, file.name, password);
+        if (result.passwordRequired) {
+          return Response.json({ passwordRequired: true, fileName: file.name }, { status: 200 });
+        }
+        transactions = result.transactions;
+        if (result.meta) meta = result.meta;
+        if (result.error) extractionWarning = result.error;
+      } else {
+        const hasText = pdfText.replace(/\s/g, "").length > 100;
+        let textForParsing = pdfText;
+
+        if (!hasText) {
+          const ocr = await ocrPdf(buffer, password);
+          if (ocr.needsPassword) {
+            return Response.json({ passwordRequired: true, fileName: file.name }, { status: 200 });
+          }
+          textForParsing = ocr.text;
+        }
+
+        const result = parsePdfLocal(textForParsing);
+        transactions = result.transactions;
+        meta = result.meta;
+        if (transactions.length === 0) {
+          extractionWarning = "Local parser could not extract transactions from this PDF. Try enabling AI mode.";
+        }
+      }
     } else {
       return Response.json({ error: `Unsupported file format: .${ext}. Use PDF, XLS, XLSX, or CSV.` }, { status: 400 });
     }
