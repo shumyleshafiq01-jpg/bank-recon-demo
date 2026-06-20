@@ -106,6 +106,7 @@ export default function FundEstimatorPage() {
   const [loaded, setLoaded] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [lastSync, setLastSync] = useState("");
+  const [syncError, setSyncError] = useState("");
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Load from Google Sheets (fall back to localStorage)
@@ -154,13 +155,21 @@ export default function FundEstimatorPage() {
     saveTimer.current = setTimeout(async () => {
       setSyncing(true);
       try {
-        await fetch("/api/fund-estimator", {
+        const res = await fetch("/api/fund-estimator", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ banks, ledger }),
         });
-        setLastSync(new Date().toLocaleTimeString());
-      } catch { /* silent */ }
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.saved) {
+          setLastSync(new Date().toLocaleTimeString());
+          setSyncError("");
+        } else {
+          setSyncError(data.error || "Sync failed");
+        }
+      } catch {
+        setSyncError("Network error");
+      }
       setSyncing(false);
     }, 1500);
   }, [banks, ledger]);
@@ -294,6 +303,8 @@ export default function FundEstimatorPage() {
         <span className="text-sm font-bold text-foreground">Fund Estimation Work Space</span>
         {syncing ? (
           <span className="text-[10px] px-2 py-0.5 rounded-full bg-yellow-500/10 text-yellow-400 font-semibold animate-pulse">Syncing...</span>
+        ) : syncError ? (
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 font-semibold" title={syncError}>Sync error</span>
         ) : lastSync ? (
           <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 font-semibold">Synced {lastSync}</span>
         ) : (
