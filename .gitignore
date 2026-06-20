@@ -36,6 +36,10 @@ yarn-error.log*
 # usage log
 .usage-log.json
 
+# credentials (service account JSON, etc.)
+personal credentials/
+*.json.key
+
 # vercel
 .vercel
 

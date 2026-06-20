@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   ArrowLeft, Plus, Pencil, Trash2, Building2, ChevronDown,
   Download, Save, X, Banknote, Eye, Lock, Unlock, Check, CheckCheck,
@@ -104,59 +104,41 @@ export default function FundEstimatorPage() {
   const [showSummary, setShowSummary] = useState(true);
   const [editMode, setEditMode] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState("");
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Load from localStorage (seed demo data if empty)
+  // Load from Google Sheets (fall back to localStorage)
   useEffect(() => {
-    try {
-      const b = localStorage.getItem(STORAGE_KEY_BANKS);
-      const l = localStorage.getItem(STORAGE_KEY_LEDGER);
-      if (b) {
-        setBanks(JSON.parse(b));
-        if (l) setLedger(JSON.parse(l));
-      } else {
-        const demo1: BankAccount = {
-          id: "demo_soneri_sav", bankName: "SONERI BANK", branch: "CLIFTON BLOCK-8",
-          acTitle: "KAFI COMMODITIES (PVT.) LIMITED", accountNo: "0268-20011926747",
-          iban: "PK70SONE0026820011926747", accountType: "SAVING ACCOUNT", branchCode: "CODE 0268",
-          notes: "", internetBanking: "not activated", stamp: "Round Stamp Kafi",
-          signatureAuthority: "SKP & KMP", mandateHolder: "", maintainBalance: "",
-          openingBalance: 50000, openingDate: "2026-06-01",
-        };
-        const demo2: BankAccount = {
-          id: "demo_hmb_curr", bankName: "HABIB METROPOLITAN BANK", branch: "City Court",
-          acTitle: "KAFI KITCHEN", accountNo: "PK23MPBL0158217140156030",
-          iban: "PK23MPBL0158217140156030", accountType: "PLS CURRENT", branchCode: "",
-          notes: "", internetBanking: "activated", stamp: "Kafi Kitchen Proprietor Stamp",
-          signatureAuthority: "SKP", mandateHolder: "", maintainBalance: "",
-          openingBalance: 29314, openingDate: "2026-06-01",
-        };
-        const demoLedger: LedgerData = {
-          demo_soneri_sav: [
-            { id: "s1", date: "2026-06-02", pdcDate: "", ibftNo: "", chequeNo: "", description: "Profit from 01-Jun to 30-Jun-2026", debit: null, credit: 1250 },
-            { id: "s2", date: "2026-06-02", pdcDate: "", ibftNo: "", chequeNo: "", description: "15% W/H Tax Deducted", debit: 188, credit: null },
-            { id: "s3", date: "2026-06-05", pdcDate: "", ibftNo: "", chequeNo: "101001", description: "Cash Cheque Issued to Vendor - Office Supplies", debit: 15000, credit: null },
-            { id: "s4", date: "2026-06-10", pdcDate: "", ibftNo: "98712345", chequeNo: "", description: "IBFT Received from HMB-156030 Fund Transfer", debit: null, credit: 200000 },
-            { id: "s5", date: "2026-06-12", pdcDate: "2026-07-01", ibftNo: "", chequeNo: "101002", description: "PDC Cheque to Allied Logistics - Freight Charges Export Inv #2050", debit: 85000, credit: null },
-            { id: "s6", date: "2026-06-15", pdcDate: "", ibftNo: "98756789", chequeNo: "", description: "Standing Instruction Transfer from HMB-155861", debit: null, credit: 350000 },
-          ],
-          demo_hmb_curr: [
-            { id: "h1", date: "2026-06-01", pdcDate: "", ibftNo: "", chequeNo: "", description: "Export Remittance FBDC #1620050 USD 18,500 @ 280", debit: null, credit: 5180000 },
-            { id: "h2", date: "2026-06-01", pdcDate: "", ibftNo: "", chequeNo: "", description: "Bank Charges against Export Invoice KAFI-2050", debit: 62000, credit: null },
-            { id: "h3", date: "2026-06-03", pdcDate: "", ibftNo: "", chequeNo: "102001650", description: "Fund Transfer to SONERI SAVING Kafi Commodities A/c", debit: 200000, credit: null },
-            { id: "h4", date: "2026-06-05", pdcDate: "", ibftNo: "", chequeNo: "", description: "Sindh Sales Tax on Service", debit: 10, credit: null },
-            { id: "h5", date: "2026-06-05", pdcDate: "", ibftNo: "", chequeNo: "", description: "SOC - GSM Subscription Charges Monthly", debit: 75, credit: null },
-            { id: "h6", date: "2026-06-08", pdcDate: "", ibftNo: "", chequeNo: "102001651", description: "Cash Cheque to Petty Cash - Office Use", debit: 50000, credit: null },
-            { id: "h7", date: "2026-06-10", pdcDate: "", ibftNo: "", chequeNo: "102001652", description: "Fund Transfer to HMB-156107 Kafi Commodities for Cement Purchase", debit: 1500000, credit: null },
-          ],
-        };
-        setBanks([demo1, demo2]);
-        setLedger(demoLedger);
-      }
-    } catch { /* ignore */ }
-    setLoaded(true);
+    async function load() {
+      try {
+        const res = await fetch("/api/fund-estimator");
+        if (res.ok) {
+          const data = await res.json();
+          if (data.banks && data.banks.length > 0) {
+            setBanks(data.banks as BankAccount[]);
+            setLedger(data.ledger as LedgerData);
+            setLastSync(new Date().toLocaleTimeString());
+            setLoaded(true);
+            return;
+          }
+        }
+      } catch { /* API unavailable — fall back to localStorage */ }
+
+      try {
+        const b = localStorage.getItem(STORAGE_KEY_BANKS);
+        const l = localStorage.getItem(STORAGE_KEY_LEDGER);
+        if (b) {
+          setBanks(JSON.parse(b));
+          if (l) setLedger(JSON.parse(l));
+        }
+      } catch { /* ignore */ }
+      setLoaded(true);
+    }
+    load();
   }, []);
 
-  // Save to localStorage
+  // Save to localStorage immediately + debounce sync to Google Sheets
   useEffect(() => {
     if (!loaded) return;
     localStorage.setItem(STORAGE_KEY_BANKS, JSON.stringify(banks));
@@ -166,6 +148,27 @@ export default function FundEstimatorPage() {
     if (!loaded) return;
     localStorage.setItem(STORAGE_KEY_LEDGER, JSON.stringify(ledger));
   }, [ledger, loaded]);
+
+  const syncToSheets = useCallback(() => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async () => {
+      setSyncing(true);
+      try {
+        await fetch("/api/fund-estimator", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ banks, ledger }),
+        });
+        setLastSync(new Date().toLocaleTimeString());
+      } catch { /* silent */ }
+      setSyncing(false);
+    }, 1500);
+  }, [banks, ledger]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    syncToSheets();
+  }, [banks, ledger, loaded, syncToSheets]);
 
   // Calculate balance for a row considering PDC
   const calcBalance = useCallback((rows: LedgerRow[], openingBalance: number): number[] => {
@@ -289,7 +292,13 @@ export default function FundEstimatorPage() {
           <Banknote className="w-3.5 h-3.5 text-indigo-400" />
         </div>
         <span className="text-sm font-bold text-foreground">Fund Estimation Work Space</span>
-        <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 font-semibold">WIP</span>
+        {syncing ? (
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-yellow-500/10 text-yellow-400 font-semibold animate-pulse">Syncing...</span>
+        ) : lastSync ? (
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 font-semibold">Synced {lastSync}</span>
+        ) : (
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 font-semibold">Local Only</span>
+        )}
         <div className="ml-auto flex items-center gap-2">
           {banks.length > 0 && (
             <button onClick={downloadXLS} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-indigo-500 hover:bg-indigo-500/80 text-white rounded-lg cursor-pointer transition-colors">
