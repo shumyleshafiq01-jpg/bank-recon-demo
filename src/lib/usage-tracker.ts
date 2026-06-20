@@ -29,21 +29,31 @@ function readLog(): UsageEntry[] {
 }
 
 function appendLog(entry: UsageEntry) {
-  const log = readLog();
-  log.push(entry);
-  writeFileSync(LOG_PATH, JSON.stringify(log, null, 2));
+  // Vercel's filesystem is read-only (only /tmp is writable), so file logging
+  // will throw EROFS in production. Never let that break the AI response.
+  try {
+    const log = readLog();
+    log.push(entry);
+    writeFileSync(LOG_PATH, JSON.stringify(log, null, 2));
+  } catch {
+    /* read-only filesystem (e.g. Vercel) — skip persistent logging */
+  }
 }
 
 export function logUsage(module: string, model: string, inputTokens: number, outputTokens: number) {
-  const cost = calcCost(model, inputTokens, outputTokens);
-  appendLog({
-    timestamp: new Date().toISOString(),
-    module,
-    model,
-    input_tokens: inputTokens,
-    output_tokens: outputTokens,
-    cost_usd: Math.round(cost * 10000) / 10000,
-  });
+  try {
+    const cost = calcCost(model, inputTokens, outputTokens);
+    appendLog({
+      timestamp: new Date().toISOString(),
+      module,
+      model,
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      cost_usd: Math.round(cost * 10000) / 10000,
+    });
+  } catch {
+    /* never throw from usage logging */
+  }
 }
 
 export { readLog };
