@@ -4,14 +4,15 @@ import { useState, useRef, useEffect } from "react";
 import {
   ArrowLeft, Upload, FileText, Loader2, X, Download,
   Wallet, Filter, MessageSquare, Send, ChevronDown, ChevronUp,
-  Plus, Globe, Tag, Calendar, DollarSign, RefreshCw,
+  Plus, Globe, Tag, Calendar, DollarSign, RefreshCw, AlertTriangle,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
 
 type Transaction = {
   date: string; month: string; merchant: string; amount: number;
-  currency: string; category: string; country: string;
+  currency: string; baseAmount?: number; baseCurrency?: string;
+  category: string; country: string;
   description: string; type: "expense" | "income" | "fee";
 };
 
@@ -45,6 +46,10 @@ const DEFAULT_RATES: Rates = {
   PKR: 1,
 };
 
+const BASE_SYMBOLS: Record<string, string> = {
+  GBP: "£", EUR: "€", USD: "$", AED: "AED ", QAR: "QAR ", PKR: "Rs ",
+};
+
 const fmt = (n: number) =>
   n.toLocaleString("en-PK", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -53,6 +58,16 @@ const fmtPKR = (n: number) =>
 
 function toPKR(amount: number, currency: string, rates: Rates): number {
   return amount * (rates[currency] || 1);
+}
+
+function toBase(amount: number, currency: string, base: string, rates: Rates): number {
+  if (currency === base) return amount;
+  return (amount * (rates[currency] || 1)) / (rates[base] || 1);
+}
+
+function getBaseAmount(t: Transaction, base: string, rates: Rates): number {
+  if (t.baseAmount !== undefined && t.baseCurrency === base) return t.baseAmount;
+  return toBase(t.amount, t.currency, base, rates);
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -204,7 +219,15 @@ export default function ExpenseAnalyzerPage() {
   const [error, setError] = useState("");
   const [results, setResults] = useState<Results | null>(null);
   const [useAI, setUseAI] = useState(false);
+  const [baseCurrency, setBaseCurrency] = useState("GBP");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-detect base currency from uploaded filenames
+  useEffect(() => {
+    if (files.length === 0) return;
+    const detected = files.map(f => f.name.match(/(GBP|EUR|USD|AED|PKR)/i)?.[1]?.toUpperCase()).find(Boolean);
+    if (detected) setBaseCurrency(detected);
+  }, [files]);
 
   // Currency rates
   const [rates, setRates] = useState<Rates>({ ...DEFAULT_RATES });
@@ -289,8 +312,17 @@ export default function ExpenseAnalyzerPage() {
     if (!results) return;
     const wb = XLSX.utils.book_new();
     const rows = [
-      ["Date", "Merchant", "Amount", "Currency", "PKR Equivalent", "Category", "Country", "Type"],
-      ...filtered.map(t => [t.date, t.merchant, t.amount, t.currency, Math.round(toPKR(t.amount, t.currency, rates)), t.category, t.country, t.type]),
+      ["Date", "Merchant", "Amount", "Currency", `${baseCurrency} Equivalent`, `PKR from ${baseCurrency}`, "PKR Equivalent", "Category", "Country", "Type"],
+      ...filtered.map(t => {
+        const baseAmt = parseFloat(getBaseAmount(t, baseCurrency, rates).toFixed(2));
+        return [
+          t.date, t.merchant, t.amount, t.currency,
+          baseAmt,
+          Math.round(toPKR(baseAmt, baseCurrency, rates)),
+          Math.round(toPKR(t.amount, t.currency, rates)),
+          t.category, t.country, t.type,
+        ];
+      }),
     ];
     const ws = XLSX.utils.aoa_to_sheet(rows);
     ws["!cols"] = [{ wch: 12 }, { wch: 35 }, { wch: 14 }, { wch: 8 }, { wch: 16 }, { wch: 16 }, { wch: 18 }, { wch: 10 }];
@@ -342,9 +374,9 @@ export default function ExpenseAnalyzerPage() {
   const filteredTotal: Record<string, number> = {};
   filteredExpenses.forEach(t => { filteredTotal[t.currency] = (filteredTotal[t.currency] || 0) + t.amount; });
 
-  // Grand total PKR
+  // Grand total PKR — all via base currency rate for consistency
   const grandTotalPKR = results
-    ? Object.entries(results.summary.totalByCurrency).reduce((s, [cur, amt]) => s + toPKR(amt, cur, rates), 0)
+    ? Object.entries(results.summary.totalByCurrency).reduce((s, [cur, amt]) => s + toPKR(toBase(amt, cur, baseCurrency, rates), baseCurrency, rates), 0)
     : 0;
 
   const ready = files.length > 0 && !loading;
@@ -431,6 +463,22 @@ export default function ExpenseAnalyzerPage() {
                   </label>
                 </div>
 
+                {files.length > 0 && (
+                  <div className="flex items-center gap-3 p-3 bg-background rounded-lg border border-border">
+                    <span className="text-xs text-muted font-medium shrink-0">Base Currency:</span>
+                    <select
+                      value={baseCurrency}
+                      onChange={e => setBaseCurrency(e.target.value)}
+                      className="text-xs bg-surface border border-border rounded-lg px-2 py-1.5 text-foreground focus:outline-none focus:border-emerald-500/50 cursor-pointer"
+                    >
+                      {["GBP", "EUR", "USD", "AED", "PKR"].map(c => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
+                    <span className="text-[10px] text-muted">Statement&apos;s primary currency — auto-detected from filename</span>
+                  </div>
+                )}
+
                 <div className="flex items-center gap-3 pt-2">
                   <label className="flex items-center gap-2 cursor-pointer text-sm text-muted">
                     <input type="checkbox" checked={useAI} onChange={(e) => setUseAI(e.target.checked)}
@@ -469,6 +517,14 @@ export default function ExpenseAnalyzerPage() {
                 </div>
               </div>
 
+              {/* Base currency warning */}
+              <div className="flex items-start gap-2 bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-3 text-xs text-yellow-400">
+                <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                <span>
+                  <strong>{baseCurrency} equivalent amounts are estimates</strong> based on the editable exchange rates below — not the actual rates at the time of each transaction. For historical statements, update the rates to match the statement period for accuracy.
+                </span>
+              </div>
+
               {/* Currency Converter */}
               <div className="bg-surface rounded-2xl border border-emerald-500/20 overflow-hidden">
                 <button onClick={() => setShowRates(!showRates)}
@@ -500,15 +556,31 @@ export default function ExpenseAnalyzerPage() {
                 )}
               </div>
 
-              {/* Summary cards — original currency + PKR */}
+              {/* Summary cards — original currency + base + PKR */}
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                {Object.entries(results.summary.totalByCurrency).map(([cur, amt]) => (
-                  <div key={cur} className="bg-surface rounded-xl border border-emerald-500/30 p-4 text-center">
-                    <p className="text-[10px] text-muted uppercase tracking-wide">{cur} Spent</p>
-                    <p className="text-lg font-bold text-emerald-400">{fmt(amt)}</p>
-                    <p className="text-xs text-muted mt-0.5">{fmtPKR(toPKR(amt, cur, rates))}</p>
-                  </div>
-                ))}
+                {Object.entries(results.summary.totalByCurrency).map(([cur, amt]) => {
+                  const baseAmt = toBase(amt, cur, baseCurrency, rates);
+                  const pkrViaBase = toPKR(baseAmt, baseCurrency, rates);
+                  return (
+                    <div key={cur} className="bg-surface rounded-xl border border-emerald-500/30 p-4 text-center">
+                      <p className="text-[10px] text-muted uppercase tracking-wide">{cur} Spent</p>
+                      <p className="text-lg font-bold text-emerald-400">{fmt(amt)}</p>
+                      {cur !== baseCurrency && (
+                        <p className="text-xs text-yellow-400 mt-0.5 font-medium">
+                          {BASE_SYMBOLS[baseCurrency] || baseCurrency}{fmt(baseAmt)}
+                        </p>
+                      )}
+                      <p className="text-xs text-muted mt-0.5">{fmtPKR(pkrViaBase)}</p>
+                    </div>
+                  );
+                })}
+                <div className="bg-surface rounded-xl border border-yellow-500/20 p-4 text-center">
+                  <p className="text-[10px] text-muted uppercase tracking-wide">Total in {baseCurrency}</p>
+                  <p className="text-lg font-bold text-yellow-400">
+                    {BASE_SYMBOLS[baseCurrency] || baseCurrency}{fmt(Object.entries(results.summary.totalByCurrency).reduce((s, [cur, amt]) => s + toBase(amt, cur, baseCurrency, rates), 0))}
+                  </p>
+                  <p className="text-xs text-muted mt-0.5">est. from rates</p>
+                </div>
                 <div className="bg-surface rounded-xl border border-foreground/20 p-4 text-center">
                   <p className="text-[10px] text-muted uppercase tracking-wide">Total in PKR</p>
                   <p className="text-lg font-bold text-foreground">{fmtPKR(grandTotalPKR)}</p>
@@ -640,6 +712,8 @@ export default function ExpenseAnalyzerPage() {
                           <th className="px-3 py-2.5 text-left font-semibold">Merchant</th>
                           <th className="px-3 py-2.5 text-right font-semibold">Amount</th>
                           <th className="px-3 py-2.5 text-center font-semibold">Cur</th>
+                          <th className="px-3 py-2.5 text-right font-semibold">{baseCurrency}</th>
+                          <th className="px-3 py-2.5 text-right font-semibold">PKR ({baseCurrency})</th>
                           <th className="px-3 py-2.5 text-right font-semibold">PKR</th>
                           <th className="px-3 py-2.5 text-center font-semibold">Category</th>
                           <th className="px-3 py-2.5 text-left font-semibold">Country</th>
@@ -657,6 +731,12 @@ export default function ExpenseAnalyzerPage() {
                               </span>
                             </td>
                             <td className="px-3 py-2 text-center text-muted">{t.currency}</td>
+                            <td className="px-3 py-2 text-right font-mono text-yellow-400">
+                              {BASE_SYMBOLS[baseCurrency] || baseCurrency}{fmt(getBaseAmount(t, baseCurrency, rates))}
+                            </td>
+                            <td className="px-3 py-2 text-right font-mono text-orange-400">
+                              {fmtPKR(toPKR(getBaseAmount(t, baseCurrency, rates), baseCurrency, rates))}
+                            </td>
                             <td className="px-3 py-2 text-right font-mono text-foreground">
                               {fmtPKR(toPKR(t.amount, t.currency, rates))}
                             </td>
@@ -671,6 +751,12 @@ export default function ExpenseAnalyzerPage() {
                         <tr className="bg-emerald-500/5 font-semibold border-t border-border">
                           <td className="px-3 py-2.5 text-foreground" colSpan={5}>
                             TOTAL ({filteredExpenses.length} expenses)
+                          </td>
+                          <td className="px-3 py-2.5 text-right font-mono text-yellow-400">
+                            {BASE_SYMBOLS[baseCurrency] || baseCurrency}{fmt(filteredExpenses.reduce((s, t) => s + getBaseAmount(t, baseCurrency, rates), 0))}
+                          </td>
+                          <td className="px-3 py-2.5 text-right font-mono text-orange-400">
+                            {fmtPKR(filteredExpenses.reduce((s, t) => s + toPKR(getBaseAmount(t, baseCurrency, rates), baseCurrency, rates), 0))}
                           </td>
                           <td className="px-3 py-2.5 text-right font-mono text-foreground">{fmtPKR(filteredTotalPKR)}</td>
                           <td colSpan={2}></td>

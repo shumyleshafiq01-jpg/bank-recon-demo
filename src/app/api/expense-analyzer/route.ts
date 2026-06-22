@@ -63,6 +63,8 @@ type Transaction = {
   merchant: string;
   amount: number;
   currency: string;
+  baseAmount?: number;
+  baseCurrency?: string;
   category: string;
   country: string;
   description: string;
@@ -85,185 +87,191 @@ function extractDate(text: string): { date: string; month: string } | null {
   return { date: `${day}-${mon}-${dm[3]}`, month: `${dm[2]} ${dm[3]}` };
 }
 
-function parseWiseStatement(text: string, fileName: string): Transaction[] {
+function parseWiseStatement(text: string, _fileName: string): Transaction[] {
+  const statCur = (text.match(/(EUR|GBP|USD|PKR)\s+statement/i)?.[1] || "GBP").toUpperCase();
+
+  const MP = "(?:January|February|March|April|May|June|July|August|September|October|November|December)";
+
+  function pd(day: string, mon: string, yr: string) {
+    return { date: `${day.padStart(2,"0")}-${MONTH_NAMES[mon.toLowerCase()]||"01"}-${yr}`, month: `${mon} ${yr}` };
+  }
+
+  // Key insight from pdf-parse output:
+  // After "| Asset 1\n" the next line is: -AMOUNT BALANCE  (concatenated, e.g. "-7.5121119.16")
+  // Use (-?[\d,]+\.\d{2}) to grab exactly 2 decimal places = just the amount, not the balance.
+
   const transactions: Transaction[] = [];
+  let m: RegExpExecArray | null;
 
-  const currMatch = text.match(/(EUR|GBP|USD|PKR)\s+statement/i);
-  const statementCurrency = currMatch ? currMatch[1].toUpperCase() : "USD";
+  // 1. Card transactions — also capture actual base currency amount from "| Asset 1\n-X.XX"
+  const cardRx = new RegExp(
+    `Card transaction of ([\\d,]+\\.?\\d*) (\\w{3}) issued by ([\\s\\S]+?)(\\d{1,2})\\s+(${MP})\\s+(\\d{4})Card ending[\\s\\S]*?\\| Asset 1\\s*\\n(-?[\\d,]+\\.\\d{2})`,
+    "gi"
+  );
+  while ((m = cardRx.exec(text)) !== null) {
+    const amount = parseFloat(m[1].replace(/,/g, ""));
+    const currency = m[2].toUpperCase();
+    const baseRaw = parseFloat(m[7].replace(/,/g, ""));
+    const baseAmount = Math.abs(baseRaw);
+    const isIncoming = baseRaw >= 0;
+    const merchant = m[3]
+      .replace(/\s*\(fee:[^)]*\)/g, "")
+      .replace(/\n/g, " ").replace(/\s+/g, " ").trim().substring(0, 80);
+    const { date, month } = pd(m[4], m[5], m[6]);
+    transactions.push({
+      date, month, merchant, amount, currency,
+      baseAmount, baseCurrency: statCur,
+      category: categorize(merchant), country: detectCountry(merchant),
+      description: `Card transaction of ${amount} ${currency} - ${merchant}`,
+      type: isIncoming ? "income" : "expense",
+    });
+  }
 
-  // pdf-parse concatenates text without spaces between columns.
-  // We use regex on the full text rather than line-by-line since fields run together.
-
-  // 1. Card transactions: "Card transaction of X.XX CUR issued by MERCHANT LOCATION"
-  //    Merchant+fee may wrap across 1-3 lines. Date follows: "DD Month YYYYCard ending..."
-  const cardTxRegex = /Card transaction of ([\d,]+\.?\d*) (\w{3}) issued by ([\s\S]+?)(\d{1,2})\s*(January|February|March|April|May|June|July|August|September|October|November|December)\s*(\d{4})Card ending/gi;
-
-  let match;
-  while ((match = cardTxRegex.exec(text)) !== null) {
-    const amount = parseFloat(match[1].replace(/,/g, ""));
-    const currency = match[2].toUpperCase();
-    const merchantRaw = match[3].trim();
-    const day = match[4].padStart(2, "0");
-    const mon = MONTH_NAMES[match[5].toLowerCase()] || "01";
-    const year = match[6];
-    const txDate = `${day}-${mon}-${year}`;
-    const txMonth = `${match[5]} ${year}`;
-
-    const cleanMerchant = merchantRaw
-      .replace(/\s*\(fee:[\s\S]*?\)/, "")
-      .replace(/[\n\r]+/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-      .substring(0, 80);
-
-    const category = categorize(cleanMerchant);
-    const country = detectCountry(cleanMerchant);
-
-    // Skip refund/reversal entries (units "bought" = money coming back)
-    const contextStart = Math.max(0, match.index - 10);
-    const contextEnd = Math.min(text.length, cardTxRegex.lastIndex + 200);
-    const context = text.substring(contextStart, contextEnd);
-    const isRefund = /units bought/i.test(context) && !/units sold/i.test(context);
-
-    if (isRefund) {
+  // 2. Wise Charges — fee on same line as FEE-CARD-XXX\n-X.XX BALANCE
+  const wiseRx = new RegExp(
+    `Wise Charges for: CARD-\\d+\\s*(\\d{1,2})\\s+(${MP})\\s+(\\d{4})Card ending[\\s\\S]*?FEE-CARD-\\d+\\s*\\n(-?[\\d,]+\\.\\d{2})`,
+    "gi"
+  );
+  while ((m = wiseRx.exec(text)) !== null) {
+    const fee = Math.abs(parseFloat(m[4].replace(/,/g, "")));
+    if (fee > 0) {
+      const { date, month } = pd(m[1], m[2], m[3]);
       transactions.push({
-        date: txDate, month: txMonth,
-        merchant: cleanMerchant,
-        amount, currency, category, country,
-        description: `Card transaction (refund) of ${amount} ${currency} - ${cleanMerchant}`,
-        type: "income",
-      });
-    } else {
-      transactions.push({
-        date: txDate, month: txMonth,
-        merchant: cleanMerchant,
-        amount, currency, category, country,
-        description: `Card transaction of ${amount} ${currency} - ${cleanMerchant}`,
-        type: "expense",
+        date, month, merchant: "Wise Card Fee",
+        amount: fee, currency: statCur,
+        baseAmount: fee, baseCurrency: statCur,
+        category: "Service Fees", country: "United Kingdom",
+        description: "Wise card transaction fee", type: "fee",
       });
     }
   }
 
-  // 2. Wise Charges (card fees): "Wise Charges for: CARD-XXXXXXX"
-  const wiseChargesRegex = /Wise Charges for:\s*CARD-\d+[\s\n]*(\d{1,2})\s*(January|February|March|April|May|June|July|August|September|October|November|December)\s*(\d{4})[^\n]*?Transaction:\s*FEE-CARD-\d+[\s\n]*-([\d,]+\.?\d*)/gi;
-
-  while ((match = wiseChargesRegex.exec(text)) !== null) {
-    const day = match[1].padStart(2, "0");
-    const mon = MONTH_NAMES[match[2].toLowerCase()] || "01";
-    const year = match[3];
-    const feeAmount = parseFloat(match[4].replace(/,/g, ""));
-
-    if (feeAmount > 0) {
-      transactions.push({
-        date: `${day}-${mon}-${year}`,
-        month: `${match[2]} ${year}`,
-        merchant: "Wise Card Fee",
-        amount: feeAmount,
-        currency: statementCurrency,
-        category: "Service Fees",
-        country: "United Kingdom",
-        description: `Wise Charges for card transaction`,
-        type: "fee",
-      });
+  // 3a. Assets service fee WITH "| Asset 1" line — boundary: don't cross "Card transaction of"
+  const assetRx = new RegExp(
+    `(\\w{3}) Assets service fee\\s*(\\d{1,2})\\s+(${MP})\\s+(\\d{4})((?:(?!Card transaction of)[\\s\\S])*?)\\| Asset 1\\s*\\n(-?[\\d,]+\\.\\d{2})`,
+    "gi"
+  );
+  const seenAssetFees = new Set<string>();
+  while ((m = assetRx.exec(text)) !== null) {
+    const feeCur = m[1].toUpperCase();
+    const fee = Math.abs(parseFloat(m[6].replace(/,/g, "")));
+    if (fee > 0) {
+      const { date, month } = pd(m[2], m[3], m[4]);
+      const key = `${date}|${feeCur}|${fee}`;
+      if (!seenAssetFees.has(key)) {
+        seenAssetFees.add(key);
+        transactions.push({
+          date, month, merchant: `${feeCur} Assets Service Fee`,
+          amount: fee, currency: feeCur,
+          baseAmount: fee, baseCurrency: statCur,
+          category: "Service Fees", country: "United Kingdom",
+          description: `${feeCur} Assets service fee`, type: "fee",
+        });
+      }
     }
   }
 
-  // 3. Assets service fees: "CUR Assets service fee"
-  const assetFeeRegex = /(\w{3}) Assets service fee[\s\n]*(\d{1,2})\s*(January|February|March|April|May|June|July|August|September|October|November|December)\s*(\d{4})[^\n]*?-([\d,]+\.?\d*)/gi;
-
-  while ((match = assetFeeRegex.exec(text)) !== null) {
-    const feeCurrency = match[1].toUpperCase();
-    const day = match[2].padStart(2, "0");
-    const mon = MONTH_NAMES[match[3].toLowerCase()] || "01";
-    const year = match[4];
-    const feeAmount = parseFloat(match[5].replace(/,/g, ""));
-
-    if (feeAmount > 0) {
-      transactions.push({
-        date: `${day}-${mon}-${year}`,
-        month: `${match[3]} ${year}`,
-        merchant: `${feeCurrency} Assets Service Fee`,
-        amount: feeAmount,
-        currency: feeCurrency,
-        category: "Service Fees",
-        country: "United Kingdom",
-        description: `${feeCurrency} Assets service fee`,
-        type: "fee",
-      });
+  // 3b. Assets service fee WITHOUT "| Asset 1" — amount directly after ACCRUAL_CHECKOUT line
+  // Format: "CUR Assets service fee\nDD Month YYYYTransaction: ACCRUAL_CHECKOUT-...\n-X.XXBALANCE"
+  const assetNoAssetRx = new RegExp(
+    `(\\w{3}) Assets service fee\\s*(\\d{1,2})\\s+(${MP})\\s+(\\d{4})Transaction: ACCRUAL_CHECKOUT[^\\n]*\\n(-?[\\d,]+\\.\\d{2})`,
+    "gi"
+  );
+  while ((m = assetNoAssetRx.exec(text)) !== null) {
+    const feeCur = m[1].toUpperCase();
+    const fee = Math.abs(parseFloat(m[5].replace(/,/g, "")));
+    if (fee > 0) {
+      const { date, month } = pd(m[2], m[3], m[4]);
+      const key = `${date}|${feeCur}|${fee}`;
+      if (!seenAssetFees.has(key)) {
+        seenAssetFees.add(key);
+        transactions.push({
+          date, month, merchant: `${feeCur} Assets Service Fee`,
+          amount: fee, currency: feeCur,
+          baseAmount: fee, baseCurrency: statCur,
+          category: "Service Fees", country: "United Kingdom",
+          description: `${feeCur} Assets service fee`, type: "fee",
+        });
+      }
     }
   }
 
-  // 4. Sent money: "Sent money to NAME"
-  const sentRegex = /Sent money to ([^\n]+?)[\s\n]*(\d{1,2})\s*(January|February|March|April|May|June|July|August|September|October|November|December)\s*(\d{4})[^\n]*?-([\d,]+\.?\d*)/gi;
-
-  while ((match = sentRegex.exec(text)) !== null) {
-    const recipient = match[1].trim().substring(0, 80);
-    const day = match[2].padStart(2, "0");
-    const mon = MONTH_NAMES[match[3].toLowerCase()] || "01";
-    const year = match[4];
-    const amount = parseFloat(match[5].replace(/,/g, ""));
-
+  // 4. Received money
+  const receivedRx = new RegExp(
+    `Received money from ([^\\n]+?)\\s*(\\d{1,2})\\s+(${MP})\\s+(\\d{4})[\\s\\S]*?\\| Asset 1\\s*\\n([\\d,]+\\.\\d{2})`,
+    "gi"
+  );
+  while ((m = receivedRx.exec(text)) !== null) {
+    const sender = m[1].trim().replace(/\n/g, " ").substring(0, 80);
+    const amount = parseFloat(m[5].replace(/,/g, ""));
     if (amount > 0) {
+      const { date, month } = pd(m[2], m[3], m[4]);
       transactions.push({
-        date: `${day}-${mon}-${year}`,
-        month: `${match[3]} ${year}`,
-        merchant: `Transfer to ${recipient}`,
-        amount, currency: statementCurrency,
-        category: "Transfer",
-        country: "Unknown",
-        description: `Sent money to ${recipient}`,
-        type: "expense",
+        date, month, merchant: `Received from ${sender}`,
+        amount, currency: statCur,
+        baseAmount: amount, baseCurrency: statCur,
+        category: "Transfer", country: "Unknown",
+        description: `Received money from ${sender}`, type: "income",
       });
     }
   }
 
-  // 5. Received money: "Received money from NAME"
-  const receivedRegex = /Received money from ([^\n]+?)[\s\n]*(\d{1,2})\s*(January|February|March|April|May|June|July|August|September|October|November|December)\s*(\d{4})/gi;
-
-  while ((match = receivedRegex.exec(text)) !== null) {
-    const sender = match[1].trim().substring(0, 80);
-    const day = match[2].padStart(2, "0");
-    const mon = MONTH_NAMES[match[3].toLowerCase()] || "01";
-    const year = match[4];
-
-    // Find amount — look for a number after the date context
-    const afterMatch = text.substring(receivedRegex.lastIndex, receivedRegex.lastIndex + 300);
-    const amtMatch = afterMatch.match(/([\d,]+\.?\d*)/);
-    const amount = amtMatch ? parseFloat(amtMatch[1].replace(/,/g, "")) : 0;
-
+  // 5. Sent money (transfers out)
+  const sentRx = new RegExp(
+    `Sent money to ([^\\n]+?)\\s*(\\d{1,2})\\s+(${MP})\\s+(\\d{4})[\\s\\S]*?\\| Asset 1\\s*\\n(-[\\d,]+\\.\\d{2})`,
+    "gi"
+  );
+  while ((m = sentRx.exec(text)) !== null) {
+    const recipient = m[1].trim()
+      .replace(/\s*\(fee:[^)]*\)/g, "")
+      .replace(/\n/g, " ").substring(0, 80);
+    const amount = Math.abs(parseFloat(m[5].replace(/,/g, "")));
     if (amount > 0) {
+      const { date, month } = pd(m[2], m[3], m[4]);
       transactions.push({
-        date: `${day}-${mon}-${year}`,
-        month: `${match[3]} ${year}`,
-        merchant: `Received from ${sender}`,
-        amount, currency: statementCurrency,
-        category: "Transfer",
-        country: "Unknown",
-        description: `Received money from ${sender}`,
-        type: "income",
+        date, month, merchant: `Transfer to ${recipient}`,
+        amount, currency: statCur,
+        baseAmount: amount, baseCurrency: statCur,
+        category: "Transfer", country: "Unknown",
+        description: `Sent money to ${recipient}`, type: "expense",
       });
     }
   }
 
-  // 6. Wise Card Acquisition
-  const cardAcqRegex = /Wise Card Acquisition[\s\n]*(\d{1,2})\s*(January|February|March|April|May|June|July|August|September|October|November|December)\s*(\d{4})[^\n]*?-([\d,]+\.?\d*)/gi;
-
-  while ((match = cardAcqRegex.exec(text)) !== null) {
-    const day = match[1].padStart(2, "0");
-    const mon = MONTH_NAMES[match[2].toLowerCase()] || "01";
-    const year = match[3];
-    const amount = parseFloat(match[4].replace(/,/g, ""));
-
-    if (amount > 0) {
+  // 6. Wise Card Acquisition (new card fee)
+  const acqRx = new RegExp(
+    `Wise Card Acquisition\\s*(\\d{1,2})\\s+(${MP})\\s+(\\d{4})[\\s\\S]*?\\| Asset 1\\s*\\n(-?[\\d,]+\\.\\d{2})`,
+    "gi"
+  );
+  while ((m = acqRx.exec(text)) !== null) {
+    const fee = Math.abs(parseFloat(m[4].replace(/,/g, "")));
+    if (fee > 0) {
+      const { date, month } = pd(m[1], m[2], m[3]);
       transactions.push({
-        date: `${day}-${mon}-${year}`,
-        month: `${match[2]} ${year}`,
-        merchant: "Wise Card Acquisition",
-        amount, currency: statementCurrency,
-        category: "Service Fees",
-        country: "United Kingdom",
-        description: "Wise Card Acquisition fee",
-        type: "fee",
+        date, month, merchant: "Wise Card Acquisition",
+        amount: fee, currency: statCur,
+        baseAmount: fee, baseCurrency: statCur,
+        category: "Service Fees", country: "United Kingdom",
+        description: "Wise card acquisition fee", type: "fee",
+      });
+    }
+  }
+
+  // 7. Transfer fees (Wise Charges for: TRANSFER-XXXX)
+  const transFeeRx = new RegExp(
+    `Wise Charges for: TRANSFER-\\d+\\s*(\\d{1,2})\\s+(${MP})\\s+(\\d{4})[\\s\\S]*?FEE-TRANSFER-\\d+\\s*\\n(-?[\\d,]+\\.\\d{2})`,
+    "gi"
+  );
+  while ((m = transFeeRx.exec(text)) !== null) {
+    const fee = Math.abs(parseFloat(m[4].replace(/,/g, "")));
+    if (fee > 0) {
+      const { date, month } = pd(m[1], m[2], m[3]);
+      transactions.push({
+        date, month, merchant: "Wise Transfer Fee",
+        amount: fee, currency: statCur,
+        baseAmount: fee, baseCurrency: statCur,
+        category: "Service Fees", country: "United Kingdom",
+        description: "Wise transfer fee", type: "fee",
       });
     }
   }
