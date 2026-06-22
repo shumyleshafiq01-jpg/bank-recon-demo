@@ -1032,7 +1032,7 @@ export default function FundEstimatorPage() {
                           </td>
                           <td className={`px-2 py-1.5 text-right font-mono font-semibold ${balance < 0 ? "text-red-400" : "text-foreground"}`}>
                             {fmt(balance)}
-                            {hasPdc && <span className="text-[9px] text-amber-400 block">PDC</span>}
+                            {hasPdc && <span className="text-[9px] text-red-400 block">PDC</span>}
                           </td>
                           {/* AA1 — tick for credit or IBFT entries */}
                           <td className="px-2 py-1.5 text-center">
@@ -1125,10 +1125,10 @@ export default function FundEstimatorPage() {
                 const pdcRows = currentRows.filter((r) => r.pdcDate);
                 if (pdcRows.length === 0) return null;
                 return (
-                  <div className="px-5 py-3 border-t border-border bg-amber-500/5">
-                    <p className="text-xs text-amber-400 font-semibold mb-1.5">Please note the PDC cheques issued:</p>
+                  <div className="px-5 py-3 border-t border-border bg-red-500/5">
+                    <p className="text-xs text-red-400 font-semibold mb-1.5">Please note the PDC cheques issued:</p>
                     {pdcRows.map((r, i) => (
-                      <p key={r.id} className="text-xs text-amber-300/80 font-mono ml-2">
+                      <p key={r.id} className="text-xs text-red-300/80 font-mono ml-2">
                         #{i + 1} {r.chequeNo ? `Cheque #${r.chequeNo}` : "—"} &nbsp;·&nbsp; Amount = {fmt(r.debit ?? r.credit ?? 0)} &nbsp;·&nbsp; PDC Date: {r.pdcDate} &nbsp;·&nbsp; {r.description}
                       </p>
                     ))}
