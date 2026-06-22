@@ -424,7 +424,7 @@ function parseStandardChartered(pdfText: string): { transactions: Transaction[];
     }
 
     // --- Skip non-transaction lines ---
-    if (/Sindh\s*ST|Adv\s*Tax\s*FCY|STWH|Amount\s+USD|US\s+Rate|WorldMiles|MasterCard\s+World/i.test(line)) continue;
+    if (/STWH|Amount\s+USD|US\s+Rate|WorldMiles|MasterCard\s+World/i.test(line)) continue;
     if (/PREVIOUS\s+BALANCE|NEW\s+BALANCE|MINIMUM\s+PAYMENT|PAYMENT\s+DUE|CREDIT\s+LIMIT|AVAILABLE/i.test(line)) continue;
     if (/standard\s+chartered|P\.O\.Box|Client\s+Centre|complaints\./i.test(line)) continue;
     if (/Payment\s+Coupon|cheque\s+number|Drawn\s+on|Debit\s+my/i.test(line)) continue;
