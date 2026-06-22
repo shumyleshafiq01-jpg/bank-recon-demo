@@ -361,6 +361,127 @@ function parseCSV(text: string): Transaction[] {
 }
 
 /* ═══════════════════════════════════════════
+   STANDARD CHARTERED — DEDICATED NO-AI PARSER
+   ═══════════════════════════════════════════ */
+function isStandardChartered(text: string): boolean {
+  return /standard\s+chartered|worldmiles|5503\s*76\*+/i.test(text);
+}
+
+function parseStandardChartered(pdfText: string): { transactions: Transaction[]; meta: StatementMeta } {
+  const meta: StatementMeta = {
+    cardholderName: "", cardLast4: "", statementMonth: "", paymentDueDate: "",
+    previousBalance: null, purchases: null, feeAndCharges: null, payments: null,
+    currentBalance: null, minimumAmountDue: null,
+  };
+
+  const MONTHS: Record<string, string> = {
+    JAN: "01", FEB: "02", MAR: "03", APR: "04", MAY: "05", JUN: "06",
+    JUL: "07", AUG: "08", SEP: "09", OCT: "10", NOV: "11", DEC: "12",
+  };
+
+  const lines = pdfText.split("\n").map((l) => l.trim()).filter(Boolean);
+  const transactions: Transaction[] = [];
+  let idCounter = 1;
+  const seen = new Set<string>();
+
+  for (const line of lines) {
+    // --- Meta extraction ---
+    if (/PREVIOUS\s+BALANCE/i.test(line)) {
+      const m = line.match(/([\d,]+\.\d{2})/);
+      if (m && meta.previousBalance === null) meta.previousBalance = parseFloat(m[1].replace(/,/g, ""));
+    }
+    if (/NEW\s+BALANCE/i.test(line)) {
+      const m = line.match(/([\d,]+\.\d{2})/);
+      if (m && meta.currentBalance === null) meta.currentBalance = parseFloat(m[1].replace(/,/g, ""));
+    }
+    if (/MINIMUM\s+PAYMENT\s+DUE/i.test(line)) {
+      const m = line.match(/([\d,]+\.\d{2})/);
+      if (m && meta.minimumAmountDue === null) meta.minimumAmountDue = parseFloat(m[1].replace(/,/g, ""));
+    }
+    // Statement date: "05 Apr 2025" → "APR-2025"
+    if (!meta.statementMonth) {
+      const m = line.match(/(\d{1,2})\s+([A-Za-z]{3})\s+(20\d{2})/);
+      if (m) meta.statementMonth = `${m[2].toUpperCase()}-${m[3]}`;
+    }
+    // Payment due date: look for the second date occurrence per page
+    if (!meta.paymentDueDate) {
+      const dates = [...line.matchAll(/(\d{1,2})\s+([A-Za-z]{3})\s+(20\d{2})/g)];
+      if (dates.length >= 2) {
+        const d = dates[1];
+        meta.paymentDueDate = `${d[1]}-${d[2].toUpperCase()}-${d[3]}`;
+      }
+    }
+    // Card section header: "5503 76** **** 8161    KHALID M PARACHA"
+    const cardHeader = line.match(/\d{4}\s+\d{2}\*\*\s+\*{4}\s+(\d{4})\s{2,}([A-Z ]{4,})/);
+    if (cardHeader) {
+      if (!meta.cardLast4) meta.cardLast4 = cardHeader[1];
+      if (!meta.cardholderName) meta.cardholderName = cardHeader[2].trim();
+      continue;
+    }
+    // MR ... cardholder fallback
+    if (!meta.cardholderName && /^MR\s+[A-Z]{2}/i.test(line)) {
+      meta.cardholderName = line.replace(/\d.*$/, "").trim();
+    }
+
+    // --- Skip non-transaction lines ---
+    if (/Sindh\s*ST|Adv\s*Tax\s*FCY|STWH|Amount\s+USD|US\s+Rate|WorldMiles|MasterCard\s+World/i.test(line)) continue;
+    if (/PREVIOUS\s+BALANCE|NEW\s+BALANCE|MINIMUM\s+PAYMENT|PAYMENT\s+DUE|CREDIT\s+LIMIT|AVAILABLE/i.test(line)) continue;
+    if (/standard\s+chartered|P\.O\.Box|Client\s+Centre|complaints\./i.test(line)) continue;
+    if (/Payment\s+Coupon|cheque\s+number|Drawn\s+on|Debit\s+my/i.test(line)) continue;
+
+    // --- Transaction line: must start with DD MMM ---
+    const dateMatch = line.match(/^(\d{1,2})\s+([A-Z]{3})\b/i);
+    if (!dateMatch) continue;
+    const monthKey = dateMatch[2].toUpperCase();
+    if (!MONTHS[monthKey]) continue;
+
+    const day = dateMatch[1].padStart(2, "0");
+    const mon = MONTHS[monthKey];
+    // Infer year from statement month or current year
+    const year = meta.statementMonth ? meta.statementMonth.split("-")[1] : String(new Date().getFullYear());
+    const dateStr = `${day}-${mon}-${year}`;
+
+    // Detect credit (CR suffix at end)
+    const isCredit = /\bCR\s*$/.test(line) || /PAYMENT\s+RECD|1BILL\s+PAYMENT/i.test(line);
+
+    // For foreign currency lines: "...COUNTRY   PKR   xxx.xx    yyy.yy"
+    // The LAST amount on the line is the PKR-billed amount
+    const allAmounts = [...line.matchAll(/([\d,]+\.\d{2})/g)];
+    if (allAmounts.length === 0) continue;
+    const rawAmtStr = allAmounts[allAmounts.length - 1][1];
+    const amount = parseFloat(rawAmtStr.replace(/,/g, ""));
+    if (!amount || amount === 0) continue;
+
+    // Merchant: everything between end of date and first amount (or PKR keyword)
+    const dateEnd = (dateMatch.index ?? 0) + dateMatch[0].length;
+    const firstAmtIdx = allAmounts[0].index ?? line.length;
+    let merchant = line.slice(dateEnd, firstAmtIdx)
+      .replace(/\s+PKR\s*$/i, "")  // strip trailing "PKR" (foreign currency label)
+      .replace(/\s{2,}/g, " ")
+      .trim();
+
+    if (merchant.length < 2) continue;
+
+    // Skip tax/fee sub-lines that slipped through
+    if (/^Sindh|^Adv\s*Tax|^STWH/i.test(merchant)) continue;
+
+    const key = `${dateStr}|${merchant}|${amount}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    transactions.push({
+      id: `TXN-${String(idCounter++).padStart(3, "0")}`,
+      date: dateStr,
+      merchant,
+      amount,
+      type: isCredit ? "credit" : "debit",
+    });
+  }
+
+  return { transactions, meta };
+}
+
+/* ═══════════════════════════════════════════
    LOCAL PDF EXTRACTION (NO AI)
    ═══════════════════════════════════════════ */
 function parsePdfLocal(pdfText: string): { transactions: Transaction[]; meta: StatementMeta } {
@@ -738,7 +859,9 @@ export async function POST(request: Request) {
           textForParsing = ocr.text;
         }
 
-        const result = parsePdfLocal(textForParsing);
+        const result = isStandardChartered(textForParsing)
+          ? parseStandardChartered(textForParsing)
+          : parsePdfLocal(textForParsing);
         transactions = result.transactions;
         meta = result.meta;
         if (transactions.length === 0 && !extractionWarning) {
