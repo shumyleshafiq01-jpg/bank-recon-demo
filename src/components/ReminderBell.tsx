@@ -159,7 +159,11 @@ export default function ReminderBell({ role, name }: ReminderBellProps) {
               <p className="text-[10px] text-muted">
                 {pending[0]?.frequency === "one-time"
                   ? "Mark done to dismiss permanently."
-                  : `Reminders repeat ${pending[0]?.frequency}. Marking done hides until next cycle.`}
+                  : pending[0]?.frequency === "daily"
+                  ? "Daily reminder — reappears after 24 hours."
+                  : pending[0]?.frequency === "weekly"
+                  ? "Weekly reminder — reappears after 7 days."
+                  : "Monthly reminder — reappears next calendar month."}
               </p>
             </div>
           )}

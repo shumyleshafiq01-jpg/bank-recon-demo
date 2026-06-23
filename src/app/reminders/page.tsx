@@ -30,8 +30,10 @@ const TARGET_OPTIONS = [
 
 const FREQ_OPTIONS = [
   { value: "one-time", label: "One-time" },
+  { value: "daily",    label: "Daily" },
   { value: "weekly",   label: "Weekly" },
   { value: "monthly",  label: "Monthly" },
+  { value: "annual",   label: "Annual" },
 ];
 
 const targetLabel = (t: string) => TARGET_OPTIONS.find((o) => o.value === t)?.label ?? t;
@@ -122,7 +124,7 @@ export default function RemindersPage() {
       </header>
 
       <div className="flex-1 overflow-y-auto p-4 md:p-6">
-        <div className="max-w-2xl mx-auto space-y-5 animate-fade-in">
+        <div className="max-w-6xl mx-auto space-y-5 animate-fade-in">
 
           {/* Create form */}
           <div className="bg-surface rounded-2xl border border-border p-5 space-y-4">
@@ -170,8 +172,10 @@ export default function RemindersPage() {
 
             <div className="flex items-center justify-between pt-1">
               <p className="text-[10px] text-muted">
-                {frequency === "monthly" && "Repeats every month — reappears after user marks done."}
-                {frequency === "weekly"  && "Repeats every 7 days — reappears after user marks done."}
+                {frequency === "monthly"  && "Repeats every month — reappears 1st of next month after marked done."}
+                {frequency === "weekly"   && "Repeats every 7 days — reappears after user marks done."}
+                {frequency === "daily"    && "Repeats every day — reappears 24 hours after marked done."}
+                {frequency === "annual"   && "Repeats every year — reappears next calendar year after marked done."}
                 {frequency === "one-time" && "Shows once until user marks done — then disappears permanently."}
               </p>
               <button
@@ -185,63 +189,76 @@ export default function RemindersPage() {
             </div>
           </div>
 
-          {/* Active reminders list */}
-          <div>
-            <h3 className="text-xs font-semibold text-muted uppercase tracking-wide mb-3">Active Reminders ({reminders.length})</h3>
-
+          {/* Active reminders table */}
+          <div className="bg-surface rounded-2xl border border-border overflow-hidden">
+            <div className="px-5 py-3 border-b border-border">
+              <h3 className="text-xs font-semibold text-muted uppercase tracking-wide">
+                Active Reminders <span className="text-amber-400 ml-1 font-bold">{reminders.length}</span>
+              </h3>
+            </div>
             {loading ? (
-              <div className="bg-surface rounded-2xl border border-border p-8 text-center text-muted text-sm">Loading...</div>
+              <p className="text-sm text-muted text-center py-10">Loading...</p>
             ) : reminders.length === 0 ? (
-              <div className="bg-surface rounded-2xl border border-border p-8 text-center text-muted text-sm">No active reminders. Create one above.</div>
+              <p className="text-sm text-muted text-center py-10">No active reminders. Create one above.</p>
             ) : (
-              <div className="space-y-3">
-                {reminders.map((r) => {
-                  const ds = getDone(r.id);
-                  const allDone = ds ? ds.doneCount >= ds.totalCount : false;
-                  return (
-                    <div key={r.id} className="bg-surface rounded-2xl border border-border p-4">
-                      <div className="flex items-start gap-3">
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm text-foreground leading-relaxed">{r.message}</p>
-                          <div className="flex items-center flex-wrap gap-2 mt-2">
-                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 font-semibold">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-amber-500/10 text-amber-400">
+                      <th className="px-4 py-3 text-left font-semibold w-[40px]">#</th>
+                      <th className="px-4 py-3 text-left font-semibold">Reminder</th>
+                      <th className="px-4 py-3 text-left font-semibold w-[120px]">For</th>
+                      <th className="px-4 py-3 text-left font-semibold w-[90px]">Frequency</th>
+                      <th className="px-4 py-3 text-left font-semibold w-[140px]">Due</th>
+                      <th className="px-4 py-3 text-center font-semibold w-[70px]">Done</th>
+                      <th className="px-4 py-3 text-center font-semibold w-[80px]">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reminders.map((r, i) => {
+                      const ds = getDone(r.id);
+                      const allDone = ds ? ds.doneCount >= ds.totalCount : false;
+                      return (
+                        <tr key={r.id} className={`border-t border-border/50 ${i % 2 === 0 ? "" : "bg-amber-500/[0.03]"} hover:bg-amber-500/10 transition-colors`}>
+                          <td className="px-4 py-3 text-muted font-semibold">{i + 1}</td>
+                          <td className="px-4 py-3">
+                            <p className="text-sm font-semibold text-foreground leading-snug">{r.message}</p>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="text-[10px] px-2 py-1 rounded-full bg-amber-500/15 text-amber-400 font-semibold whitespace-nowrap">
                               {targetLabel(r.target)}
                             </span>
-                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${freqColor(r.frequency)}`}>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`text-[10px] px-2 py-1 rounded-full font-semibold whitespace-nowrap ${freqColor(r.frequency)}`}>
                               {freqLabel(r.frequency)}
                             </span>
-                            {r.dueDate && (
-                              <span className="text-[10px] text-muted">Due: {r.dueDate}</span>
-                            )}
-                            {ds && (
-                              <span className={`text-[10px] font-semibold ${allDone ? "text-emerald-400" : "text-amber-400"}`}>
-                                {ds.doneCount}/{ds.totalCount} done
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          {ds && ds.doneCount > 0 && (
-                            <button
-                              onClick={() => resetReminder(r.id)}
-                              title="Reset — make it appear again for everyone"
-                              className="p-1.5 text-muted hover:text-amber-400 cursor-pointer transition-colors rounded-lg hover:bg-amber-500/10"
-                            >
-                              <RefreshCw className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                          <button
-                            onClick={() => deleteReminder(r.id)}
-                            title="Delete permanently"
-                            className="p-1.5 text-muted hover:text-red-400 cursor-pointer transition-colors rounded-lg hover:bg-red-500/10"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+                          </td>
+                          <td className="px-4 py-3 text-muted font-medium">{r.dueDate || "—"}</td>
+                          <td className="px-4 py-3 text-center">
+                            <span className={`text-sm font-bold ${allDone ? "text-emerald-400" : "text-amber-400"}`}>
+                              {ds ? `${ds.doneCount}/${ds.totalCount}` : "—"}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center justify-center gap-1.5">
+                              {ds && ds.doneCount > 0 && (
+                                <button onClick={() => resetReminder(r.id)} title="Reset for everyone"
+                                  className="p-1.5 text-muted hover:text-amber-400 cursor-pointer transition-colors rounded hover:bg-amber-500/10">
+                                  <RefreshCw className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                              <button onClick={() => deleteReminder(r.id)} title="Delete permanently"
+                                className="p-1.5 text-muted hover:text-red-400 cursor-pointer transition-colors rounded hover:bg-red-500/10">
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>

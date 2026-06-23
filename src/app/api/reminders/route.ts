@@ -6,7 +6,7 @@ const DONE_SHEET = "RemindersDone";
 const REMINDERS_HEADERS = ["id", "message", "target", "dueDate", "frequency", "createdAt", "active"];
 const DONE_HEADERS = ["reminderId", "role", "markedAt"];
 
-type Frequency = "one-time" | "weekly" | "monthly";
+type Frequency = "one-time" | "daily" | "weekly" | "monthly" | "annual";
 
 async function init() {
   await ensureSheet(REMINDERS_SHEET, REMINDERS_HEADERS);
@@ -24,12 +24,19 @@ function isDoneForNow(frequency: Frequency, markedAt: string): boolean {
   const marked = new Date(markedAt);
   const now = new Date();
   if (frequency === "one-time") return true;
+  if (frequency === "daily") {
+    const diffMs = now.getTime() - marked.getTime();
+    return diffMs < 24 * 60 * 60 * 1000;
+  }
   if (frequency === "weekly") {
     const diffMs = now.getTime() - marked.getTime();
     return diffMs < 7 * 24 * 60 * 60 * 1000;
   }
   if (frequency === "monthly") {
     return marked.getFullYear() === now.getFullYear() && marked.getMonth() === now.getMonth();
+  }
+  if (frequency === "annual") {
+    return marked.getFullYear() === now.getFullYear();
   }
   return false;
 }

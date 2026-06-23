@@ -162,8 +162,10 @@ export default function FundEstimatorPage() {
   const [selectedBank, setSelectedBank] = useState<string>("");
   const [showBankModal, setShowBankModal] = useState(false);
   const [editingBank, setEditingBank] = useState<BankAccount | null>(null);
+  const [showBankList, setShowBankList] = useState(false);
   const [showSummary, setShowSummary] = useState(true);
   const [summaryFilter, setSummaryFilter] = useState("");
+  const [summaryAccFilter, setSummaryAccFilter] = useState("");
   const [editMode, setEditMode] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -452,8 +454,18 @@ export default function FundEstimatorPage() {
 
           {/* Bank Management Bar */}
           <div className="bg-surface rounded-2xl border border-border p-4">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-xs font-semibold text-muted uppercase tracking-wide">Bank Accounts</h3>
+            <div className="flex items-center justify-between">
+              <button
+                onClick={() => setShowBankList(v => !v)}
+                className="flex items-center gap-2 cursor-pointer group"
+              >
+                <Building2 className="w-4 h-4 text-indigo-400" />
+                <h3 className="text-xs font-semibold text-muted uppercase tracking-wide group-hover:text-foreground transition-colors">
+                  Bank Accounts
+                  {banks.length > 0 && <span className="ml-1.5 text-indigo-400">({banks.length})</span>}
+                </h3>
+                <ChevronDown className={`w-3.5 h-3.5 text-muted transition-transform ${showBankList ? "rotate-180" : ""}`} />
+              </button>
               <button
                 onClick={() => requireAuth(["accountant"], () => { setEditingBank(null); setShowBankModal(true); })}
                 className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-indigo-500 hover:bg-indigo-500/80 text-white rounded-lg cursor-pointer transition-colors"
@@ -461,10 +473,12 @@ export default function FundEstimatorPage() {
                 <Plus className="w-3 h-3" /> Add Bank
               </button>
             </div>
+            {showBankList && (
+              <>
             {banks.length === 0 ? (
-              <p className="text-sm text-muted text-center py-6">No bank accounts added yet. Click &quot;Add Bank&quot; to get started.</p>
+              <p className="text-sm text-muted text-center py-6 mt-3">No bank accounts added yet. Click &quot;Add Bank&quot; to get started.</p>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-3">
                 {banks.map((bank) => (
                   <div
                     key={bank.id}
@@ -506,6 +520,8 @@ export default function FundEstimatorPage() {
                 ))}
               </div>
             )}
+              </>
+            )}
           </div>
 
           {/* Summary Dashboard */}
@@ -529,10 +545,14 @@ export default function FundEstimatorPage() {
               </button>
               {showSummary && (() => {
                 const uniqueBanks = [...new Set(banks.map(b => b.bankName))].sort();
-                const filteredBanks = summaryFilter ? banks.filter(b => b.bankName === summaryFilter) : banks;
+                const filteredBanks = banks.filter(b => {
+                  const matchBank = !summaryFilter || b.bankName === summaryFilter;
+                  const matchAcc  = !summaryAccFilter || b.accountNo.toLowerCase().includes(summaryAccFilter.toLowerCase());
+                  return matchBank && matchAcc;
+                });
                 return (
                   <div className="px-5 pb-4 space-y-3">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <select
                         value={summaryFilter}
                         onChange={e => setSummaryFilter(e.target.value)}
@@ -541,8 +561,18 @@ export default function FundEstimatorPage() {
                         <option value="">All Banks</option>
                         {uniqueBanks.map(b => <option key={b} value={b}>{b}</option>)}
                       </select>
-                      {summaryFilter && (
-                        <button onClick={() => setSummaryFilter("")} className="text-[10px] text-muted hover:text-foreground cursor-pointer">Clear</button>
+                      <select
+                        value={summaryAccFilter}
+                        onChange={e => setSummaryAccFilter(e.target.value)}
+                        className="text-xs bg-background border border-border rounded-lg px-2 py-1.5 text-foreground focus:outline-none focus:border-indigo-500/50 cursor-pointer"
+                      >
+                        <option value="">All Accounts</option>
+                        {banks.filter(b => b.accountNo).map(b => (
+                          <option key={b.id} value={b.accountNo}>{b.accountNo} — {b.bankName}</option>
+                        ))}
+                      </select>
+                      {(summaryFilter || summaryAccFilter) && (
+                        <button onClick={() => { setSummaryFilter(""); setSummaryAccFilter(""); }} className="text-[10px] text-muted hover:text-foreground cursor-pointer">Clear</button>
                       )}
                     </div>
                     <table className="w-full text-xs">
@@ -551,6 +581,7 @@ export default function FundEstimatorPage() {
                           <th className="px-3 py-2.5 text-left font-semibold w-[40px]">S.No</th>
                           <th className="px-3 py-2.5 text-left font-semibold">Bank</th>
                           <th className="px-3 py-2.5 text-left font-semibold">Account Details</th>
+                          <th className="px-3 py-2.5 text-left font-semibold w-[160px]">Account No.</th>
                           <th className="px-3 py-2.5 text-right font-semibold w-[140px]">Balance</th>
                         </tr>
                       </thead>
@@ -560,11 +591,12 @@ export default function FundEstimatorPage() {
                             <td className="px-3 py-2 text-muted">{i + 1}</td>
                             <td className="px-3 py-2 text-foreground">{bank.bankName}</td>
                             <td className="px-3 py-2 text-foreground">{bank.acTitle} &middot; {bank.accountType}</td>
+                            <td className="px-3 py-2 font-mono text-muted">{bank.accountNo || "—"}</td>
                             <td className="px-3 py-2 text-right font-mono font-semibold text-foreground">{fmt(getAccountBalance(bank))}</td>
                           </tr>
                         ))}
                         <tr className="bg-indigo-500/5 font-semibold border-t border-border">
-                          <td className="px-3 py-2.5" colSpan={3}>{summaryFilter ? `TOTAL (${summaryFilter})` : "TOTAL"}</td>
+                          <td className="px-3 py-2.5" colSpan={4}>{summaryFilter ? `TOTAL (${summaryFilter})` : summaryAccFilter ? `TOTAL (filtered)` : "TOTAL"}</td>
                           <td className="px-3 py-2.5 text-right font-mono text-indigo-400">{fmt(filteredBanks.reduce((s, b) => s + getAccountBalance(b), 0))}</td>
                         </tr>
                       </tbody>
