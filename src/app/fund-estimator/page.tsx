@@ -3,10 +3,11 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   ArrowLeft, Plus, Pencil, Trash2, Building2, ChevronDown,
-  Download, Save, X, Banknote, Eye, Lock, Unlock, Check, CheckCheck, Bell,
+  Download, Save, X, Banknote, Eye, Lock, Unlock, Check, CheckCheck,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
+import ReminderBell from "@/components/ReminderBell";
 
 /* ═══════════════════════════════════════════
    TYPES
@@ -92,16 +93,6 @@ const emptyRow = (): LedgerRow => ({
 });
 
 /* ═══════════════════════════════════════════
-   NOTIFICATION TYPES
-   ═══════════════════════════════════════════ */
-interface Notification {
-  id: string;
-  message: string;
-  target: string;
-  createdAt?: string;
-}
-
-/* ═══════════════════════════════════════════
    PIN / SESSION
    ═══════════════════════════════════════════ */
 type Role = "accountant" | "aa1" | "aa2";
@@ -161,262 +152,6 @@ function PinModal({ allowedRoles, onSuccess, onClose }: {
     </div>
   );
 }
-
-/* ═══════════════════════════════════════════
-   NOTIFICATION POPUP  (AA1 / AA2)
-   ═══════════════════════════════════════════ */
-function NotifPopup({ notifs, role, onDone, onClose }: {
-  notifs: Notification[];
-  role: string;
-  onDone: (id: string) => void;
-  onClose: () => void;
-}) {
-  const [doneIds, setDoneIds] = useState<Set<string>>(new Set());
-  const [marking, setMarking] = useState<string | null>(null);
-
-  async function markDone(id: string) {
-    setMarking(id);
-    try {
-      await fetch("/api/fund-estimator/notifications", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "done", notifId: id, role }),
-      });
-      setDoneIds((prev) => new Set([...prev, id]));
-      onDone(id);
-    } catch { /* ignore */ }
-    setMarking(null);
-  }
-
-  const visible = notifs.filter((n) => !doneIds.has(n.id));
-
-  return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-surface rounded-2xl border border-border w-full max-w-md shadow-2xl">
-        <div className="flex items-center gap-3 px-5 py-4 border-b border-border">
-          <div className="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center">
-            <Bell className="w-4 h-4 text-amber-400" />
-          </div>
-          <div>
-            <h3 className="text-sm font-bold text-foreground">Reminders</h3>
-            <p className="text-[10px] text-muted">{visible.length} pending task{visible.length !== 1 ? "s" : ""}</p>
-          </div>
-          <button onClick={onClose} className="ml-auto text-muted hover:text-foreground cursor-pointer">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-        <div className="p-5 space-y-3 max-h-[60vh] overflow-y-auto">
-          {visible.length === 0 ? (
-            <p className="text-sm text-muted text-center py-4">All tasks marked done.</p>
-          ) : visible.map((n) => (
-            <div key={n.id} className="flex items-start gap-3 p-3 bg-amber-500/5 border border-amber-500/20 rounded-xl">
-              <div className="w-1.5 h-1.5 rounded-full bg-amber-400 mt-2 shrink-0" />
-              <p className="flex-1 text-sm text-foreground leading-relaxed">{n.message}</p>
-              <button
-                onClick={() => markDone(n.id)}
-                disabled={marking === n.id}
-                className="shrink-0 flex items-center gap-1 text-[10px] px-2.5 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white border border-emerald-600 rounded-lg cursor-pointer transition-colors disabled:opacity-50"
-              >
-                <Check className="w-3 h-3" />
-                {marking === n.id ? "..." : "Done"}
-              </button>
-            </div>
-          ))}
-        </div>
-        {visible.length > 0 && (
-          <div className="px-5 py-4 border-t border-border">
-            <p className="text-[10px] text-muted">Mark each reminder done once completed. They will keep appearing until marked.</p>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/* ═══════════════════════════════════════════
-   MANAGE NOTIFICATIONS MODAL  (Accountant)
-   ═══════════════════════════════════════════ */
-interface NotifEntry {
-  id: string;
-  message: string;
-  target: string;
-  createdAt: string;
-  active: boolean;
-}
-
-interface DoneEntry {
-  notifId: string;
-  role: string;
-}
-
-function ManageNotifModal({ onClose }: { onClose: () => void }) {
-  const [notifs, setNotifs] = useState<NotifEntry[]>([]);
-  const [done, setDone] = useState<DoneEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [newMsg, setNewMsg] = useState("");
-  const [newTarget, setNewTarget] = useState<"aa1" | "aa2" | "both">("both");
-  const [saving, setSaving] = useState(false);
-
-  async function load() {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/fund-estimator/notifications");
-      if (res.ok) {
-        const data = await res.json();
-        setNotifs(data.notifications ?? []);
-        setDone(data.done ?? []);
-      }
-    } catch { /* ignore */ }
-    setLoading(false);
-  }
-
-  useEffect(() => { load(); }, []);
-
-  async function createNotif() {
-    if (!newMsg.trim()) return;
-    setSaving(true);
-    try {
-      await fetch("/api/fund-estimator/notifications", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: newMsg.trim(), target: newTarget }),
-      });
-      setNewMsg("");
-      await load();
-    } catch { /* ignore */ }
-    setSaving(false);
-  }
-
-  async function resetNotif(id: string) {
-    await fetch("/api/fund-estimator/notifications", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "reset", notifId: id }),
-    });
-    await load();
-  }
-
-  async function deleteNotif(id: string) {
-    await fetch("/api/fund-estimator/notifications", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ notifId: id }),
-    });
-    await load();
-  }
-
-  const targetLabel = (t: string) =>
-    t === "both" ? "AA1 + AA2" : t === "aa1" ? "AA1 (Moiz)" : "AA2 (Hamza)";
-
-  const totalFor = (t: string) => (t === "both" ? 2 : 1);
-
-  const doneCountFor = (notifId: string, target: string) =>
-    done.filter((d) => d.notifId === notifId && (target === "both" || d.role === target)).length;
-
-  return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-surface rounded-2xl border border-border max-w-lg w-full max-h-[85vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center gap-3 px-5 py-4 border-b border-border">
-          <div className="w-7 h-7 rounded-lg bg-amber-500/20 flex items-center justify-center">
-            <Bell className="w-3.5 h-3.5 text-amber-400" />
-          </div>
-          <h3 className="text-sm font-semibold text-foreground">Manage Reminders</h3>
-          <button onClick={onClose} className="ml-auto text-muted hover:text-foreground cursor-pointer">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="overflow-auto p-5 space-y-5 flex-1">
-          {/* Create new */}
-          <div className="bg-background rounded-xl border border-border p-4 space-y-3">
-            <h4 className="text-xs font-semibold text-indigo-400 uppercase tracking-wide">New Reminder</h4>
-            <textarea
-              value={newMsg}
-              onChange={(e) => setNewMsg(e.target.value)}
-              placeholder="e.g. Add EOBI contribution entries for the month"
-              rows={3}
-              className="w-full bg-surface border border-border rounded-lg px-3 py-2.5 text-sm text-foreground focus:outline-none focus:border-indigo-500/50 resize-none"
-            />
-            <div className="flex items-center gap-2">
-              <select
-                value={newTarget}
-                onChange={(e) => setNewTarget(e.target.value as "aa1" | "aa2" | "both")}
-                className="text-xs bg-surface border border-border rounded-lg px-2.5 py-2 text-foreground focus:outline-none focus:border-indigo-500/50 cursor-pointer"
-              >
-                <option value="both">Both AA1 + AA2</option>
-                <option value="aa1">AA1 — Moiz only</option>
-                <option value="aa2">AA2 — Hamza only</option>
-              </select>
-              <button
-                onClick={createNotif}
-                disabled={!newMsg.trim() || saving}
-                className="flex items-center gap-1.5 px-4 py-2 bg-indigo-500 hover:bg-indigo-500/80 text-white text-xs font-semibold rounded-lg cursor-pointer transition-colors disabled:opacity-50 ml-auto"
-              >
-                <Plus className="w-3 h-3" />
-                {saving ? "Saving..." : "Send Reminder"}
-              </button>
-            </div>
-          </div>
-
-          {/* Active reminders list */}
-          <div>
-            <h4 className="text-xs font-semibold text-muted uppercase tracking-wide mb-3">Active Reminders</h4>
-            {loading ? (
-              <p className="text-sm text-muted text-center py-4">Loading...</p>
-            ) : notifs.length === 0 ? (
-              <p className="text-sm text-muted text-center py-4">No active reminders.</p>
-            ) : (
-              <div className="space-y-2">
-                {notifs.map((n) => {
-                  const total = totalFor(n.target);
-                  const count = doneCountFor(n.id, n.target);
-                  return (
-                    <div key={n.id} className="p-3 bg-background rounded-xl border border-border space-y-2">
-                      <div className="flex items-start gap-2">
-                        <p className="flex-1 text-sm text-foreground leading-relaxed">{n.message}</p>
-                        <span className={`shrink-0 text-[10px] px-2 py-0.5 rounded-full font-semibold ${
-                          n.target === "both" ? "bg-purple-500/10 text-purple-400" :
-                          n.target === "aa1" ? "bg-blue-500/10 text-blue-400" : "bg-teal-500/10 text-teal-400"
-                        }`}>
-                          {targetLabel(n.target)}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className={`text-[10px] font-semibold ${count >= total ? "text-emerald-400" : "text-amber-400"}`}>
-                          {count}/{total} marked done
-                        </span>
-                        <span className="text-[10px] text-muted">
-                          {new Date(n.createdAt).toLocaleDateString("en-PK")}
-                        </span>
-                        <div className="ml-auto flex items-center gap-2">
-                          {count > 0 && (
-                            <button
-                              onClick={() => resetNotif(n.id)}
-                              className="text-[10px] px-2 py-1 text-amber-400 hover:text-amber-300 border border-amber-500/30 rounded-lg cursor-pointer transition-colors"
-                            >
-                              Reset
-                            </button>
-                          )}
-                          <button
-                            onClick={() => deleteNotif(n.id)}
-                            className="text-[10px] px-2 py-1 text-red-400 hover:text-red-300 border border-red-500/30 rounded-lg cursor-pointer transition-colors"
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 /* ═══════════════════════════════════════════
    COMPONENT
    ═══════════════════════════════════════════ */
@@ -442,38 +177,17 @@ export default function FundEstimatorPage() {
   const [session, setSession] = useState<Session | null>(null);
   const [pinModal, setPinModal] = useState<{ roles: Role[]; action: (s: Session) => void } | null>(null);
 
-  // Notifications
-  const [pendingNotifs, setPendingNotifs] = useState<Notification[]>([]);
-  const [showManageNotif, setShowManageNotif] = useState(false);
-
-  async function fetchNotifs(role: Role) {
-    if (role === "accountant") return;
-    try {
-      const res = await fetch(`/api/fund-estimator/notifications?role=${role}`);
-      if (res.ok) {
-        const data = await res.json();
-        setPendingNotifs(data.notifications ?? []);
-      }
-    } catch { /* ignore */ }
-  }
-
   useEffect(() => {
     try {
       const saved = localStorage.getItem(SESSION_KEY);
-      if (saved) {
-        const s: Session = JSON.parse(saved);
-        setSession(s);
-        fetchNotifs(s.role);
-      }
+      if (saved) setSession(JSON.parse(saved));
     } catch { /* ignore */ }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function login(s: Session) {
     localStorage.setItem(SESSION_KEY, JSON.stringify(s));
     setSession(s);
     setPinModal(null);
-    fetchNotifs(s.role);
   }
 
   function logout() {
@@ -716,14 +430,7 @@ export default function FundEstimatorPage() {
         <div className="ml-auto flex items-center gap-3">
           {session && (
             <div className="flex items-center gap-2">
-              {session.role === "accountant" && (
-                <button
-                  onClick={() => setShowManageNotif(true)}
-                  className="flex items-center gap-1.5 text-[10px] px-2.5 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-lg cursor-pointer transition-colors"
-                >
-                  <Bell className="w-3 h-3" /> Reminders
-                </button>
-              )}
+              <ReminderBell role={session.role} name={session.name} />
               <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 font-semibold">
                 {session.role === "accountant" ? "Accountant" : session.role === "aa1" ? "AA1" : "AA2"}: {session.name}
               </span>
@@ -964,10 +671,9 @@ export default function FundEstimatorPage() {
                           <td className="px-2 py-1.5">
                             <input
                               type="text"
-                              inputMode="numeric"
                               value={row.ibftNo}
                               onChange={(e) => {
-                                const v = e.target.value.replace(/\D/g, "");
+                                const v = e.target.value.replace(/[^a-zA-Z0-9\s\-/#]/g, "");
                                 updateRow(row.id, "ibftNo", v);
                               }}
                               placeholder="—"
@@ -1172,20 +878,6 @@ export default function FundEstimatorPage() {
         />
       )}
 
-      {/* Notification Popup — AA1 / AA2 */}
-      {pendingNotifs.length > 0 && session && session.role !== "accountant" && (
-        <NotifPopup
-          notifs={pendingNotifs}
-          role={session.role}
-          onDone={(id) => setPendingNotifs((prev) => prev.filter((n) => n.id !== id))}
-          onClose={() => setPendingNotifs([])}
-        />
-      )}
-
-      {/* Manage Reminders Modal — Accountant */}
-      {showManageNotif && (
-        <ManageNotifModal onClose={() => setShowManageNotif(false)} />
-      )}
 
       {/* Bank Account Modal */}
       {showBankModal && (

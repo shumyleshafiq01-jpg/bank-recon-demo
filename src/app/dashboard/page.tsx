@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, useRef, useCallback } from "react";
 import {
   Landmark, ArrowRight, Clock, User, Building2, CreditCard,
-  Globe, FileText, LogOut, Scale, Timer, BookOpen, Wallet, Banknote, Zap,
+  Globe, FileText, LogOut, Scale, Timer, BookOpen, Wallet, Banknote, Zap, Settings,
 } from "lucide-react";
 
 const TESTING_DEADLINE = new Date("2026-06-20T12:00:00Z").getTime();
@@ -251,6 +251,21 @@ const MODULES = [
     tags: ["Wise Card", "Chat & Filter"],
   },
   {
+    key: "reminders",
+    route: "/reminders",
+    title: "Reminders",
+    desc: "Global reminders for the team — one-time, weekly or monthly, shown on every module login",
+    icon: Zap,
+    color: "amber",
+    gradient: "from-amber-600/20 to-amber-900/40",
+    border: "hover:border-amber-400/60",
+    iconBg: "bg-amber-500/20",
+    iconColor: "text-amber-400",
+    tagBg: "bg-amber-500/10 text-amber-300",
+    image: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23f59e0b' stop-opacity='0.3'/%3E%3Cstop offset='1' stop-color='%23f59e0b' stop-opacity='0.05'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='200' height='200' fill='url(%23g)'/%3E%3Ccircle cx='100' cy='85' r='36' fill='none' stroke='%23f59e0b' stroke-width='2.5' opacity='0.3'/%3E%3Crect x='88' y='121' width='24' height='8' rx='4' fill='%23f59e0b' opacity='0.3'/%3E%3Cline x1='100' y1='49' x2='100' y2='61' stroke='%23f59e0b' stroke-width='2.5' opacity='0.3'/%3E%3Crect x='55' y='140' width='90' height='6' rx='3' fill='%23f59e0b' opacity='0.2'/%3E%3Crect x='65' y='153' width='70' height='6' rx='3' fill='%23f59e0b' opacity='0.15'/%3E%3C/svg%3E",
+    tags: ["Global", "All Modules"],
+  },
+  {
     key: "petty-cash",
     route: "/petty-cash",
     title: "Petty Cash Flow",
@@ -289,6 +304,15 @@ export default function DashboardPage() {
   const [remaining, setRemaining] = useState("");
   const [apiUsage, setApiUsage] = useState<{ totalCost: number; totalCalls: number } | null>(null);
 
+  // Super user
+  const [isSuperUser, setIsSuperUser] = useState(false);
+  const [showAdminPin, setShowAdminPin] = useState(false);
+  const [adminUser, setAdminUser] = useState("");
+  const [adminPin, setAdminPin] = useState("");
+  const [adminPinError, setAdminPinError] = useState("");
+  const [hiddenModules, setHiddenModules] = useState<string[]>([]);
+  const [savingConfig, setSavingConfig] = useState(false);
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem("session");
@@ -310,6 +334,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     fetch("/api/usage").then((r) => r.json()).then((d) => setApiUsage(d)).catch(() => {});
+    fetch("/api/dashboard-config").then((r) => r.json()).then((d) => setHiddenModules(d.hiddenModules ?? [])).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -333,9 +358,41 @@ export default function DashboardPage() {
     router.replace("/login");
   }
 
+  function submitAdminPin() {
+    const correct = process.env.NEXT_PUBLIC_ADMIN_PIN;
+    const userOk = adminUser.trim().toLowerCase() === "shumyle";
+    const pinOk = adminPin.trim() === correct;
+    if (userOk && pinOk) {
+      setIsSuperUser(true);
+      setShowAdminPin(false);
+      setAdminUser("");
+      setAdminPin("");
+      setAdminPinError("");
+    } else if (!userOk) {
+      setAdminPinError("Username not recognised.");
+    } else {
+      setAdminPinError("Incorrect PIN.");
+    }
+  }
+
+  async function toggleModule(key: string) {
+    const next = hiddenModules.includes(key)
+      ? hiddenModules.filter((k) => k !== key)
+      : [...hiddenModules, key];
+    setHiddenModules(next);
+    setSavingConfig(true);
+    await fetch("/api/dashboard-config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hiddenModules: next }),
+    }).catch(() => {});
+    setSavingConfig(false);
+  }
+
   if (!checked) return null;
 
   const sessionLabel = session?.type === "user" ? "User" : "Tester";
+  const visibleModules = isSuperUser ? MODULES : MODULES.filter((m) => !hiddenModules.includes(m.key));
 
   return (
     <div className="flex-1 flex flex-col min-h-screen" style={{ background: "#e8ecf1" }}>
@@ -362,6 +419,21 @@ export default function DashboardPage() {
               <Timer className="w-3.5 h-3.5" />
               {remaining}
             </div>
+          )}
+          {isSuperUser ? (
+            <div className="flex items-center gap-2">
+              {savingConfig && <span className="text-[10px] text-amber-600 animate-pulse">Saving...</span>}
+              <span className="text-[10px] px-2 py-1 bg-amber-100 text-amber-700 rounded-lg font-semibold border border-amber-200">Super User</span>
+              <button onClick={() => setIsSuperUser(false)} className="text-[10px] text-gray-400 hover:text-gray-600 cursor-pointer">Exit</button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setShowAdminPin(true)}
+              className="text-gray-300 hover:text-gray-500 transition-colors cursor-pointer p-1.5 rounded-lg hover:bg-gray-100"
+              title="Super user"
+            >
+              <Settings className="w-3.5 h-3.5" />
+            </button>
           )}
           <button onClick={logout} className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-red-500 transition-colors cursor-pointer bg-gray-50 hover:bg-red-50 rounded-lg px-3 py-1.5">
             <LogOut className="w-3.5 h-3.5" />
@@ -419,52 +491,51 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Module Grid — 2 per row, square cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 animate-fade-in">
-          {MODULES.map((mod) => {
+        {/* Module List — compact rows */}
+        {isSuperUser && (
+          <p className="text-xs text-amber-600 font-medium -mb-1">
+            Super user mode — toggle modules on/off for all users. Hidden modules are still accessible to you.
+          </p>
+        )}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 animate-fade-in">
+          {visibleModules.map((mod) => {
             const Icon = mod.icon;
+            const isHidden = hiddenModules.includes(mod.key);
             return (
-              <button
-                key={mod.key}
-                onClick={() => router.push(mod.route)}
-                className={`group relative overflow-hidden bg-white/60 backdrop-blur-sm hover:bg-white/90 rounded-2xl border border-gray-200/80 ${mod.border} shadow-sm hover:shadow-lg transition-all cursor-pointer text-left aspect-square flex flex-col`}
-              >
-                {/* Background image */}
-                <div
-                  className="absolute inset-0 opacity-50 group-hover:opacity-70 transition-opacity"
-                  style={{
-                    backgroundImage: `url("${mod.image}")`,
-                    backgroundSize: "cover",
-                    backgroundPosition: "center",
-                  }}
-                />
-
-                {/* Content */}
-                <div className="relative z-10 flex flex-col justify-between h-full p-5">
-                  <div>
-                    <div className={`w-11 h-11 rounded-xl ${mod.iconBg} flex items-center justify-center mb-3 backdrop-blur-sm`}>
-                      <Icon className={`w-5 h-5 ${mod.iconColor}`} />
-                    </div>
-                    <h4 className={`font-bold text-gray-900 group-hover:${mod.iconColor} transition-colors text-[15px] leading-tight`}>
-                      {mod.title}
-                    </h4>
-                    <p className="text-xs text-gray-500 mt-2 leading-relaxed line-clamp-3">
-                      {mod.desc}
-                    </p>
+              <div key={mod.key} className="relative group">
+                <button
+                  onClick={() => router.push(mod.route)}
+                  className={`w-full flex items-center gap-3.5 bg-white/65 backdrop-blur-sm hover:bg-white/95 rounded-xl border border-gray-200/80 ${mod.border} shadow-sm hover:shadow-md transition-all cursor-pointer text-left px-4 py-3 ${isHidden ? "opacity-50" : ""}`}
+                >
+                  <div className={`w-9 h-9 rounded-lg ${mod.iconBg} flex items-center justify-center shrink-0`}>
+                    <Icon className={`w-4 h-4 ${mod.iconColor}`} />
                   </div>
-
-                  <div className="flex items-center justify-between mt-auto pt-3">
-                    <div className="flex flex-wrap gap-1.5">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[13px] font-semibold text-gray-900 truncate leading-tight">{mod.title}</p>
+                    <div className="flex items-center gap-1 mt-1 flex-wrap">
                       {mod.tags.map((tag) => (
-                        <span key={tag} className={`text-[10px] px-2 py-0.5 rounded-full ${mod.tagBg} backdrop-blur-sm font-medium`}>
+                        <span key={tag} className={`text-[9px] px-1.5 py-0.5 rounded-full font-semibold ${mod.tagBg}`}>
                           {tag}
                         </span>
                       ))}
+                      {isHidden && <span className="text-[9px] px-1.5 py-0.5 rounded-full font-semibold bg-red-100 text-red-500">Hidden</span>}
                     </div>
-                    <ArrowRight className={`w-4 h-4 text-gray-300 group-hover:${mod.iconColor} transition-colors shrink-0`} />
                   </div>
-                </div>
-              </button>
+                  <ArrowRight className={`w-3.5 h-3.5 text-gray-300 group-hover:${mod.iconColor} transition-colors shrink-0`} />
+                </button>
+                {isSuperUser && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); toggleModule(mod.key); }}
+                    className={`absolute top-2 right-2 text-[9px] px-2 py-1 rounded-lg font-semibold border cursor-pointer transition-all ${
+                      isHidden
+                        ? "bg-red-50 text-red-500 border-red-200 hover:bg-red-100"
+                        : "bg-green-50 text-green-600 border-green-200 hover:bg-red-50 hover:text-red-500 hover:border-red-200"
+                    }`}
+                  >
+                    {isHidden ? "Hidden — click to show" : "Visible — click to hide"}
+                  </button>
+                )}
+              </div>
             );
           })}
         </div>
@@ -474,6 +545,43 @@ export default function DashboardPage() {
           AI Agent Finance &middot; Sheikh Shumyle &middot; 2026
         </p>
       </div>
+
+      {/* Admin PIN modal */}
+      {showAdminPin && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { setShowAdminPin(false); setAdminPin(""); setAdminPinError(""); }}>
+          <div className="bg-white rounded-2xl border border-gray-200 w-full max-w-xs p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 mb-4">
+              <Settings className="w-4 h-4 text-gray-500" />
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900">Super User Access</h3>
+                <p className="text-[10px] text-gray-400">Admin only</p>
+              </div>
+            </div>
+            <input
+              type="text"
+              value={adminUser}
+              onChange={(e) => { setAdminUser(e.target.value); setAdminPinError(""); }}
+              onKeyDown={(e) => e.key === "Enter" && submitAdminPin()}
+              placeholder="Username"
+              autoFocus
+              className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:border-gray-400 mb-2"
+            />
+            <input
+              type="password"
+              value={adminPin}
+              onChange={(e) => { setAdminPin(e.target.value); setAdminPinError(""); }}
+              onKeyDown={(e) => e.key === "Enter" && submitAdminPin()}
+              placeholder="PIN"
+              className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:border-gray-400 mb-3"
+            />
+            {adminPinError && <p className="text-xs text-red-500 mb-3">{adminPinError}</p>}
+            <div className="flex gap-2">
+              <button onClick={() => { setShowAdminPin(false); setAdminUser(""); setAdminPin(""); setAdminPinError(""); }} className="flex-1 px-4 py-2 text-sm text-gray-400 hover:text-gray-600 cursor-pointer transition-colors">Cancel</button>
+              <button onClick={submitAdminPin} className="flex-1 px-4 py-2 bg-gray-900 hover:bg-gray-700 text-white text-sm font-semibold rounded-lg cursor-pointer transition-colors">Login</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

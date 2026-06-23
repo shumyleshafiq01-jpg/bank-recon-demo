@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
+import { Link2 } from "lucide-react";
 
 /* ═══════════════════════════════════════════
    TYPES
@@ -271,6 +272,106 @@ export default function CreditCardPage() {
     XLSX.writeFile(wb, "credit-card-verification.xlsx");
   }
 
+  // ── CSV export ────────────────────────────────────────
+  function downloadCSV() {
+    if (!results) return;
+    const rows: string[] = [["Date", "Merchant", "Amount", "Type", "Status"].join(",")];
+    for (const group of results.groups) {
+      for (const txn of group.transactions) {
+        const status = verifications[txn.id];
+        const statusLabel = status === "verified" ? "Verified" : status === "disputed" ? "Disputed" : "Pending";
+        rows.push([
+          `"${txn.date}"`,
+          `"${txn.merchant.replace(/"/g, '""')}"`,
+          txn.amountRaw,
+          txn.type === "debit" ? "Purchase" : "Payment/Refund",
+          statusLabel,
+        ].join(","));
+      }
+    }
+    const blob = new Blob([rows.join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = "credit-card-verification.csv"; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // ── PDF export ────────────────────────────────────────
+  async function downloadPDF() {
+    if (!results) return;
+    const { jsPDF } = await import("jspdf");
+    const autoTable = (await import("jspdf-autotable")).default;
+    const doc = new jsPDF({ orientation: "landscape" });
+
+    doc.setFontSize(14);
+    doc.text("Kafi Commodities — Credit Card Verification Report", 14, 16);
+    const stats = getStats();
+    doc.setFontSize(9);
+    doc.text(`Total: ${stats.total}   Verified: ${stats.verified}   Disputed: ${stats.disputed}   Pending: ${stats.unverified}   Total Spend: ${results.totalSpend}`, 14, 23);
+
+    const body: (string | number)[][] = [];
+    for (const group of results.groups) {
+      body.push([{ content: `▸ ${group.header}  (${group.count} txns — ${group.total})`, colSpan: 5, styles: { fontStyle: "bold", fillColor: [40, 40, 60] } } as unknown as string]);
+      for (const txn of group.transactions) {
+        const status = verifications[txn.id];
+        body.push([
+          txn.date, txn.merchant, txn.amount,
+          txn.type === "debit" ? "Purchase" : "Payment/Refund",
+          status === "verified" ? "✓ Verified" : status === "disputed" ? "✗ Disputed" : "— Pending",
+        ]);
+      }
+    }
+
+    autoTable(doc, {
+      startY: 28,
+      head: [["Date", "Merchant", "Amount", "Type", "Status"]],
+      body,
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: [79, 70, 229] },
+      columnStyles: { 1: { cellWidth: 80 } },
+    });
+
+    doc.save("credit-card-verification.pdf");
+  }
+
+  // ── Google Drive shareable link ───────────────────────
+  const [driveLoading, setDriveLoading] = useState(false);
+  const [driveLink, setDriveLink] = useState<string | null>(null);
+
+  async function uploadToDrive() {
+    if (!results) return;
+    setDriveLoading(true);
+    setDriveLink(null);
+    try {
+      // Build XLS in memory as base64
+      const wb = XLSX.utils.book_new();
+      const rows: Record<string, string | number>[] = [];
+      for (const group of results.groups) {
+        rows.push({ "Date": "", "Merchant": `▸ ${group.header}`, "Amount": "", "Type": "", "Status": `${group.count} txns — Total: ${group.total}` });
+        for (const txn of group.transactions) {
+          const s = verifications[txn.id];
+          rows.push({ "Date": txn.date, "Merchant": txn.merchant, "Amount": txn.amountRaw, "Type": txn.type === "debit" ? "Purchase" : "Payment/Refund", "Status": s === "verified" ? "✓ Verified" : s === "disputed" ? "✗ Disputed" : "— Pending" });
+        }
+        rows.push({ "Date": "", "Merchant": "", "Amount": "", "Type": "", "Status": "" });
+      }
+      const ws = XLSX.utils.json_to_sheet(rows);
+      XLSX.utils.book_append_sheet(wb, ws, "Credit Card Verification");
+      const base64 = XLSX.write(wb, { type: "base64", bookType: "xlsx" });
+
+      const now = new Date();
+      const filename = `CC-Report-${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}.xlsx`;
+
+      const res = await fetch("/api/credit-card/export-drive", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename, mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", base64 }),
+      });
+      const data = await res.json();
+      if (res.ok && data.link) { setDriveLink(data.link); }
+      else { alert(data.error || "Drive upload failed"); }
+    } catch { alert("Drive upload failed — network error"); }
+    setDriveLoading(false);
+  }
+
   const stats = getStats();
 
   return (
@@ -475,14 +576,26 @@ export default function CreditCardPage() {
                   <Eye className="w-4 h-4" /> View Format
                 </span>
               </button>
-              <button
-                onClick={downloadExcel}
-                className="px-4 py-2 rounded-lg text-sm bg-accent/20 text-accent hover:bg-accent/30 transition cursor-pointer"
-              >
-                <span className="flex items-center gap-2">
-                  <Download className="w-4 h-4" /> Download Report
-                </span>
-              </button>
+              {/* Export options */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <button onClick={downloadCSV} className="px-3 py-1.5 rounded-lg text-xs bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 border border-emerald-500/30 transition cursor-pointer flex items-center gap-1.5">
+                  <Download className="w-3 h-3" /> CSV
+                </button>
+                <button onClick={downloadExcel} className="px-3 py-1.5 rounded-lg text-xs bg-accent/20 text-accent hover:bg-accent/30 border border-accent/30 transition cursor-pointer flex items-center gap-1.5">
+                  <Download className="w-3 h-3" /> XLS
+                </button>
+                <button onClick={downloadPDF} className="px-3 py-1.5 rounded-lg text-xs bg-red-500/15 text-red-400 hover:bg-red-500/25 border border-red-500/30 transition cursor-pointer flex items-center gap-1.5">
+                  <FileText className="w-3 h-3" /> PDF
+                </button>
+                <button onClick={uploadToDrive} disabled={driveLoading} className="px-3 py-1.5 rounded-lg text-xs bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 border border-blue-500/30 transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50">
+                  <Link2 className="w-3 h-3" /> {driveLoading ? "Uploading..." : "Drive Link"}
+                </button>
+                {driveLink && (
+                  <a href={driveLink} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 rounded-lg text-xs bg-green-500/15 text-green-400 hover:bg-green-500/25 border border-green-500/30 transition flex items-center gap-1.5 animate-pulse">
+                    <Link2 className="w-3 h-3" /> Open Link
+                  </a>
+                )}
+              </div>
             </div>
 
             {/* Merchant Groups */}
