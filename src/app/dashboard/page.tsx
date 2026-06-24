@@ -579,7 +579,7 @@ export default function DashboardPage() {
             <div className="flex items-center gap-2 mb-4">
               <Settings className="w-4 h-4 text-gray-500" />
               <div>
-                <h3 className="text-sm font-semibold text-gray-900">Super User Access</h3>
+                <h3 className="text-sm font-semibold text-gray-900">Enter Credentials</h3>
                 <p className="text-[10px] text-gray-400">Admin only</p>
               </div>
             </div>
