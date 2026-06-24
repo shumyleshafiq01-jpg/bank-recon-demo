@@ -450,10 +450,6 @@ export default function DashboardPage() {
               <Settings className="w-3.5 h-3.5" />
             </button>
           )}
-          <button onClick={() => router.push("/settings")} className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-700 transition-colors cursor-pointer bg-gray-50 hover:bg-gray-100 rounded-lg px-3 py-1.5">
-            <Settings className="w-3.5 h-3.5" />
-            Settings
-          </button>
           <button onClick={logout} className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-red-500 transition-colors cursor-pointer bg-gray-50 hover:bg-red-50 rounded-lg px-3 py-1.5">
             <LogOut className="w-3.5 h-3.5" />
             Logout
