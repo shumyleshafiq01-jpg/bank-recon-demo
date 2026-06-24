@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ArrowLeft, Bell, Plus, Trash2, RefreshCw, X } from "lucide-react";
+import { ArrowLeft, Bell, Plus, Trash2, RefreshCw, X, Pencil } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 interface Reminder {
@@ -45,12 +45,27 @@ export default function RemindersPage() {
   const [doneSummary, setDoneSummary] = useState<DoneSummary[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // New reminder form
+  // New / edit reminder form
   const [message, setMessage] = useState("");
   const [target, setTarget]   = useState("both");
   const [dueDate, setDueDate] = useState("");
   const [frequency, setFrequency] = useState("monthly");
   const [saving, setSaving]   = useState(false);
+  const [editingReminder, setEditingReminder] = useState<Reminder | null>(null);
+
+  function startEdit(r: Reminder) {
+    setEditingReminder(r);
+    setMessage(r.message);
+    setTarget(r.target);
+    setDueDate(r.dueDate);
+    setFrequency(r.frequency);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function cancelEdit() {
+    setEditingReminder(null);
+    setMessage(""); setTarget("both"); setDueDate(""); setFrequency("monthly");
+  }
 
   async function load() {
     setLoading(true);
@@ -66,6 +81,30 @@ export default function RemindersPage() {
   }
 
   useEffect(() => { load(); }, []);
+
+  async function saveReminder() {
+    if (!message.trim()) return;
+    setSaving(true);
+    try {
+      if (editingReminder) {
+        await fetch("/api/reminders", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "update", reminderId: editingReminder.id, message: message.trim(), target, dueDate, frequency }),
+        });
+        cancelEdit();
+      } else {
+        await fetch("/api/reminders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: message.trim(), target, dueDate, frequency }),
+        });
+        setMessage(""); setDueDate("");
+      }
+      await load();
+    } catch { /* ignore */ }
+    setSaving(false);
+  }
 
   async function createReminder() {
     if (!message.trim()) return;
@@ -128,7 +167,16 @@ export default function RemindersPage() {
 
           {/* Create form */}
           <div className="bg-surface rounded-2xl border border-border p-5 space-y-4">
-            <h3 className="text-xs font-semibold text-amber-400 uppercase tracking-wide">New Reminder</h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-semibold text-amber-400 uppercase tracking-wide">
+                {editingReminder ? "Edit Reminder" : "New Reminder"}
+              </h3>
+              {editingReminder && (
+                <button onClick={cancelEdit} className="text-[10px] text-muted hover:text-foreground cursor-pointer flex items-center gap-1">
+                  <X className="w-3 h-3" /> Cancel Edit
+                </button>
+              )}
+            </div>
 
             <textarea
               value={message}
@@ -179,12 +227,12 @@ export default function RemindersPage() {
                 {frequency === "one-time" && "Shows once until user marks done — then disappears permanently."}
               </p>
               <button
-                onClick={createReminder}
+                onClick={saveReminder}
                 disabled={!message.trim() || saving}
-                className="flex items-center gap-1.5 px-5 py-2 bg-amber-500 hover:bg-amber-500/80 text-white text-sm font-semibold rounded-xl cursor-pointer transition-colors disabled:opacity-50"
+                className={`flex items-center gap-1.5 px-5 py-2 text-white text-sm font-semibold rounded-xl cursor-pointer transition-colors disabled:opacity-50 ${editingReminder ? "bg-indigo-500 hover:bg-indigo-500/80" : "bg-amber-500 hover:bg-amber-500/80"}`}
               >
-                <Plus className="w-3.5 h-3.5" />
-                {saving ? "Saving..." : "Create Reminder"}
+                {editingReminder ? <Pencil className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+                {saving ? "Saving..." : editingReminder ? "Update Reminder" : "Create Reminder"}
               </button>
             </div>
           </div>
@@ -242,6 +290,10 @@ export default function RemindersPage() {
                           </td>
                           <td className="px-4 py-3">
                             <div className="flex items-center justify-center gap-1.5">
+                              <button onClick={() => startEdit(r)} title="Edit reminder"
+                                className="p-1.5 text-muted hover:text-indigo-400 cursor-pointer transition-colors rounded hover:bg-indigo-500/10">
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
                               {ds && ds.doneCount > 0 && (
                                 <button onClick={() => resetReminder(r.id)} title="Reset for everyone"
                                   className="p-1.5 text-muted hover:text-amber-400 cursor-pointer transition-colors rounded hover:bg-amber-500/10">

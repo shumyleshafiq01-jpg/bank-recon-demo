@@ -116,6 +116,24 @@ export async function PATCH(request: Request) {
       return Response.json({ marked: true });
     }
 
+    if (body.action === "update") {
+      const { reminderId, message, target, dueDate, frequency } = body as unknown as {
+        action: string; reminderId: string; message: string; target: string; dueDate: string; frequency: string;
+      };
+      const rows = await readSheet(REMINDERS_SHEET);
+      for (let i = 1; i < rows.length; i++) {
+        if (rows[i][0] === reminderId) {
+          rows[i][1] = message;
+          rows[i][2] = target;
+          rows[i][3] = dueDate;
+          rows[i][4] = frequency;
+          break;
+        }
+      }
+      await clearAndWrite(REMINDERS_SHEET, rows);
+      return Response.json({ updated: true });
+    }
+
     if (body.action === "reset") {
       const rows = await readSheet(DONE_SHEET);
       const filtered = [rows[0], ...rows.slice(1).filter((r) => r[0] !== body.reminderId)].filter(Boolean);
