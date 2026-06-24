@@ -166,6 +166,12 @@ export default function FundEstimatorPage() {
   const [showSummary, setShowSummary] = useState(true);
   const [summaryFilter, setSummaryFilter] = useState("");
   const [summaryAccFilter, setSummaryAccFilter] = useState("");
+  const [summaryTitleFilter, setSummaryTitleFilter] = useState("");
+  const [descModal, setDescModal] = useState<string | null>(null);
+  const [showFlowReport, setShowFlowReport] = useState(false);
+  const [flowDateFrom, setFlowDateFrom] = useState("");
+  const [flowDateTo, setFlowDateTo] = useState("");
+  const [flowBankFilter, setFlowBankFilter] = useState("");
   const [editMode, setEditMode] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -546,10 +552,12 @@ export default function FundEstimatorPage() {
               {showSummary && (() => {
                 const uniqueBanks = [...new Set(banks.map(b => b.bankName))].sort();
                 const filteredBanks = banks.filter(b => {
-                  const matchBank = !summaryFilter || b.bankName === summaryFilter;
-                  const matchAcc  = !summaryAccFilter || b.accountNo.toLowerCase().includes(summaryAccFilter.toLowerCase());
-                  return matchBank && matchAcc;
+                  const matchBank  = !summaryFilter || b.bankName === summaryFilter;
+                  const matchAcc   = !summaryAccFilter || b.accountNo === summaryAccFilter;
+                  const matchTitle = !summaryTitleFilter || b.acTitle === summaryTitleFilter;
+                  return matchBank && matchAcc && matchTitle;
                 });
+                const uniqueTitles = [...new Set(banks.map(b => b.acTitle).filter(Boolean))].sort();
                 return (
                   <div className="px-5 pb-4 space-y-3">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -571,8 +579,16 @@ export default function FundEstimatorPage() {
                           <option key={b.id} value={b.accountNo}>{b.accountNo} — {b.bankName}</option>
                         ))}
                       </select>
-                      {(summaryFilter || summaryAccFilter) && (
-                        <button onClick={() => { setSummaryFilter(""); setSummaryAccFilter(""); }} className="text-[10px] text-muted hover:text-foreground cursor-pointer">Clear</button>
+                      <select
+                        value={summaryTitleFilter}
+                        onChange={e => setSummaryTitleFilter(e.target.value)}
+                        className="text-xs bg-background border border-border rounded-lg px-2 py-1.5 text-foreground focus:outline-none focus:border-indigo-500/50 cursor-pointer"
+                      >
+                        <option value="">All Account Titles</option>
+                        {uniqueTitles.map(t => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                      {(summaryFilter || summaryAccFilter || summaryTitleFilter) && (
+                        <button onClick={() => { setSummaryFilter(""); setSummaryAccFilter(""); setSummaryTitleFilter(""); }} className="text-[10px] text-muted hover:text-foreground cursor-pointer">Clear</button>
                       )}
                     </div>
                     <table className="w-full text-xs">
@@ -596,11 +612,132 @@ export default function FundEstimatorPage() {
                           </tr>
                         ))}
                         <tr className="bg-indigo-500/5 font-semibold border-t border-border">
-                          <td className="px-3 py-2.5" colSpan={4}>{summaryFilter ? `TOTAL (${summaryFilter})` : summaryAccFilter ? `TOTAL (filtered)` : "TOTAL"}</td>
+                          <td className="px-3 py-2.5" colSpan={5}>{summaryFilter || summaryAccFilter || summaryTitleFilter ? "TOTAL (filtered)" : "TOTAL"}</td>
                           <td className="px-3 py-2.5 text-right font-mono text-indigo-400">{fmt(filteredBanks.reduce((s, b) => s + getAccountBalance(b), 0))}</td>
                         </tr>
                       </tbody>
                     </table>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* Debit / Credit Flow Report */}
+          {banks.length > 0 && (
+            <div className="bg-surface rounded-2xl border border-border overflow-hidden">
+              <button
+                onClick={() => setShowFlowReport(v => !v)}
+                className="w-full flex items-center justify-between px-5 py-4 cursor-pointer hover:bg-surface-light/30 transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  <ChevronDown className={`w-4 h-4 text-indigo-400 transition-transform ${showFlowReport ? "rotate-180" : ""}`} />
+                  <h3 className="text-sm font-semibold text-foreground">Transaction Flow Report
+                    <span className="ml-2 text-xs font-normal text-muted">— debit & credit summary by date / bank</span>
+                  </h3>
+                </div>
+              </button>
+
+              {showFlowReport && (() => {
+                const allEntries = banks
+                  .filter(b => !flowBankFilter || b.id === flowBankFilter)
+                  .flatMap(b =>
+                    (ledger[b.id] ?? [])
+                      .filter(r =>
+                        (!flowDateFrom || r.date >= flowDateFrom) &&
+                        (!flowDateTo   || r.date <= flowDateTo)
+                      )
+                      .map(r => ({ ...r, bankName: b.bankName, accountNo: b.accountNo, acTitle: b.acTitle }))
+                  )
+                  .sort((a, b) => a.date.localeCompare(b.date));
+
+                const debitRows  = allEntries.filter(e => e.debit  !== null && (e.debit  ?? 0) > 0);
+                const creditRows = allEntries.filter(e => e.credit !== null && (e.credit ?? 0) > 0);
+                const totalDebit  = debitRows.reduce((s, e)  => s + (e.debit  ?? 0), 0);
+                const totalCredit = creditRows.reduce((s, e) => s + (e.credit ?? 0), 0);
+
+                const TxnTable = ({ rows, type }: { rows: typeof allEntries; type: "debit" | "credit" }) => (
+                  <div>
+                    <h4 className={`text-xs font-bold uppercase tracking-wide mb-2 ${type === "debit" ? "text-red-400" : "text-emerald-400"}`}>
+                      {type === "debit" ? "Cash Out (Debits)" : "Cash In (Credits)"} — {rows.length} transactions
+                    </h4>
+                    <div className="rounded-xl border border-border overflow-hidden">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className={type === "debit" ? "bg-red-500/10 text-red-400" : "bg-emerald-500/10 text-emerald-400"}>
+                            <th className="px-3 py-2 text-left font-semibold w-[36px]">#</th>
+                            <th className="px-3 py-2 text-left font-semibold w-[100px]">Date</th>
+                            <th className="px-3 py-2 text-left font-semibold w-[130px]">Bank</th>
+                            <th className="px-3 py-2 text-left font-semibold">Description</th>
+                            <th className="px-3 py-2 text-right font-semibold w-[130px]">Amount</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rows.length === 0 ? (
+                            <tr><td colSpan={5} className="px-3 py-6 text-center text-muted">No {type} transactions in this period.</td></tr>
+                          ) : rows.map((r, i) => (
+                            <tr key={r.id} className={i % 2 === 0 ? "" : "bg-surface-light/20"}>
+                              <td className="px-3 py-2 text-muted">{i + 1}</td>
+                              <td className="px-3 py-2 text-muted">{r.date || "—"}</td>
+                              <td className="px-3 py-2 text-foreground">{r.bankName}</td>
+                              <td className="px-3 py-2 text-muted truncate max-w-[250px]">
+                                <button onClick={() => r.description && setDescModal(r.description)}
+                                  className={r.description ? "hover:text-indigo-400 cursor-pointer text-left truncate w-full" : "cursor-default text-muted/40"}>
+                                  {r.description || "—"}
+                                </button>
+                              </td>
+                              <td className={`px-3 py-2 text-right font-mono font-semibold ${type === "debit" ? "text-red-400" : "text-emerald-400"}`}>
+                                {fmt(type === "debit" ? (r.debit ?? 0) : (r.credit ?? 0))}
+                              </td>
+                            </tr>
+                          ))}
+                          <tr className={`border-t border-border font-bold ${type === "debit" ? "bg-red-500/5" : "bg-emerald-500/5"}`}>
+                            <td colSpan={4} className="px-3 py-2.5 text-right">TOTAL</td>
+                            <td className={`px-3 py-2.5 text-right font-mono ${type === "debit" ? "text-red-400" : "text-emerald-400"}`}>
+                              {fmt(type === "debit" ? totalDebit : totalCredit)}
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+
+                return (
+                  <div className="px-5 pb-5 space-y-5">
+                    {/* Filters */}
+                    <div className="flex items-center gap-3 flex-wrap pt-1">
+                      <select value={flowBankFilter} onChange={e => setFlowBankFilter(e.target.value)}
+                        className="text-xs bg-background border border-border rounded-lg px-2 py-1.5 text-foreground focus:outline-none focus:border-indigo-500/50 cursor-pointer">
+                        <option value="">All Banks</option>
+                        {banks.map(b => <option key={b.id} value={b.id}>{b.bankName} — {b.acTitle}{b.accountNo ? ` (${b.accountNo})` : ""}</option>)}
+                      </select>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-muted">From</span>
+                        <input type="date" value={flowDateFrom} onChange={e => setFlowDateFrom(e.target.value)}
+                          className="text-xs bg-background border border-border rounded-lg px-2 py-1.5 text-foreground focus:outline-none focus:border-indigo-500/50 cursor-pointer" />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-muted">To</span>
+                        <input type="date" value={flowDateTo} onChange={e => setFlowDateTo(e.target.value)}
+                          className="text-xs bg-background border border-border rounded-lg px-2 py-1.5 text-foreground focus:outline-none focus:border-indigo-500/50 cursor-pointer" />
+                      </div>
+                      {(flowBankFilter || flowDateFrom || flowDateTo) && (
+                        <button onClick={() => { setFlowBankFilter(""); setFlowDateFrom(""); setFlowDateTo(""); }}
+                          className="text-[10px] text-muted hover:text-foreground cursor-pointer">Clear</button>
+                      )}
+                      <div className="ml-auto flex items-center gap-4 text-xs font-semibold">
+                        <span className="text-red-400">Total Out: {fmt(totalDebit)}</span>
+                        <span className="text-emerald-400">Total In: {fmt(totalCredit)}</span>
+                        <span className={`${totalCredit - totalDebit >= 0 ? "text-indigo-400" : "text-red-400"}`}>
+                          Net: {fmt(Math.abs(totalCredit - totalDebit))} {totalCredit - totalDebit >= 0 ? "▲" : "▼"}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Tables — Credit first, then Debit */}
+                    <TxnTable rows={creditRows} type="credit" />
+                    <TxnTable rows={debitRows}  type="debit"  />
                   </div>
                 );
               })()}
@@ -658,9 +795,9 @@ export default function FundEstimatorPage() {
                       <th className="px-2 py-2.5 text-left font-semibold w-[36px]">#</th>
                       <th className="px-2 py-2.5 text-left font-semibold w-[110px]">Date</th>
                       <th className="px-2 py-2.5 text-left font-semibold w-[110px]">PDC Date</th>
-                      <th className="px-2 py-2.5 text-left font-semibold w-[100px]">IBFT #</th>
+                      <th className="px-2 py-2.5 text-left font-semibold w-[115px]">IBFT #</th>
                       <th className="px-2 py-2.5 text-left font-semibold w-[100px]">Cheque No.</th>
-                      <th className="px-2 py-2.5 text-left font-semibold">Description</th>
+                      <th className="px-2 py-2.5 text-left font-semibold max-w-[220px]">Description</th>
                       <th className="px-2 py-2.5 text-right font-semibold w-[120px]">Debit</th>
                       <th className="px-2 py-2.5 text-right font-semibold w-[120px]">Credit</th>
                       <th className="px-2 py-2.5 text-right font-semibold w-[130px]">Balance</th>
@@ -727,18 +864,27 @@ export default function FundEstimatorPage() {
                               className={`w-full bg-transparent rounded px-1.5 py-1 text-foreground focus:outline-none text-xs ${editMode ? "border border-transparent hover:border-border focus:border-indigo-500/50" : "border border-transparent cursor-default"}`}
                             />
                           </td>
-                          <td className="px-2 py-1.5">
-                            <input
-                              type="text"
-                              value={row.description}
-                              onChange={(e) => {
-                                const v = e.target.value.replace(/[^a-zA-Z0-9\s\-/.#&(),@:;'"+=$%!]/g, "");
-                                updateRow(row.id, "description", v);
-                              }}
-                              placeholder={editMode ? "Enter description..." : ""}
-                              readOnly={!editMode}
-                              className={`w-full bg-transparent rounded px-1.5 py-1 text-foreground focus:outline-none text-xs ${editMode ? "border border-transparent hover:border-border focus:border-indigo-500/50" : "border border-transparent cursor-default"}`}
-                            />
+                          <td className="px-2 py-1.5 max-w-[220px]">
+                            {editMode ? (
+                              <input
+                                type="text"
+                                value={row.description}
+                                onChange={(e) => {
+                                  const v = e.target.value.replace(/[^a-zA-Z0-9\s\-/.#&(),@:;'"+=$%!]/g, "");
+                                  updateRow(row.id, "description", v);
+                                }}
+                                placeholder="Enter description..."
+                                className="w-full bg-transparent rounded px-1.5 py-1 text-foreground focus:outline-none text-xs border border-transparent hover:border-border focus:border-indigo-500/50"
+                              />
+                            ) : (
+                              <button
+                                onClick={() => row.description && setDescModal(row.description)}
+                                className={`w-full text-left px-1.5 py-1 text-xs truncate block ${row.description ? "text-foreground hover:text-indigo-400 cursor-pointer" : "text-muted/40 cursor-default"}`}
+                                title={row.description || ""}
+                              >
+                                {row.description || ""}
+                              </button>
+                            )}
                           </td>
                           <td className="px-2 py-1.5">
                             <input
@@ -910,6 +1056,19 @@ export default function FundEstimatorPage() {
         />
       )}
 
+
+      {/* Description full-text modal */}
+      {descModal !== null && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setDescModal(null)}>
+          <div className="bg-surface rounded-2xl border border-border max-w-lg w-full p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-foreground">Description</h3>
+              <button onClick={() => setDescModal(null)} className="text-muted hover:text-foreground cursor-pointer"><X className="w-4 h-4" /></button>
+            </div>
+            <p className="text-sm text-foreground leading-relaxed">{descModal}</p>
+          </div>
+        </div>
+      )}
 
       {/* Bank Account Modal */}
       {showBankModal && (
