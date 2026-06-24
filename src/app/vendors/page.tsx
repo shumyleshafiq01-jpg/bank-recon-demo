@@ -366,7 +366,7 @@ export default function VendorsPage() {
       try {
         const r = await fetch("/api/suppliers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ suppliers }) });
         const d = await r.json().catch(() => ({}));
-        if (r.ok && d.saved) { setLastSync(new Date().toLocaleTimeString()); setSyncError(""); }
+        if (r.ok && d.saved) { setLastSync(new Date().toLocaleTimeString()); try { localStorage.setItem("vb_sync", new Date().toLocaleTimeString()); } catch {}; setSyncError(""); }
         else setSyncError(d.error || "Sync failed");
       } catch { setSyncError("Network error"); }
       setSyncing(false);
@@ -380,7 +380,7 @@ export default function VendorsPage() {
       try {
         const r = await fetch("/api/vendors", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ vendors }) });
         const d = await r.json().catch(() => ({}));
-        if (r.ok && d.saved) { setLastSync(new Date().toLocaleTimeString()); setSyncError(""); }
+        if (r.ok && d.saved) { setLastSync(new Date().toLocaleTimeString()); try { localStorage.setItem("vb_sync", new Date().toLocaleTimeString()); } catch {}; setSyncError(""); }
         else setSyncError(d.error || "Sync failed");
       } catch { setSyncError("Network error"); }
       setSyncing(false);
@@ -527,13 +527,6 @@ export default function VendorsPage() {
         <button onClick={() => router.push("/dashboard")} className="text-muted hover:text-foreground cursor-pointer"><ArrowLeft className="w-5 h-5" /></button>
         <div className="w-7 h-7 rounded-lg bg-blue-500/20 flex items-center justify-center"><Building2 className="w-3.5 h-3.5 text-blue-400" /></div>
         <span className="text-sm font-bold text-foreground">Vendor Directory</span>
-        {syncing ? (
-          <span className="text-[10px] px-2 py-0.5 rounded-full bg-yellow-500/10 text-yellow-400 font-semibold animate-pulse">Syncing...</span>
-        ) : syncError ? (
-          <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 font-semibold">{syncError}</span>
-        ) : lastSync ? (
-          <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 font-semibold">Synced {lastSync}</span>
-        ) : null}
         <div className="ml-auto flex items-center gap-2">
           {session && (
             <>

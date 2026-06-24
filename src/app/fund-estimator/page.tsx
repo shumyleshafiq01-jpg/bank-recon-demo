@@ -221,7 +221,7 @@ export default function FundEstimatorPage() {
           if (data.banks && data.banks.length > 0) {
             setBanks(data.banks as BankAccount[]);
             setLedger(data.ledger as LedgerData);
-            setLastSync(new Date().toLocaleTimeString());
+            setLastSync(new Date().toLocaleTimeString()); try { localStorage.setItem("fe_sync", new Date().toLocaleTimeString()); } catch {};
             setLoaded(true);
             return;
           }
@@ -264,7 +264,7 @@ export default function FundEstimatorPage() {
         });
         const data = await res.json().catch(() => ({}));
         if (res.ok && data.saved) {
-          setLastSync(new Date().toLocaleTimeString());
+          setLastSync(new Date().toLocaleTimeString()); try { localStorage.setItem("fe_sync", new Date().toLocaleTimeString()); } catch {};
           setSyncError("");
         } else {
           setSyncError(data.error || "Sync failed");
@@ -426,15 +426,6 @@ export default function FundEstimatorPage() {
           <Banknote className="w-3.5 h-3.5 text-indigo-400" />
         </div>
         <span className="text-sm font-bold text-foreground">Fund Estimation Work Space</span>
-        {syncing ? (
-          <span className="text-[10px] px-2 py-0.5 rounded-full bg-yellow-500/10 text-yellow-400 font-semibold animate-pulse">Syncing...</span>
-        ) : syncError ? (
-          <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 font-semibold" title={syncError}>Sync error</span>
-        ) : lastSync ? (
-          <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 font-semibold">Synced {lastSync}</span>
-        ) : (
-          <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 font-semibold">Local Only</span>
-        )}
         <div className="ml-auto flex items-center gap-3">
           {session && (
             <div className="flex items-center gap-2">

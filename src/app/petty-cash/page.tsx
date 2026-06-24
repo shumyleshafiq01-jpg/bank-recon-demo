@@ -329,7 +329,7 @@ export default function PettyCashPage() {
             setEntries(data.entries as PettyCashEntry[]);
             setOpeningBalance(data.openingBalance ?? 0);
             setOpeningDate(data.openingDate ?? "");
-            setLastSync(new Date().toLocaleTimeString());
+            setLastSync(new Date().toLocaleTimeString()); try { localStorage.setItem("pc_sync", new Date().toLocaleTimeString()); } catch {};
             setLoaded(true);
             return;
           }
@@ -375,7 +375,7 @@ export default function PettyCashPage() {
         });
         const data = await res.json().catch(() => ({}));
         if (res.ok && data.saved) {
-          setLastSync(new Date().toLocaleTimeString());
+          setLastSync(new Date().toLocaleTimeString()); try { localStorage.setItem("pc_sync", new Date().toLocaleTimeString()); } catch {};
           setSyncError("");
         } else {
           setSyncError(data.error || "Sync failed");
@@ -501,15 +501,6 @@ export default function PettyCashPage() {
           <Wallet className="w-3.5 h-3.5 text-orange-400" />
         </div>
         <span className="text-sm font-bold text-foreground">Petty Cash Flow</span>
-        {syncing ? (
-          <span className="text-[10px] px-2 py-0.5 rounded-full bg-yellow-500/10 text-yellow-400 font-semibold animate-pulse">Syncing...</span>
-        ) : syncError ? (
-          <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 font-semibold" title={syncError}>Sync error</span>
-        ) : lastSync ? (
-          <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 font-semibold">Synced {lastSync}</span>
-        ) : (
-          <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 font-semibold">Local Only</span>
-        )}
         <div className="ml-auto flex items-center gap-2">
           {session && <ReminderBell role={session.role} name={session.name} />}
           {session && (

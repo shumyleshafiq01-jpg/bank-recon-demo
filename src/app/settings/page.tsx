@@ -1,8 +1,38 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ArrowLeft, Plus, Trash2, Settings, Zap, Building2, BarChart3, Eye, EyeOff } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Settings, Zap, Building2, BarChart3, Eye, EyeOff, Activity } from "lucide-react";
 import { useRouter } from "next/navigation";
+
+function SyncStatusBadge() {
+  const [status, setStatus] = useState<{ module: string; time: string; ok: boolean }[]>([]);
+
+  useEffect(() => {
+    const modules = [
+      { key: "fe_sync", label: "Fund Estimator" },
+      { key: "pc_sync", label: "Petty Cash" },
+      { key: "vb_sync", label: "Vendor Bank" },
+      { key: "sc_sync", label: "Supplier Contacts" },
+    ];
+    const result = modules.map(m => {
+      const val = localStorage.getItem(m.key);
+      return { module: m.label, time: val || "Never", ok: !!val };
+    });
+    setStatus(result);
+  }, []);
+
+  return (
+    <div className="flex items-center gap-2 text-[10px]">
+      <Activity className="w-3 h-3 text-green-400" />
+      <span className="text-muted font-semibold">Sync:</span>
+      {status.map(s => (
+        <span key={s.module} className={`px-1.5 py-0.5 rounded font-semibold ${s.ok ? "bg-green-500/10 text-green-400" : "bg-surface-light/40 text-muted"}`}>
+          {s.module}: {s.ok ? s.time : "—"}
+        </span>
+      ))}
+    </div>
+  );
+}
 
 interface Dept {
   id: string;
@@ -123,6 +153,7 @@ export default function SettingsPage() {
         <button onClick={() => router.push("/dashboard")} className="text-muted hover:text-foreground cursor-pointer"><ArrowLeft className="w-5 h-5" /></button>
         <div className="w-7 h-7 rounded-lg bg-indigo-500/20 flex items-center justify-center"><Settings className="w-3.5 h-3.5 text-indigo-400" /></div>
         <span className="text-sm font-bold text-foreground">Settings</span>
+        {isAdmin && <SyncStatusBadge />}
         {activeDeptId && (
           <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 font-semibold">
             Active: {localStorage.getItem("kafi_active_dept_name") || activeDeptId}
