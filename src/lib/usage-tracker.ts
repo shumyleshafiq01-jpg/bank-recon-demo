@@ -29,28 +29,41 @@ function readLog(): UsageEntry[] {
 }
 
 function appendLog(entry: UsageEntry) {
-  // Vercel's filesystem is read-only (only /tmp is writable), so file logging
-  // will throw EROFS in production. Never let that break the AI response.
   try {
     const log = readLog();
     log.push(entry);
     writeFileSync(LOG_PATH, JSON.stringify(log, null, 2));
   } catch {
-    /* read-only filesystem (e.g. Vercel) — skip persistent logging */
+    /* read-only filesystem (Vercel) — skip */
   }
 }
 
-export function logUsage(module: string, model: string, inputTokens: number, outputTokens: number) {
+async function logToSheets(
+  module: string, model: string, inputTokens: number, outputTokens: number,
+  costUSD: number, deptId = "", deptName = "Default"
+) {
+  try {
+    const { writeRows, ensureSheet } = await import("@/lib/google-sheets");
+    await ensureSheet("APIUsageLogs", ["timestamp","deptId","deptName","module","model","inputTokens","outputTokens","costUSD"]);
+    await writeRows("APIUsageLogs", [[
+      new Date().toISOString(), deptId, deptName, module, model,
+      String(inputTokens), String(outputTokens), String(costUSD),
+    ]]);
+  } catch {
+    /* never throw from usage logging */
+  }
+}
+
+export function logUsage(
+  module: string, model: string, inputTokens: number, outputTokens: number,
+  deptId = "", deptName = "Default"
+) {
   try {
     const cost = calcCost(model, inputTokens, outputTokens);
-    appendLog({
-      timestamp: new Date().toISOString(),
-      module,
-      model,
-      input_tokens: inputTokens,
-      output_tokens: outputTokens,
-      cost_usd: Math.round(cost * 10000) / 10000,
-    });
+    const rounded = Math.round(cost * 10000) / 10000;
+    appendLog({ timestamp: new Date().toISOString(), module, model, input_tokens: inputTokens, output_tokens: outputTokens, cost_usd: rounded });
+    // Log to Google Sheets (async, non-blocking)
+    logToSheets(module, model, inputTokens, outputTokens, rounded, deptId, deptName).catch(() => {});
   } catch {
     /* never throw from usage logging */
   }
