@@ -164,13 +164,32 @@ export default function SettingsPage() {
       <div className="flex-1 overflow-y-auto p-4 md:p-6">
         <div className="max-w-5xl mx-auto space-y-5 animate-fade-in">
 
+          {/* Admin gate — shown when not verified */}
+          {!isAdmin && (
+            <div className="bg-surface rounded-2xl border border-border p-6 max-w-sm mx-auto space-y-4 mt-8">
+              <div className="flex items-center gap-2">
+                <Settings className="w-4 h-4 text-indigo-400" />
+                <h3 className="text-sm font-semibold text-foreground">Super Admin Access Required</h3>
+              </div>
+              <input type="password" value={adminInput} onChange={e => { setAdminInput(e.target.value); setAdminError(""); }}
+                onKeyDown={e => e.key === "Enter" && verifyAdmin()}
+                placeholder="Enter admin PIN" autoFocus
+                className="w-full border border-border bg-background rounded-lg px-3 py-2.5 text-sm text-foreground focus:outline-none focus:border-indigo-500/50" />
+              {adminError && <p className="text-xs text-red-400">{adminError}</p>}
+              <button onClick={verifyAdmin} className="w-full px-4 py-2 bg-indigo-500 hover:bg-indigo-500/80 text-white text-sm font-semibold rounded-lg cursor-pointer transition-colors">Verify</button>
+            </div>
+          )}
+
+          {/* All settings content — only when admin verified */}
+          {isAdmin && <>
+
           {/* Tabs */}
           <div className="flex items-center gap-1 bg-surface rounded-xl border border-border p-1 w-fit">
             <button onClick={() => { setTab("usage"); loadUsage(); }}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold cursor-pointer transition-all ${tab === "usage" ? "bg-indigo-500 text-white" : "text-muted hover:text-foreground"}`}>
               <BarChart3 className="w-3.5 h-3.5" /> Usage Dashboard
             </button>
-            <button onClick={() => { setTab("depts"); if (isAdmin) loadDepts(); }}
+            <button onClick={() => { setTab("depts"); loadDepts(); }}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold cursor-pointer transition-all ${tab === "depts" ? "bg-indigo-500 text-white" : "text-muted hover:text-foreground"}`}>
               <Building2 className="w-3.5 h-3.5" /> Department API Keys
             </button>
@@ -302,17 +321,6 @@ export default function SettingsPage() {
 
           {/* ── DEPARTMENT API KEYS ── */}
           {tab === "depts" && (
-            !isAdmin ? (
-              <div className="bg-surface rounded-2xl border border-border p-6 max-w-sm mx-auto space-y-4">
-                <h3 className="text-sm font-semibold text-foreground">Admin Access Required</h3>
-                <input type="password" value={adminInput} onChange={e => { setAdminInput(e.target.value); setAdminError(""); }}
-                  onKeyDown={e => e.key === "Enter" && verifyAdmin()}
-                  placeholder="Enter admin PIN" autoFocus
-                  className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-sm text-foreground focus:outline-none focus:border-indigo-500/50" />
-                {adminError && <p className="text-xs text-red-400">{adminError}</p>}
-                <button onClick={verifyAdmin} className="w-full px-4 py-2 bg-indigo-500 hover:bg-indigo-500/80 text-white text-sm font-semibold rounded-lg cursor-pointer">Verify</button>
-              </div>
-            ) : (
               <div className="space-y-5">
                 {/* Active dept selector */}
                 {depts.length > 0 && (
@@ -399,8 +407,9 @@ export default function SettingsPage() {
                   )}
                 </div>
               </div>
-            )
           )}
+
+          </>}
         </div>
       </div>
     </div>
