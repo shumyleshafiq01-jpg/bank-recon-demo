@@ -435,21 +435,32 @@ export default function DashboardPage() {
               {remaining}
             </div>
           )}
-          {isSuperUser ? (
-            <div className="flex items-center gap-2">
-              {savingConfig && <span className="text-[10px] text-amber-600 animate-pulse">Saving...</span>}
-              <span className="text-[10px] px-2 py-1 bg-amber-100 text-amber-700 rounded-lg font-semibold border border-amber-200">Super User</span>
-              <button onClick={() => setIsSuperUser(false)} className="text-[10px] text-gray-400 hover:text-gray-600 cursor-pointer">Exit</button>
-            </div>
-          ) : (
-            <button
-              onClick={() => setShowAdminPin(true)}
-              className="text-gray-300 hover:text-gray-500 transition-colors cursor-pointer p-1.5 rounded-lg hover:bg-gray-100"
-              title="Super user"
-            >
+          {/* Single gear dropdown */}
+          <div className="relative group">
+            <button className={`flex items-center gap-1 p-1.5 rounded-lg cursor-pointer transition-colors ${isSuperUser ? "text-amber-600 bg-amber-50 hover:bg-amber-100" : "text-gray-300 hover:text-gray-500 hover:bg-gray-100"}`}>
               <Settings className="w-3.5 h-3.5" />
+              {isSuperUser && <span className="text-[10px] font-semibold pr-0.5">Admin</span>}
             </button>
-          )}
+            {/* Dropdown */}
+            <div className="absolute right-0 top-full mt-1 w-44 bg-white rounded-xl border border-gray-200 shadow-lg z-50 overflow-hidden opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all">
+              <button
+                onClick={() => !isSuperUser ? setShowAdminPin(true) : setIsSuperUser(false)}
+                className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 cursor-pointer transition-colors text-left"
+              >
+                <Settings className="w-3.5 h-3.5 text-gray-400" />
+                {isSuperUser ? "Exit Admin" : "Admin"}
+              </button>
+              <div className="border-t border-gray-100" />
+              <button
+                onClick={() => router.push("/settings")}
+                className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 cursor-pointer transition-colors text-left"
+              >
+                <Settings className="w-3.5 h-3.5 text-gray-400" />
+                API Settings
+              </button>
+            </div>
+          </div>
+          {isSuperUser && savingConfig && <span className="text-[10px] text-amber-600 animate-pulse">Saving...</span>}
           <button onClick={logout} className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-red-500 transition-colors cursor-pointer bg-gray-50 hover:bg-red-50 rounded-lg px-3 py-1.5">
             <LogOut className="w-3.5 h-3.5" />
             Logout
