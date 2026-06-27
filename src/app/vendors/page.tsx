@@ -545,8 +545,63 @@ export default function VendorsPage() {
     reader.onload = (e) => {
       const wb = XLSX.read(e.target?.result, { type: "binary" });
       const ws = wb.Sheets[wb.SheetNames[0]];
-      const raw = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: "" });
-      if (!raw.length) return;
+
+      // Try reading with headers from first non-empty row
+      const allRows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: "", header: 1 }) as string[][];
+
+      // Find first row that has actual column headers (not blank, not purely numeric)
+      const headerRowIdx = allRows.findIndex(r => r.some(c => c && isNaN(Number(c)) && String(c).length > 1));
+      if (headerRowIdx === -1) return;
+
+      const headers = allRows[headerRowIdx].map(h => String(h ?? "").trim());
+
+      // Flexible column name mapping
+      function findCol(candidates: string[]): number {
+        for (const c of candidates) {
+          const idx = headers.findIndex(h => h.toLowerCase().replace(/[\s/._-]/g, "").includes(c.toLowerCase().replace(/[\s/._-]/g, "")));
+          if (idx >= 0) return idx;
+        }
+        return -1;
+      }
+
+      const colMap = {
+        companyName:   findCol(["companyname", "company", "companyName"]),
+        contactPerson: findCol(["contactperson", "contact person", "contactPerson", "name"]),
+        jobTitle:      findCol(["jobtitle", "job title", "designation", "title"]),
+        phone:         findCol(["phone", "mobile", "cell", "contact", "mobilephone", "businessphone"]),
+        service:       findCol(["service", "business", "manufacturing"]),
+        address:       findCol(["address"]),
+        product:       findCol(["product", "services"]),
+        visitStatus:   findCol(["visit", "visitdone", "visitStatus"]),
+        vendorName:    findCol(["vendorname", "vendor"]),
+        acNo:          findCol(["acno", "accountno", "accountnumber", "account"]),
+        bank:          findCol(["bank"]),
+        acTitle:       findCol(["actitle", "accounttitle", "title"]),
+        branchCode:    findCol(["branch", "branchcode"]),
+      };
+
+      function getCell(row: string[], key: keyof typeof colMap): string {
+        const idx = colMap[key];
+        return idx >= 0 ? String(row[idx] ?? "").trim() : "";
+      }
+
+      // Filter data rows — skip blank rows and category header rows
+      const dataRows = allRows.slice(headerRowIdx + 1).filter(row => {
+        const hasData = row.some(c => c && String(c).trim());
+        const firstCell = String(row[0] ?? "").trim();
+        const isSubHeader = firstCell.toUpperCase() === firstCell && firstCell.length > 10 && !firstCell.match(/^\d/);
+        return hasData && !isSubHeader;
+      });
+
+      if (!dataRows.length) { alert("No data rows found in this file. Make sure the file has content below the header row."); return; }
+
+      const raw = dataRows.map(row => {
+        const mapped: Record<string, string> = {};
+        for (const [key, idx] of Object.entries(colMap)) {
+          if (idx >= 0) mapped[key] = String(row[idx] ?? "").trim();
+        }
+        return mapped;
+      });
 
       const existingPhones    = new Set(tab === "contacts" ? suppliers.map(s => s.phone.trim()).filter(Boolean) : vendors.map(v => v.phone.trim()).filter(Boolean));
       const existingAccNos    = new Set(vendors.map(v => v.acNo.trim()).filter(Boolean));

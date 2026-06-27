@@ -145,6 +145,17 @@ const AGENTS = [
     route: "/login",
   },
   {
+    name: "AI Product List / Recipes / Price List",
+    status: "wip",
+    statusLabel: "WIP",
+    statusColor: "bg-amber-100 text-amber-600",
+    desc: "Product catalogue, recipe/BOM management, costing, and price list generation",
+    icon: DollarSign,
+    iconBg: "bg-green-100",
+    iconColor: "text-green-500",
+    route: "/product-list",
+  },
+  {
     name: "AI Agent Cost / Budgeting",
     status: "tba",
     statusLabel: "TBA",

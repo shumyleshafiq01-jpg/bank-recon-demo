@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, useRef, useCallback } from "react";
 import {
   Landmark, ArrowRight, Clock, User, Building2, CreditCard,
-  Globe, FileText, LogOut, Scale, Timer, BookOpen, Wallet, Banknote, Zap, Settings,
+  Globe, FileText, LogOut, Scale, Timer, BookOpen, Wallet, Banknote, Zap, Settings, Package,
 } from "lucide-react";
 
 const TESTING_DEADLINE = new Date("2026-06-20T12:00:00Z").getTime();
