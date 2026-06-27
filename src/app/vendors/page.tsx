@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { ArrowLeft, Plus, Trash2, Pencil, X, Save, Building2, Lock, Search, Users, Landmark, Upload, Download, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Pencil, X, Save, Building2, Lock, Search, Users, Landmark, Upload, Download, AlertTriangle, CheckCircle2, UserCheck } from "lucide-react";
 import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
 
@@ -16,6 +16,16 @@ interface VendorBank {
   id: string; vendorName: string; contactPerson: string; commodity: string;
   phone: string; bank: string; acTitle: string; acNo: string; branchCode: string; notes: string;
 }
+
+interface Employee {
+  id: string; name: string; designation: string; phone: string;
+  bank: string; acTitle: string; acNo: string; branchCode: string; notes: string;
+}
+
+const emptyEmployee = (): Employee => ({
+  id: genId(), name: "", designation: "", phone: "",
+  bank: "", acTitle: "", acNo: "", branchCode: "", notes: "",
+});
 
 const genId = () => Math.random().toString(36).slice(2, 10);
 
@@ -315,13 +325,65 @@ function StarRating({ value, onChange }: { value: string; onChange: (g: string) 
   );
 }
 
+/* ═══════════════════════════════════════════ EMPLOYEE FORM */
+function EmpForm({ item, onSave, onClose }: { item: Employee; onSave: (e: Employee) => void; onClose: () => void }) {
+  const [f, setF] = useState<Employee>(item);
+  const s = <K extends keyof Employee>(k: K, v: Employee[K]) => setF(p => ({ ...p, [k]: v }));
+  const BANKS = ["MEEZAN","HMB","ABL","HBL","UBL","MCB","SCB","FAYSAL","BAH (BAHL)","ASKARI","SILK BANK","BANK ISLAMI","ALLIED","DIB","JS BANK","Other"];
+
+  return (
+    <div className="overflow-auto p-5 space-y-3 flex-1">
+      <div className="grid grid-cols-2 gap-3">
+        {([["name","Full Name *"],["designation","Designation"],["phone","Phone"]] as [keyof Employee, string][]).map(([k, l]) => (
+          <div key={k} className={k === "name" ? "col-span-2" : ""}>
+            <label className="text-[10px] text-muted uppercase tracking-wide block mb-1">{l}</label>
+            <input type="text" value={String(f[k])} onChange={e => s(k, e.target.value as never)}
+              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-blue-500/50" />
+          </div>
+        ))}
+        <div>
+          <label className="text-[10px] text-muted uppercase tracking-wide block mb-1">Bank</label>
+          <select value={f.bank} onChange={e => s("bank", e.target.value)} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-blue-500/50 cursor-pointer">
+            <option value="">— Select Bank —</option>
+            {BANKS.map(b => <option key={b} value={b}>{b}</option>)}
+          </select>
+        </div>
+        {([["acTitle","A/C Title"],["acNo","Account Number"],["branchCode","Branch Code / Name"]] as [keyof Employee, string][]).map(([k, l]) => (
+          <div key={k}>
+            <label className="text-[10px] text-muted uppercase tracking-wide block mb-1">{l}</label>
+            <input type="text" value={String(f[k])} onChange={e => s(k, e.target.value as never)}
+              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-blue-500/50" />
+          </div>
+        ))}
+        <div className="col-span-2">
+          <label className="text-[10px] text-muted uppercase tracking-wide block mb-1">Notes</label>
+          <textarea value={f.notes} onChange={e => s("notes", e.target.value)} rows={2}
+            className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-blue-500/50 resize-none" />
+        </div>
+      </div>
+      <div className="flex justify-end gap-3 pt-2 border-t border-border">
+        <button onClick={onClose} className="px-4 py-2 text-sm text-muted hover:text-foreground cursor-pointer">Cancel</button>
+        <button onClick={() => { if (!f.name.trim()) return; onSave(f); }}
+          className="flex items-center gap-1.5 px-5 py-2 bg-blue-500 hover:bg-blue-500/80 text-white text-sm font-semibold rounded-lg cursor-pointer">
+          <Save className="w-3.5 h-3.5" /> Save
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ═══════════════════════════════════════════ MAIN PAGE */
 export default function VendorsPage() {
   const router = useRouter();
-  const [tab, setTab] = useState<"contacts" | "banks">("banks");
+  const [tab, setTab] = useState<"contacts" | "banks" | "employees">("banks");
 
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [vendors, setVendors]     = useState<VendorBank[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [empLoaded, setEmpLoaded] = useState(false);
+  const empTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [showEmpForm, setShowEmpForm] = useState(false);
+  const [editEmployee, setEditEmployee] = useState<Employee | null>(null);
 
   const [suppLoaded, setSuppLoaded] = useState(false);
   const [bankLoaded, setBankLoaded] = useState(false);
@@ -356,6 +418,7 @@ export default function VendorsPage() {
   useEffect(() => {
     fetch("/api/suppliers").then(r => r.json()).then(d => { setSuppliers(d.suppliers ?? []); setSuppLoaded(true); }).catch(() => setSuppLoaded(true));
     fetch("/api/vendors").then(r => r.json()).then(d => { setVendors(d.vendors ?? []); setBankLoaded(true); }).catch(() => setBankLoaded(true));
+    fetch("/api/employees").then(r => r.json()).then(d => { setEmployees(d.employees ?? []); setEmpLoaded(true); }).catch(() => setEmpLoaded(true));
   }, []);
 
   // Debounced syncs
@@ -389,6 +452,28 @@ export default function VendorsPage() {
 
   useEffect(() => { if (suppLoaded) syncSuppliers(); }, [suppliers, suppLoaded, syncSuppliers]);
   useEffect(() => { if (bankLoaded) syncVendors();   }, [vendors,   bankLoaded, syncVendors]);
+
+  const syncEmployees = useCallback(() => {
+    if (empTimer.current) clearTimeout(empTimer.current);
+    empTimer.current = setTimeout(async () => {
+      try {
+        await fetch("/api/employees", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ employees }) });
+      } catch { /* ignore */ }
+    }, 1500);
+  }, [employees]);
+
+  useEffect(() => { if (empLoaded) syncEmployees(); }, [employees, empLoaded, syncEmployees]);
+
+  function saveEmployee(e: Employee) {
+    if (editEmployee) setEmployees(prev => prev.map(x => x.id === e.id ? e : x));
+    else setEmployees(prev => [...prev, e]);
+    setShowEmpForm(false); setEditEmployee(null);
+  }
+
+  function deleteEmployee(id: string) {
+    if (!confirm("Delete this record?")) return;
+    setEmployees(prev => prev.filter(e => e.id !== id));
+  }
 
   // Suppliers tab
   const uniqueCategories = [...new Set(suppliers.map(s => s.category).filter(Boolean))].sort();
@@ -547,12 +632,22 @@ export default function VendorsPage() {
             <input ref={fileInputRef} type="file" accept=".csv,.xlsx,.xls" className="hidden"
               onChange={e => { const f = e.target.files?.[0]; if (f) { requireAuth(() => parseUploadFile(f)); } e.target.value = ""; }} />
           </label>
-          <button
-            onClick={() => requireAuth(() => tab === "contacts" ? (setEditSupplier(null), setShowSuppForm(true)) : (setEditBank(null), setShowBankForm(true)))}
-            className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-blue-500 hover:bg-blue-500/80 text-white rounded-lg cursor-pointer transition-colors"
-          >
-            <Plus className="w-3 h-3" /> Add {tab === "contacts" ? "Supplier" : "Vendor"}
-          </button>
+          {tab !== "employees" && (
+            <button
+              onClick={() => requireAuth(() => tab === "contacts" ? (setEditSupplier(null), setShowSuppForm(true)) : (setEditBank(null), setShowBankForm(true)))}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-blue-500 hover:bg-blue-500/80 text-white rounded-lg cursor-pointer transition-colors"
+            >
+              <Plus className="w-3 h-3" /> Add {tab === "contacts" ? "Supplier" : "Vendor"}
+            </button>
+          )}
+          {tab === "employees" && (
+            <button
+              onClick={() => requireAuth(() => { setEditEmployee(null); setShowEmpForm(true); })}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-blue-500 hover:bg-blue-500/80 text-white rounded-lg cursor-pointer transition-colors"
+            >
+              <Plus className="w-3 h-3" /> Add Employee
+            </button>
+          )}
         </div>
       </header>
 
@@ -561,15 +656,21 @@ export default function VendorsPage() {
 
           {/* Tabs */}
           <div className="flex items-center gap-1 bg-surface rounded-xl border border-border p-1 w-fit">
-            <button onClick={() => { setTab("banks"); setSearch(""); setCatFilter(""); setVisitFilter(""); setGradeFilter(""); }}
+            <button onClick={() => { setTab("banks"); setSearch(""); setCatFilter(""); setVisitFilter(""); setGradeFilter(""); setShowEmpForm(false); }}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold cursor-pointer transition-all ${tab === "banks" ? "bg-blue-500 text-white" : "text-muted hover:text-foreground"}`}>
               <Landmark className="w-3.5 h-3.5" /> Vendor Bank Details
               <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${tab === "banks" ? "bg-white/20 text-white" : "bg-surface-light/60 text-muted"}`}>{vendors.length}</span>
             </button>
-            <button onClick={() => { setTab("contacts"); setSearch(""); setCatFilter(""); setVisitFilter(""); setGradeFilter(""); }}
+            <button onClick={() => { setTab("contacts"); setSearch(""); setCatFilter(""); setVisitFilter(""); setGradeFilter(""); setShowEmpForm(false); }}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold cursor-pointer transition-all ${tab === "contacts" ? "bg-blue-500 text-white" : "text-muted hover:text-foreground"}`}>
               <Users className="w-3.5 h-3.5" /> Supplier Contacts
               <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${tab === "contacts" ? "bg-white/20 text-white" : "bg-surface-light/60 text-muted"}`}>{suppliers.length}</span>
+            </button>
+            <button
+              onClick={() => requireAuth(() => { setTab("employees"); setSearch(""); setShowEmpForm(false); })}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold cursor-pointer transition-all ${tab === "employees" ? "bg-blue-500 text-white" : "text-muted hover:text-foreground"}`}>
+              <UserCheck className="w-3.5 h-3.5" /> Employees & Directors
+              <Lock className={`w-2.5 h-2.5 ${tab === "employees" ? "text-white/60" : "text-muted/50"}`} />
             </button>
           </div>
 
@@ -710,8 +811,68 @@ export default function VendorsPage() {
               </div>
             </div>
           )}
+
+          {/* ── EMPLOYEES & DIRECTORS TABLE ── */}
+          {tab === "employees" && (
+            <div className="bg-surface rounded-2xl border border-border overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-blue-500/10 text-blue-400">
+                      <th className="px-3 py-3 text-left font-semibold w-[36px]">#</th>
+                      <th className="px-3 py-3 text-left font-semibold">Name</th>
+                      <th className="px-3 py-3 text-left font-semibold w-[140px]">Designation</th>
+                      <th className="px-3 py-3 text-left font-semibold w-[120px]">Phone</th>
+                      <th className="px-3 py-3 text-left font-semibold w-[90px]">Bank</th>
+                      <th className="px-3 py-3 text-left font-semibold">A/C Title</th>
+                      <th className="px-3 py-3 text-left font-semibold">Account No.</th>
+                      <th className="px-3 py-3 text-left font-semibold">Branch</th>
+                      <th className="px-3 py-3 text-center w-[70px]">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {employees.length === 0 && (
+                      <tr><td colSpan={9} className="px-4 py-10 text-center text-muted">No records yet.</td></tr>
+                    )}
+                    {employees.map((e, i) => (
+                      <tr key={e.id} className={`${i % 2 === 0 ? "" : "bg-surface-light/20"} hover:bg-blue-500/5 transition-colors`}>
+                        <td className="px-3 py-2.5 text-muted">{i + 1}</td>
+                        <td className="px-3 py-2.5 font-semibold text-foreground">{e.name}</td>
+                        <td className="px-3 py-2.5"><span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 font-semibold">{e.designation || "—"}</span></td>
+                        <td className="px-3 py-2.5 text-muted">{e.phone || "—"}</td>
+                        <td className="px-3 py-2.5"><span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 font-semibold">{e.bank || "—"}</span></td>
+                        <td className="px-3 py-2.5 text-muted">{e.acTitle || "—"}</td>
+                        <td className="px-3 py-2.5 font-mono text-foreground text-[11px]">{e.acNo || "—"}</td>
+                        <td className="px-3 py-2.5 text-muted">{e.branchCode || "—"}</td>
+                        <td className="px-3 py-2.5">
+                          <div className="flex items-center justify-center gap-1">
+                            <button onClick={() => requireAuth(() => { setEditEmployee(e); setShowEmpForm(true); })} className="p-1 text-muted hover:text-blue-400 cursor-pointer"><Pencil className="w-3 h-3" /></button>
+                            <button onClick={() => requireAuth(() => deleteEmployee(e.id))} className="p-1 text-muted hover:text-red-400 cursor-pointer"><Trash2 className="w-3 h-3" /></button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
         </div>
       </div>
+
+      {/* Employee Form Modal */}
+      {showEmpForm && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { setShowEmpForm(false); setEditEmployee(null); }}>
+          <div className="bg-surface rounded-2xl border border-border max-w-xl w-full max-h-[88vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <h3 className="text-sm font-semibold text-foreground">{editEmployee ? "Edit" : "Add"} Employee / Director</h3>
+              <button onClick={() => { setShowEmpForm(false); setEditEmployee(null); }} className="text-muted hover:text-foreground cursor-pointer"><X className="w-4 h-4" /></button>
+            </div>
+            <EmpForm item={editEmployee ?? emptyEmployee()} onSave={saveEmployee} onClose={() => { setShowEmpForm(false); setEditEmployee(null); }} />
+          </div>
+        </div>
+      )}
 
       {showBankForm   && <BankForm     item={editBank     ?? emptyBank()}     existingVendors={vendors}     onSave={saveVendor}   onClose={() => { setShowBankForm(false);   setEditBank(null);     }} />}
       {showSuppForm   && <SupplierForm item={editSupplier ?? emptySupplier()} existingSuppliers={suppliers} onSave={saveSupplier} onClose={() => { setShowSuppForm(false);   setEditSupplier(null); }} />}
