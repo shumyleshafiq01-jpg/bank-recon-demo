@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
+import ApiCodeGate from "@/components/ApiCodeGate";
   Landmark, ArrowLeft, Upload, X, FileText,
   AlertTriangle, Loader2, ChevronDown, Download,
   Scale, Check,
@@ -202,6 +203,7 @@ export default function QuotationsPage() {
   const comparison = result?.quotations ? buildComparisonTable(result.quotations, includeLabor) : null;
 
   return (
+    <ApiCodeGate moduleName="Quotation Comparison">
     <div className="flex-1 flex flex-col">
       {/* Header */}
       <header className="border-b border-border bg-surface/50 backdrop-blur px-6 py-4 flex items-center justify-between">
@@ -504,5 +506,6 @@ export default function QuotationsPage() {
         )}
       </div>
     </div>
-  );
+      </ApiCodeGate>
+  );;
 }

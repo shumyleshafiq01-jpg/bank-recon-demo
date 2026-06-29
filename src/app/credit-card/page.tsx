@@ -10,6 +10,7 @@ import {
 import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
 import { Link2 } from "lucide-react";
+import ApiCodeGate from "@/components/ApiCodeGate";
 
 /* ═══════════════════════════════════════════
    TYPES
@@ -375,6 +376,7 @@ export default function CreditCardPage() {
   const stats = getStats();
 
   return (
+    <ApiCodeGate moduleName="Credit Card Verification">
     <div className="flex-1 flex flex-col">
       {/* Header */}
       <header className="border-b border-border bg-surface/50 backdrop-blur px-6 py-4 flex items-center gap-3">
@@ -869,5 +871,6 @@ export default function CreditCardPage() {
         );
       })()}
     </div>
-  );
+      </ApiCodeGate>
+  );;
 }

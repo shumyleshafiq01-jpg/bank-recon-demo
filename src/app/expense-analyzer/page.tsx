@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
+import ApiCodeGate from "@/components/ApiCodeGate";
 
 type Transaction = {
   date: string; month: string; merchant: string; amount: number;
@@ -382,6 +383,7 @@ export default function ExpenseAnalyzerPage() {
   const ready = files.length > 0 && !loading;
 
   return (
+    <ApiCodeGate moduleName="Expense Analyzer">
     <div className="flex-1 flex flex-col h-screen">
       <header className="border-b border-border bg-surface/50 backdrop-blur px-4 md:px-6 py-3 flex items-center gap-3 shrink-0">
         <button onClick={() => router.push("/dashboard")} className="text-muted hover:text-foreground transition-colors cursor-pointer">
@@ -836,5 +838,6 @@ export default function ExpenseAnalyzerPage() {
         </div>
       </div>
     </div>
-  );
+      </ApiCodeGate>
+  );;
 }

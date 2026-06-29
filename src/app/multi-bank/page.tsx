@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
+import ApiCodeGate from "@/components/ApiCodeGate";
 
 type BankRow = { date: string; particulars: string; debit: number; credit: number; source: string };
 type LedgerRow = { date: string; ref: string; doc: string; desc: string; debit: number; credit: number };
@@ -168,6 +169,7 @@ export default function MultiBankPage() {
   const ready = bankFiles.length > 0 && ledgerFile && !loading;
 
   return (
+    <ApiCodeGate moduleName="Multi-Bank Adjustments">
     <div className="flex-1 flex flex-col h-screen">
       <header className="border-b border-border bg-surface/50 backdrop-blur px-4 md:px-6 py-3 flex items-center gap-3 shrink-0">
         <button onClick={() => router.push("/dashboard")} className="text-muted hover:text-foreground transition-colors cursor-pointer">
@@ -603,5 +605,6 @@ export default function MultiBankPage() {
         </div>
       </div>
     </div>
-  );
+      </ApiCodeGate>
+  );;
 }

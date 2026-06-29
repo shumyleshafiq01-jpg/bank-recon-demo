@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ArrowLeft, ArrowRight, Upload, X, Loader2, CheckCircle2, XCircle, Lock, FileText, BookOpen, GitCompare, AlertTriangle } from "lucide-react";
 import { useRouter } from "next/navigation";
+import ApiCodeGate from "@/components/ApiCodeGate";
 
 /* ── Types ── */
 
@@ -344,6 +345,7 @@ export default function StatementDigitizerPage() {
   const ledgerOnlyCount = matchedRows.filter((r) => r.status === "ledger_only").length;
 
   return (
+    <ApiCodeGate moduleName="Statement Digitizer">
     <div className="flex-1 flex flex-col">
       {/* Header */}
       <header className="border-b border-border bg-surface/50 backdrop-blur px-6 py-4 flex items-center gap-4">
@@ -959,5 +961,6 @@ export default function StatementDigitizerPage() {
         </div>
       )}
     </div>
-  );
+      </ApiCodeGate>
+  );;
 }
