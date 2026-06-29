@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { ArrowLeft, Plus, Trash2, Pencil, X, Save, Building2, Lock, Search, Users, Landmark, Upload, Download, AlertTriangle, CheckCircle2, UserCheck } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Pencil, X, Save, Building2, Lock, Search, Users, Landmark, Upload, Download, AlertTriangle, CheckCircle2, UserCheck, Phone, Mail, Settings2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
 
@@ -21,6 +21,16 @@ interface Employee {
   id: string; name: string; designation: string; phone: string;
   bank: string; acTitle: string; acNo: string; branchCode: string; notes: string;
 }
+
+interface BankContact {
+  id: string; name: string; designation: string; phone: string;
+  ptcl: string; email: string; bankBranch: string; notes: string;
+}
+
+const emptyBankContact = (): BankContact => ({
+  id: genId(), name: "", designation: "", phone: "",
+  ptcl: "", email: "", bankBranch: "", notes: "",
+});
 
 const emptyEmployee = (): Employee => ({
   id: genId(), name: "", designation: "", phone: "",
@@ -75,15 +85,16 @@ function VPinModal({ onSuccess, onClose }: { onSuccess: (s: VSession) => void; o
 }
 
 /* ═══════════════════════════════════════════ SUPPLIER FORM */
-function SupplierForm({ item, existingSuppliers, onSave, onClose }: {
+function SupplierForm({ item, existingSuppliers, catOptions, onSave, onClose }: {
   item: Supplier; existingSuppliers: Supplier[];
+  catOptions?: string[];
   onSave: (s: Supplier) => void; onClose: () => void;
 }) {
   const [f, setF] = useState<Supplier>(item);
   const [submitted, setSubmitted] = useState(false);
   const s = <K extends keyof Supplier>(k: K, v: Supplier[K]) => setF(p => ({ ...p, [k]: v }));
 
-  const CATEGORIES = ["Fried Onion","Spices","Paste / Pickle / Chutney","Sauces & Mayo","Vermicelli","Pheni / Bakery","Custard & Jelly","Fresh Vegetables","Food Technologist","Packaging","Logistics / Transport","Other"];
+  const CATEGORIES = catOptions ?? ["Fried Onion","Spices","Paste / Pickle / Chutney","Sauces & Mayo","Vermicelli","Pheni / Bakery","Custard & Jelly","Fresh Vegetables","Food Technologist","Packaging","Logistics / Transport","Other"];
   const VISIT = ["Visited","Not visited yet","Already met","Closed / Inactive"];
   const GRADES = ["★ Under evaluation","★★ Approved","★★★ Good","★★★★ Preferred","★★★★★ Top Supplier"];
 
@@ -213,14 +224,15 @@ function SupplierForm({ item, existingSuppliers, onSave, onClose }: {
 }
 
 /* ═══════════════════════════════════════════ BANK FORM */
-function BankForm({ item, existingVendors, onSave, onClose }: {
+function BankForm({ item, existingVendors, bankOptions, onSave, onClose }: {
   item: VendorBank; existingVendors: VendorBank[];
+  bankOptions?: string[];
   onSave: (v: VendorBank) => void; onClose: () => void;
 }) {
   const [f, setF] = useState<VendorBank>(item);
   const s = <K extends keyof VendorBank>(k: K, v: VendorBank[K]) => setF(p => ({ ...p, [k]: v }));
 
-  const BANKS = ["MEEZAN","HMB","ABL","HBL","UBL","MCB","SCB","FAYSAL","BAH (BAHL)","ASKARI","SILK BANK","BANK ISLAMI","ALLIED","DIB","JS BANK","Other"];
+  const BANKS = bankOptions ?? ["MEEZAN","HMB","ABL","HBL","UBL","MCB","SCB","FAYSAL","BAH (BAHL)","ASKARI","SILK BANK","BANK ISLAMI","ALLIED","DIB","JS BANK","Other"];
 
   const acNoMatch = f.acNo.trim() ? existingVendors.filter(x => x.id !== item.id && x.acNo.trim() === f.acNo.trim()) : [];
   const phoneMatch = f.phone.trim() ? existingVendors.filter(x => x.id !== item.id && x.phone.trim() === f.phone.trim()) : [];
@@ -325,6 +337,110 @@ function StarRating({ value, onChange }: { value: string; onChange: (g: string) 
   );
 }
 
+/* ═══════════════════════════════════════════ CATEGORY MODAL */
+function CategoryModal({ title, items, saving, onSave, onClose }: {
+  title: string; items: string[]; saving: boolean;
+  onSave: (items: string[]) => void; onClose: () => void;
+}) {
+  const [list, setList] = useState<string[]>([...items]);
+  const [newItem, setNewItem] = useState("");
+  const [editIdx, setEditIdx] = useState<number | null>(null);
+  const [editVal, setEditVal] = useState("");
+
+  function addItem() {
+    if (!newItem.trim() || list.includes(newItem.trim())) return;
+    setList(prev => [...prev, newItem.trim()]); setNewItem("");
+  }
+
+  function removeItem(idx: number) { setList(prev => prev.filter((_, i) => i !== idx)); }
+
+  function startEdit(idx: number) { setEditIdx(idx); setEditVal(list[idx]); }
+
+  function saveEdit() {
+    if (editIdx === null || !editVal.trim()) return;
+    setList(prev => prev.map((v, i) => i === editIdx ? editVal.trim() : v));
+    setEditIdx(null); setEditVal("");
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-surface rounded-2xl border border-border max-w-md w-full max-h-[80vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+          <h3 className="text-sm font-semibold text-foreground">Manage {title}</h3>
+          <button onClick={onClose} className="text-muted hover:text-foreground cursor-pointer"><X className="w-4 h-4" /></button>
+        </div>
+        <div className="overflow-auto p-5 flex-1 space-y-2">
+          {list.map((item, idx) => (
+            <div key={idx} className="flex items-center gap-2">
+              {editIdx === idx ? (
+                <>
+                  <input value={editVal} onChange={e => setEditVal(e.target.value)} onKeyDown={e => e.key === "Enter" && saveEdit()} autoFocus
+                    className="flex-1 bg-background border border-blue-500/50 rounded-lg px-3 py-1.5 text-sm text-foreground focus:outline-none" />
+                  <button onClick={saveEdit} className="text-xs px-2 py-1.5 bg-blue-500 text-white rounded-lg cursor-pointer">Save</button>
+                  <button onClick={() => setEditIdx(null)} className="text-xs text-muted cursor-pointer">Cancel</button>
+                </>
+              ) : (
+                <>
+                  <span className="flex-1 text-sm text-foreground py-1.5">{item}</span>
+                  <button onClick={() => startEdit(idx)} className="p-1 text-muted hover:text-blue-400 cursor-pointer"><Pencil className="w-3 h-3" /></button>
+                  <button onClick={() => removeItem(idx)} className="p-1 text-muted hover:text-red-400 cursor-pointer"><Trash2 className="w-3 h-3" /></button>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="px-5 py-4 border-t border-border space-y-3">
+          <div className="flex gap-2">
+            <input value={newItem} onChange={e => setNewItem(e.target.value)} onKeyDown={e => e.key === "Enter" && addItem()} placeholder="Add new item..."
+              className="flex-1 bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-blue-500/50" />
+            <button onClick={addItem} disabled={!newItem.trim()} className="px-3 py-2 bg-blue-500 hover:bg-blue-500/80 text-white text-sm font-semibold rounded-lg cursor-pointer disabled:opacity-40">
+              <Plus className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div className="flex justify-end gap-2">
+            <button onClick={onClose} className="px-4 py-2 text-sm text-muted cursor-pointer">Cancel</button>
+            <button onClick={() => { onSave(list); onClose(); }} disabled={saving}
+              className="flex items-center gap-1.5 px-5 py-2 bg-blue-500 hover:bg-blue-500/80 text-white text-sm font-semibold rounded-lg cursor-pointer disabled:opacity-50">
+              <Save className="w-3.5 h-3.5" /> {saving ? "Saving..." : "Save Changes"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════ BANK CONTACT FORM */
+function BankContactForm({ item, onSave, onClose }: { item: BankContact; onSave: (c: BankContact) => void; onClose: () => void }) {
+  const [f, setF] = useState<BankContact>(item);
+  const s = <K extends keyof BankContact>(k: K, v: BankContact[K]) => setF(p => ({ ...p, [k]: v }));
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-3">
+        {([["name","Name *"],["designation","Designation"],["phone","Phone"],["ptcl","PTCL / Ext"],["email","Email"],["bankBranch","Bank & Branch"]] as [keyof BankContact, string][]).map(([k, l]) => (
+          <div key={k} className={k === "bankBranch" || k === "email" ? "col-span-2" : ""}>
+            <label className="text-[10px] text-muted uppercase tracking-wide block mb-1">{l}</label>
+            <input type="text" value={String(f[k])} onChange={e => s(k, e.target.value as never)}
+              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-blue-500/50" />
+          </div>
+        ))}
+        <div className="col-span-2">
+          <label className="text-[10px] text-muted uppercase tracking-wide block mb-1">Notes</label>
+          <textarea value={f.notes} onChange={e => s("notes", e.target.value)} rows={2}
+            className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-blue-500/50 resize-none" />
+        </div>
+      </div>
+      <div className="flex justify-end gap-2 pt-2 border-t border-border">
+        <button onClick={onClose} className="px-4 py-2 text-sm text-muted cursor-pointer">Cancel</button>
+        <button onClick={() => { if (!f.name.trim()) return; onSave(f); }}
+          className="flex items-center gap-1.5 px-5 py-2 bg-blue-500 hover:bg-blue-500/80 text-white text-sm font-semibold rounded-lg cursor-pointer">
+          <Save className="w-3.5 h-3.5" /> Save
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ═══════════════════════════════════════════ EMPLOYEE FORM */
 function EmpForm({ item, onSave, onClose }: { item: Employee; onSave: (e: Employee) => void; onClose: () => void }) {
   const [f, setF] = useState<Employee>(item);
@@ -375,13 +491,30 @@ function EmpForm({ item, onSave, onClose }: { item: Employee; onSave: (e: Employ
 /* ═══════════════════════════════════════════ MAIN PAGE */
 export default function VendorsPage() {
   const router = useRouter();
-  const [tab, setTab] = useState<"contacts" | "banks" | "employees">("banks");
+  const [tab, setTab] = useState<"contacts" | "banks" | "employees" | "bankcontacts">("banks");
 
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [vendors, setVendors]     = useState<VendorBank[]>([]);
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [empLoaded, setEmpLoaded] = useState(false);
+  const [suppliers, setSuppliers]       = useState<Supplier[]>([]);
+  const [vendors, setVendors]           = useState<VendorBank[]>([]);
+  const [employees, setEmployees]       = useState<Employee[]>([]);
+  const [bankContacts, setBankContacts] = useState<BankContact[]>([]);
+  const [empLoaded, setEmpLoaded]       = useState(false);
+  const [bcLoaded, setBcLoaded]         = useState(false);
   const empTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bcTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Bulk selection
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // Category management
+  const [showCatModal, setShowCatModal] = useState(false);
+  const [catType, setCatType] = useState<"supplier_categories"|"vendor_banks">("supplier_categories");
+  const [dirConfig, setDirConfig] = useState<{supplier_categories: string[]; vendor_banks: string[]}>({
+    supplier_categories: ["Fried Onion","Spices","Paste / Pickle / Chutney","Sauces & Mayo","Vermicelli","Pheni / Bakery","Custard & Jelly","Fresh Vegetables","Food Technologist","Packaging","Logistics / Transport","Other"],
+    vendor_banks: ["MEEZAN","HMB","ABL","HBL","UBL","MCB","SCB","FAYSAL","BAH (BAHL)","ASKARI","SILK BANK","BANK ISLAMI","ALLIED","DIB","JS BANK","Other"],
+  });
+  const [savingConfig, setSavingConfig] = useState(false);
+  const [showBankContactForm, setShowBankContactForm] = useState(false);
+  const [editingBankContact, setEditingBankContact] = useState<BankContact | null>(null);
   const [showEmpForm, setShowEmpForm] = useState(false);
   const [editEmployee, setEditEmployee] = useState<Employee | null>(null);
 
@@ -419,6 +552,8 @@ export default function VendorsPage() {
     fetch("/api/suppliers").then(r => r.json()).then(d => { setSuppliers(d.suppliers ?? []); setSuppLoaded(true); }).catch(() => setSuppLoaded(true));
     fetch("/api/vendors").then(r => r.json()).then(d => { setVendors(d.vendors ?? []); setBankLoaded(true); }).catch(() => setBankLoaded(true));
     fetch("/api/employees").then(r => r.json()).then(d => { setEmployees(d.employees ?? []); setEmpLoaded(true); }).catch(() => setEmpLoaded(true));
+    fetch("/api/bank-contacts").then(r => r.json()).then(d => { setBankContacts(d.contacts ?? []); setBcLoaded(true); }).catch(() => setBcLoaded(true));
+    fetch("/api/directory-config").then(r => r.json()).then(d => setDirConfig(dc => ({ ...dc, ...d }))).catch(() => {});
   }, []);
 
   // Debounced syncs
@@ -473,6 +608,55 @@ export default function VendorsPage() {
   function deleteEmployee(id: string) {
     if (!confirm("Delete this record?")) return;
     setEmployees(prev => prev.filter(e => e.id !== id));
+  }
+
+  // Bank Contacts sync
+  const syncBankContacts = useCallback(() => {
+    if (bcTimer.current) clearTimeout(bcTimer.current);
+    bcTimer.current = setTimeout(async () => {
+      try { await fetch("/api/bank-contacts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contacts: bankContacts }) }); } catch { /* */ }
+    }, 1500);
+  }, [bankContacts]);
+
+  useEffect(() => { if (bcLoaded) syncBankContacts(); }, [bankContacts, bcLoaded, syncBankContacts]);
+
+  function saveBankContact(c: BankContact) {
+    if (editingBankContact) setBankContacts(prev => prev.map(x => x.id === c.id ? c : x));
+    else setBankContacts(prev => [...prev, c]);
+    setShowBankContactForm(false); setEditingBankContact(null);
+  }
+
+  function deleteBankContact(id: string) {
+    if (!confirm("Delete this contact?")) return;
+    setBankContacts(prev => prev.filter(c => c.id !== id));
+  }
+
+  // Bulk select helpers
+  function toggleSelect(id: string) {
+    setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  }
+
+  function selectAll(ids: string[]) {
+    setSelectedIds(prev => prev.size === ids.length && ids.every(id => prev.has(id)) ? new Set() : new Set(ids));
+  }
+
+  function bulkDelete() {
+    if (!selectedIds.size) return;
+    if (!confirm(`Delete ${selectedIds.size} selected record(s)?`)) return;
+    if (tab === "banks")        setVendors(prev => prev.filter(v => !selectedIds.has(v.id)));
+    if (tab === "contacts")     setSuppliers(prev => prev.filter(s => !selectedIds.has(s.id)));
+    if (tab === "employees")    setEmployees(prev => prev.filter(e => !selectedIds.has(e.id)));
+    if (tab === "bankcontacts") setBankContacts(prev => prev.filter(c => !selectedIds.has(c.id)));
+    setSelectedIds(new Set());
+  }
+
+  async function saveConfig(key: "supplier_categories"|"vendor_banks", values: string[]) {
+    setSavingConfig(true);
+    setDirConfig(prev => ({ ...prev, [key]: values }));
+    try {
+      await fetch("/api/directory-config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, values }) });
+    } catch { /* ignore */ }
+    setSavingConfig(false);
   }
 
   // Suppliers tab
@@ -547,7 +731,7 @@ export default function VendorsPage() {
       const ws = wb.Sheets[wb.SheetNames[0]];
 
       // Try reading with headers from first non-empty row
-      const allRows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: "", header: 1 }) as string[][];
+      const allRows = XLSX.utils.sheet_to_json<unknown>(ws, { defval: "", header: 1 }) as string[][];
 
       // Find first row that has actual column headers (not blank, not purely numeric)
       const headerRowIdx = allRows.findIndex(r => r.some(c => c && isNaN(Number(c)) && String(c).length > 1));
@@ -666,7 +850,7 @@ export default function VendorsPage() {
       <header className="border-b border-border bg-surface/50 backdrop-blur px-4 md:px-6 py-3 flex items-center gap-3 shrink-0">
         <button onClick={() => router.push("/dashboard")} className="text-muted hover:text-foreground cursor-pointer"><ArrowLeft className="w-5 h-5" /></button>
         <div className="w-7 h-7 rounded-lg bg-blue-500/20 flex items-center justify-center"><Building2 className="w-3.5 h-3.5 text-blue-400" /></div>
-        <span className="text-sm font-bold text-foreground">Vendor Directory</span>
+        <span className="text-sm font-bold text-foreground">Master Directory</span>
         <div className="ml-auto flex items-center gap-2">
           {session && (
             <>
@@ -675,6 +859,12 @@ export default function VendorsPage() {
               </span>
               <button onClick={logout} className="text-[10px] text-muted hover:text-red-400 cursor-pointer">Logout</button>
             </>
+          )}
+          {(tab === "contacts" || tab === "banks") && (
+            <button onClick={() => requireAuth(() => { setCatType(tab === "contacts" ? "supplier_categories" : "vendor_banks"); setShowCatModal(true); })}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 border border-border text-muted hover:text-foreground hover:border-blue-500/40 rounded-lg cursor-pointer transition-colors">
+              <Settings2 className="w-3 h-3" /> {tab === "contacts" ? "Categories" : "Banks"}
+            </button>
           )}
           <button
             onClick={() => requireAuth(() => { tab === "contacts" ? exportSupplierTemplate() : exportVendorTemplate(); })}
@@ -696,11 +886,21 @@ export default function VendorsPage() {
             </button>
           )}
           {tab === "employees" && (
-            <button
-              onClick={() => requireAuth(() => { setEditEmployee(null); setShowEmpForm(true); })}
-              className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-blue-500 hover:bg-blue-500/80 text-white rounded-lg cursor-pointer transition-colors"
-            >
+            <button onClick={() => requireAuth(() => { setEditEmployee(null); setShowEmpForm(true); })}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-blue-500 hover:bg-blue-500/80 text-white rounded-lg cursor-pointer transition-colors">
               <Plus className="w-3 h-3" /> Add Employee
+            </button>
+          )}
+          {tab === "bankcontacts" && (
+            <button onClick={() => requireAuth(() => { setEditingBankContact(null); setShowBankContactForm(true); })}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-blue-500 hover:bg-blue-500/80 text-white rounded-lg cursor-pointer transition-colors">
+              <Plus className="w-3 h-3" /> Add Contact
+            </button>
+          )}
+          {selectedIds.size > 0 && (
+            <button onClick={() => requireAuth(() => bulkDelete())}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-red-500 hover:bg-red-500/80 text-white rounded-lg cursor-pointer transition-colors">
+              <Trash2 className="w-3 h-3" /> Delete {selectedIds.size} selected
             </button>
           )}
         </div>
@@ -711,21 +911,27 @@ export default function VendorsPage() {
 
           {/* Tabs */}
           <div className="flex items-center gap-1 bg-surface rounded-xl border border-border p-1 w-fit">
-            <button onClick={() => { setTab("banks"); setSearch(""); setCatFilter(""); setVisitFilter(""); setGradeFilter(""); setShowEmpForm(false); }}
+            <button onClick={() => { setTab("banks"); setSearch(""); setCatFilter(""); setVisitFilter(""); setGradeFilter(""); setShowEmpForm(false); setSelectedIds(new Set()); }}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold cursor-pointer transition-all ${tab === "banks" ? "bg-blue-500 text-white" : "text-muted hover:text-foreground"}`}>
               <Landmark className="w-3.5 h-3.5" /> Vendor Bank Details
               <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${tab === "banks" ? "bg-white/20 text-white" : "bg-surface-light/60 text-muted"}`}>{vendors.length}</span>
             </button>
-            <button onClick={() => { setTab("contacts"); setSearch(""); setCatFilter(""); setVisitFilter(""); setGradeFilter(""); setShowEmpForm(false); }}
+            <button onClick={() => { setTab("contacts"); setSearch(""); setCatFilter(""); setVisitFilter(""); setGradeFilter(""); setShowEmpForm(false); setSelectedIds(new Set()); }}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold cursor-pointer transition-all ${tab === "contacts" ? "bg-blue-500 text-white" : "text-muted hover:text-foreground"}`}>
               <Users className="w-3.5 h-3.5" /> Supplier Contacts
               <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${tab === "contacts" ? "bg-white/20 text-white" : "bg-surface-light/60 text-muted"}`}>{suppliers.length}</span>
             </button>
             <button
-              onClick={() => requireAuth(() => { setTab("employees"); setSearch(""); setShowEmpForm(false); })}
+              onClick={() => requireAuth(() => { setTab("employees"); setSearch(""); setShowEmpForm(false); setSelectedIds(new Set()); })}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold cursor-pointer transition-all ${tab === "employees" ? "bg-blue-500 text-white" : "text-muted hover:text-foreground"}`}>
               <UserCheck className="w-3.5 h-3.5" /> Employees & Directors
               <Lock className={`w-2.5 h-2.5 ${tab === "employees" ? "text-white/60" : "text-muted/50"}`} />
+            </button>
+            <button
+              onClick={() => { setTab("bankcontacts"); setSearch(""); setSelectedIds(new Set()); }}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold cursor-pointer transition-all ${tab === "bankcontacts" ? "bg-blue-500 text-white" : "text-muted hover:text-foreground"}`}>
+              <Phone className="w-3.5 h-3.5" /> Bank Contacts
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${tab === "bankcontacts" ? "bg-white/20 text-white" : "bg-surface-light/60 text-muted"}`}>{bankContacts.length}</span>
             </button>
           </div>
 
@@ -775,6 +981,9 @@ export default function VendorsPage() {
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="bg-blue-500/10 text-blue-400">
+                      <th className="px-3 py-3 text-center w-[36px]">
+                        <input type="checkbox" checked={selectedIds.size === filteredVendors.length && filteredVendors.length > 0} onChange={() => selectAll(filteredVendors.map(v => v.id))} className="cursor-pointer" />
+                      </th>
                       <th className="px-3 py-3 text-left font-semibold w-[36px]">#</th>
                       <th className="px-3 py-3 text-left font-semibold">Vendor Name</th>
                       <th className="px-3 py-3 text-left font-semibold">Commodity / Nature</th>
@@ -791,7 +1000,8 @@ export default function VendorsPage() {
                       <tr><td colSpan={9} className="px-4 py-10 text-center text-muted">{vendors.length === 0 ? "No vendors yet." : "No results."}</td></tr>
                     )}
                     {filteredVendors.map((v, i) => (
-                      <tr key={v.id} className={`${i % 2 === 0 ? "" : "bg-surface-light/20"} hover:bg-blue-500/5 transition-colors`}>
+                      <tr key={v.id} className={`${selectedIds.has(v.id) ? "bg-blue-500/10" : i % 2 === 0 ? "" : "bg-surface-light/20"} hover:bg-blue-500/5 transition-colors`}>
+                        <td className="px-3 py-2.5 text-center"><input type="checkbox" checked={selectedIds.has(v.id)} onChange={() => toggleSelect(v.id)} className="cursor-pointer" /></td>
                         <td className="px-3 py-2.5 text-muted">{i + 1}</td>
                         <td className="px-3 py-2.5 font-semibold text-foreground">{v.vendorName}</td>
                         <td className="px-3 py-2.5 text-muted">{v.commodity || "—"}</td>
@@ -821,6 +1031,9 @@ export default function VendorsPage() {
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="bg-blue-500/10 text-blue-400">
+                      <th className="px-3 py-3 text-center w-[36px]">
+                        <input type="checkbox" checked={selectedIds.size === filteredSuppliers.length && filteredSuppliers.length > 0} onChange={() => selectAll(filteredSuppliers.map(s => s.id))} className="cursor-pointer" />
+                      </th>
                       <th className="px-3 py-3 text-left font-semibold w-[36px]">#</th>
                       <th className="px-3 py-3 text-left font-semibold">Company</th>
                       <th className="px-3 py-3 text-left font-semibold">Contact Person</th>
@@ -838,7 +1051,8 @@ export default function VendorsPage() {
                       <tr><td colSpan={9} className="px-4 py-10 text-center text-muted">{suppliers.length === 0 ? "No suppliers yet." : "No results."}</td></tr>
                     )}
                     {filteredSuppliers.map((s, i) => (
-                      <tr key={s.id} className={`${i % 2 === 0 ? "" : "bg-surface-light/20"} hover:bg-blue-500/5 transition-colors`}>
+                      <tr key={s.id} className={`${selectedIds.has(s.id) ? "bg-blue-500/10" : i % 2 === 0 ? "" : "bg-surface-light/20"} hover:bg-blue-500/5 transition-colors`}>
+                        <td className="px-3 py-2.5 text-center"><input type="checkbox" checked={selectedIds.has(s.id)} onChange={() => toggleSelect(s.id)} className="cursor-pointer" /></td>
                         <td className="px-3 py-2.5 text-muted">{i + 1}</td>
                         <td className="px-3 py-2.5 font-semibold text-foreground">{s.companyName || "—"}</td>
                         <td className="px-3 py-2.5 text-muted">{s.contactPerson || "—"}{s.jobTitle ? <span className="text-[10px] ml-1 text-muted/60">({s.jobTitle})</span> : null}</td>
@@ -913,8 +1127,67 @@ export default function VendorsPage() {
             </div>
           )}
 
+          {/* ── BANK CONTACTS TABLE ── */}
+          {tab === "bankcontacts" && (
+            <div className="bg-surface rounded-2xl border border-border overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-blue-500/10 text-blue-400">
+                      <th className="px-3 py-3 text-center w-[36px]">
+                        <input type="checkbox" checked={selectedIds.size === bankContacts.length && bankContacts.length > 0} onChange={() => selectAll(bankContacts.map(c => c.id))} className="cursor-pointer" />
+                      </th>
+                      <th className="px-3 py-3 text-left font-semibold w-[36px]">#</th>
+                      <th className="px-3 py-3 text-left font-semibold">Name</th>
+                      <th className="px-3 py-3 text-left font-semibold w-[160px]">Designation</th>
+                      <th className="px-3 py-3 text-left font-semibold w-[120px]">Phone</th>
+                      <th className="px-3 py-3 text-left font-semibold w-[120px]">PTCL</th>
+                      <th className="px-3 py-3 text-left font-semibold">Email</th>
+                      <th className="px-3 py-3 text-left font-semibold">Bank & Branch</th>
+                      <th className="px-3 py-3 text-center w-[70px]">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {bankContacts.length === 0 && <tr><td colSpan={9} className="px-4 py-10 text-center text-muted">No bank contacts yet.</td></tr>}
+                    {bankContacts.map((c, i) => (
+                      <tr key={c.id} className={`${selectedIds.has(c.id) ? "bg-blue-500/10" : i % 2 === 0 ? "" : "bg-surface-light/20"} hover:bg-blue-500/5 transition-colors`}>
+                        <td className="px-3 py-2.5 text-center"><input type="checkbox" checked={selectedIds.has(c.id)} onChange={() => toggleSelect(c.id)} className="cursor-pointer" /></td>
+                        <td className="px-3 py-2.5 text-muted">{i + 1}</td>
+                        <td className="px-3 py-2.5 font-semibold text-foreground">{c.name}</td>
+                        <td className="px-3 py-2.5 text-muted">{c.designation || "—"}</td>
+                        <td className="px-3 py-2.5 text-muted">{c.phone || "—"}</td>
+                        <td className="px-3 py-2.5 text-muted">{c.ptcl || "—"}</td>
+                        <td className="px-3 py-2.5 text-blue-400">{c.email ? <a href={`mailto:${c.email}`} className="hover:underline cursor-pointer">{c.email}</a> : "—"}</td>
+                        <td className="px-3 py-2.5 text-muted">{c.bankBranch || "—"}</td>
+                        <td className="px-3 py-2.5">
+                          <div className="flex items-center justify-center gap-1">
+                            <button onClick={() => requireAuth(() => { setEditingBankContact(c); setShowBankContactForm(true); })} className="p-1 text-muted hover:text-blue-400 cursor-pointer"><Pencil className="w-3 h-3" /></button>
+                            <button onClick={() => requireAuth(() => deleteBankContact(c.id))} className="p-1 text-muted hover:text-red-400 cursor-pointer"><Trash2 className="w-3 h-3" /></button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
         </div>
       </div>
+
+      {/* Bank Contact Form Modal */}
+      {showBankContactForm && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { setShowBankContactForm(false); setEditingBankContact(null); }}>
+          <div className="bg-surface rounded-2xl border border-border max-w-lg w-full p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-foreground">{editingBankContact ? "Edit" : "Add"} Bank Contact</h3>
+              <button onClick={() => { setShowBankContactForm(false); setEditingBankContact(null); }} className="text-muted hover:text-foreground cursor-pointer"><X className="w-4 h-4" /></button>
+            </div>
+            <BankContactForm item={editingBankContact ?? emptyBankContact()} onSave={saveBankContact} onClose={() => { setShowBankContactForm(false); setEditingBankContact(null); }} />
+          </div>
+        </div>
+      )}
 
       {/* Employee Form Modal */}
       {showEmpForm && (
@@ -929,8 +1202,19 @@ export default function VendorsPage() {
         </div>
       )}
 
-      {showBankForm   && <BankForm     item={editBank     ?? emptyBank()}     existingVendors={vendors}     onSave={saveVendor}   onClose={() => { setShowBankForm(false);   setEditBank(null);     }} />}
-      {showSuppForm   && <SupplierForm item={editSupplier ?? emptySupplier()} existingSuppliers={suppliers} onSave={saveSupplier} onClose={() => { setShowSuppForm(false);   setEditSupplier(null); }} />}
+      {showBankForm   && <BankForm     item={editBank     ?? emptyBank()}     existingVendors={vendors}     bankOptions={dirConfig.vendor_banks}   onSave={saveVendor}   onClose={() => { setShowBankForm(false);   setEditBank(null);     }} />}
+      {showSuppForm   && <SupplierForm item={editSupplier ?? emptySupplier()} existingSuppliers={suppliers} catOptions={dirConfig.supplier_categories} onSave={saveSupplier} onClose={() => { setShowSuppForm(false);   setEditSupplier(null); }} />}
+
+      {/* Category / Bank Name Management Modal */}
+      {showCatModal && (
+        <CategoryModal
+          title={catType === "supplier_categories" ? "Supplier Categories" : "Bank Names"}
+          items={dirConfig[catType]}
+          saving={savingConfig}
+          onSave={(items) => saveConfig(catType, items)}
+          onClose={() => setShowCatModal(false)}
+        />
+      )}
       {pinModal       && <VPinModal onSuccess={s => { login(s); pinModal.action(s); }} onClose={() => setPinModal(null)} />}
 
       {/* Bulk Upload Modal */}

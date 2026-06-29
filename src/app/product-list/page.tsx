@@ -1,0 +1,866 @@
+"use client";
+import { useState, useEffect, useCallback } from "react";
+import { ArrowLeft, Plus, Trash2, Pencil, X, Save, Lock, Search, Package, List, DollarSign, Settings2, ChevronRight, ChevronDown, ExternalLink, Copy } from "lucide-react";
+import { useRouter } from "next/navigation";
+
+/* ════════════════════════════════ TYPES */
+interface Material { id: string; name: string; unit: string; category: string; pricePerUnit: number; updatedAt: string; }
+interface Product { id: string; sku: string; name: string; productType: string; fclQty: number; adminPct: number; grossProfitPct: number; whtPct: number; serviceCharges: number; eds: number; courierCharges: number; imageUrl: string; notes: string; active: boolean; }
+interface RecipeItem { id: string; productId: string; materialId: string; materialName: string; qty: number; unitType: "PCS" | "CONTAINER" | "FIXED"; sortOrder: number; }
+interface Settings { fcRate: number; currency: string; targetCurrency: string; }
+
+const genId = () => Math.random().toString(36).slice(2, 10);
+const UNIT_TYPES = ["PCS", "CONTAINER", "FIXED"] as const;
+const PRODUCT_TYPES = ["FINISH GOODS", "RAW MATERIAL", "SEMI FINISHED", "PACKAGING"];
+const CATEGORIES = ["Raw Material", "Packaging", "Labels & Seals", "Labor", "Export Charges", "Other"];
+
+/* ════════════════════════════════ PIN */
+type PLRole = "accountant" | "aa1" | "aa2";
+interface PLSession { role: PLRole; name: string; }
+const PL_PINS: Record<string, PLSession> = {
+  [process.env.NEXT_PUBLIC_FE_PIN_ACCOUNTANT || ""]: { role: "accountant", name: "A.Hafeez" },
+  [process.env.NEXT_PUBLIC_FE_PIN_AA1 || ""]:        { role: "aa1",        name: "Moiz" },
+  [process.env.NEXT_PUBLIC_FE_PIN_AA2 || ""]:        { role: "aa2",        name: "Hamza" },
+};
+const PL_SESSION_KEY = "pl_session";
+
+function PinModal({ onSuccess, onClose }: { onSuccess: (s: PLSession) => void; onClose: () => void }) {
+  const [pin, setPin] = useState(""); const [err, setErr] = useState("");
+  function submit() { const s = PL_PINS[pin.trim()]; if (!s) { setErr("Incorrect PIN."); return; } onSuccess(s); }
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-surface rounded-2xl border border-border w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center gap-2 mb-4"><Lock className="w-4 h-4 text-green-400" /><h3 className="text-sm font-semibold text-foreground">Enter PIN</h3><span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 ml-auto">Product List</span></div>
+        <input type="password" value={pin} onChange={e => { setPin(e.target.value); setErr(""); }} onKeyDown={e => e.key === "Enter" && submit()} placeholder="Enter your PIN" autoFocus className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-sm text-foreground focus:outline-none focus:border-green-500/50 mb-3" />
+        {err && <p className="text-xs text-red-400 mb-3">{err}</p>}
+        <div className="flex gap-2"><button onClick={onClose} className="flex-1 px-4 py-2 text-sm text-muted hover:text-foreground cursor-pointer">Cancel</button><button onClick={submit} className="flex-1 px-4 py-2 bg-green-500 hover:bg-green-500/80 text-white text-sm font-semibold rounded-lg cursor-pointer">Confirm</button></div>
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════ COST CALCULATOR */
+function calcCost(recipe: RecipeItem[], materials: Material[], product: Product, settings: Settings, quoteQty = 1) {
+  const matMap = new Map(materials.map(m => [m.id, m]));
+  let pcsCOG = 0;   // scales with quoteQty
+  let fixedCOG = 0; // stays same regardless of qty
+  for (const item of recipe) {
+    const price = matMap.get(item.materialId)?.pricePerUnit ?? 0;
+    if (item.unitType === "CONTAINER") fixedCOG += price / (product.fclQty || 1500);
+    else if (item.unitType === "FIXED") fixedCOG += item.qty * price;
+    else pcsCOG += item.qty * price; // PCS — scales
+  }
+  const r = (n: number) => Math.round(n * 100) / 100;
+  const cogTotal    = r(pcsCOG * quoteQty + fixedCOG);
+  const cogPerCarton = r(cogTotal / quoteQty);
+  const adminAmt    = r(cogTotal * (product.adminPct / 100));
+  const cogWithAdmin = r(cogTotal + adminAmt);
+  const cogUSD      = r(cogWithAdmin / (settings.fcRate || 275));
+  const sellingUSD  = r(cogUSD * (1 + product.grossProfitPct / 100));
+  const sellingPerCarton = r(sellingUSD / quoteQty);
+  const whtUSD      = r(sellingUSD * (product.whtPct / 100));
+  const fobTotal    = r(sellingUSD + whtUSD + product.serviceCharges + product.eds + product.courierCharges);
+  const fobPerCarton = r(fobTotal / quoteQty);
+  return { cogPerCarton, cogTotal, adminAmt, cogWithAdmin, cogUSD, sellingUSD, sellingPerCarton, whtUSD, fobTotal, fobPerCarton,
+    // legacy alias for price list tab
+    cogPKR: cogPerCarton, fobUSD: fobPerCarton };
+}
+
+/* ════════════════════════════════ MAIN */
+export default function ProductListPage() {
+  const router = useRouter();
+  const [tab, setTab] = useState<"master" | "products" | "pricelist" | null>(null);
+  const [materials, setMaterials] = useState<Material[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [recipes, setRecipes] = useState<Map<string, RecipeItem[]>>(new Map());
+  const [settings, setSettings] = useState<Settings>({ fcRate: 275, currency: "PKR", targetCurrency: "USD" });
+  const [loaded, setLoaded] = useState(false);
+  const [search, setSearch] = useState("");
+  const [session, setSession] = useState<PLSession | null>(null);
+  const [pinModal, setPinModal] = useState<{ action: (s: PLSession) => void } | null>(null);
+  const [showGear, setShowGear] = useState(false);
+  const [gearPin, setGearPin] = useState("");
+  const [gearPinErr, setGearPinErr] = useState("");
+  const [accessConfig, setAccessConfig] = useState({
+    master_aa1: true,  master_aa2: true,
+    products_aa1: true, products_aa2: true,
+    pricelist_aa1: true, pricelist_aa2: true,
+  });
+  const [savingAccess, setSavingAccess] = useState(false);
+
+  // Product detail view
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [productDraft, setProductDraft] = useState<Product | null>(null);
+  const [productRecipe, setProductRecipe] = useState<RecipeItem[]>([]);
+  const [quoteQty, setQuoteQty] = useState(1);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [showProductForm, setShowProductForm] = useState(false);
+  const [savingRecipe, setSavingRecipe] = useState(false);
+  const [savingSettings, setSavingSettings] = useState(false);
+
+  // Master prices
+  const [editingMaterial, setEditingMaterial] = useState<Material | null>(null);
+  const [showMaterialForm, setShowMaterialForm] = useState(false);
+  const [matCatFilter, setMatCatFilter] = useState("");
+
+  // Settings edit
+  const [editSettings, setEditSettings] = useState(false);
+  const [settingsDraft, setSettingsDraft] = useState<Settings>({ fcRate: 275, currency: "PKR", targetCurrency: "USD" });
+
+  // Price list
+  const [copiedId, setCopiedId] = useState("");
+
+  useEffect(() => {
+    try { const s = localStorage.getItem(PL_SESSION_KEY); if (s) setSession(JSON.parse(s)); } catch { /* */ }
+    Promise.all([
+      fetch("/api/product-list/master").then(r => r.json()).then(d => setMaterials(d.materials ?? [])),
+      fetch("/api/product-list/products").then(r => r.json()).then(d => setProducts(d.products ?? [])),
+      fetch("/api/product-list/settings").then(r => r.json()).then(d => {
+        setSettings(d);
+        // Load access config from settings
+        if (d.pl_access) {
+          try { setAccessConfig(JSON.parse(d.pl_access)); } catch { /* use defaults */ }
+        }
+      }),
+      fetch("/api/product-list/recipes").then(r => r.json()).then(d => {
+        const map = new Map<string, RecipeItem[]>();
+        for (const item of (d.items ?? []) as RecipeItem[]) {
+          if (!map.has(item.productId)) map.set(item.productId, []);
+          map.get(item.productId)!.push(item);
+        }
+        setRecipes(map);
+      }),
+    ]).finally(() => setLoaded(true));
+  }, []);
+
+  function login(s: PLSession) { localStorage.setItem(PL_SESSION_KEY, JSON.stringify(s)); setSession(s); setPinModal(null); }
+  function logout() { localStorage.removeItem(PL_SESSION_KEY); setSession(null); setShowGear(false); }
+  function requireAuth(action: (s: PLSession) => void) { if (session) { action(session); return; } setPinModal({ action }); }
+
+  function gearLogin() {
+    const s = PL_PINS[gearPin.trim()];
+    if (!s) { setGearPinErr("Incorrect PIN."); return; }
+    login(s); setGearPin(""); setGearPinErr("");
+  }
+
+  function canAccess(section: "master" | "products" | "pricelist"): boolean {
+    if (!session) return false;
+    if (session.role === "accountant") return true;
+    return accessConfig[`${section}_${session.role}` as keyof typeof accessConfig];
+  }
+
+  async function saveAccessConfig(cfg: typeof accessConfig) {
+    setSavingAccess(true);
+    setAccessConfig(cfg);
+    try {
+      await fetch("/api/product-list/settings", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pl_access: JSON.stringify(cfg) }),
+      });
+    } catch { /* ignore */ }
+    setSavingAccess(false);
+  }
+
+  function toggleAccess(key: keyof typeof accessConfig) {
+    const cfg = { ...accessConfig, [key]: !accessConfig[key] };
+    saveAccessConfig(cfg);
+  }
+
+  async function loadRecipe(productId: string) {
+    if (recipes.has(productId)) return recipes.get(productId)!;
+    const res = await fetch(`/api/product-list/recipes?productId=${productId}`);
+    const data = await res.json();
+    const items = (data.items ?? []) as RecipeItem[];
+    setRecipes(prev => new Map(prev).set(productId, items));
+    return items;
+  }
+
+  async function openProduct(p: Product) {
+    setSelectedProduct(p);
+    setProductDraft({ ...p });
+    setQuoteQty(1);
+    const items = await loadRecipe(p.id);
+    setProductRecipe(items);
+  }
+
+  async function saveProductSettings() {
+    if (!productDraft) return;
+    setSavingSettings(true);
+    await saveProduct(productDraft);
+    setSelectedProduct(productDraft);
+    setSavingSettings(false);
+  }
+
+  function updateDraft<K extends keyof Product>(key: K, value: Product[K]) {
+    setProductDraft(prev => prev ? { ...prev, [key]: value } : prev);
+  }
+
+  async function saveRecipe() {
+    if (!selectedProduct) return;
+    setSavingRecipe(true);
+    await fetch("/api/product-list/recipes", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "save-product-recipe", productId: selectedProduct.id, items: productRecipe }),
+    });
+    setRecipes(prev => new Map(prev).set(selectedProduct.id, productRecipe));
+    setSavingRecipe(false);
+  }
+
+  async function saveProduct(p: Product) {
+    await fetch("/api/product-list/products", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "upsert", product: p }),
+    });
+    setProducts(prev => prev.some(x => x.id === p.id) ? prev.map(x => x.id === p.id ? p : x) : [...prev, p]);
+    setShowProductForm(false); setEditingProduct(null);
+  }
+
+  async function deleteProduct(id: string) {
+    if (!confirm("Delete this product and its recipe?")) return;
+    await fetch("/api/product-list/products", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete", product: { id } }) });
+    await fetch("/api/product-list/recipes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete-product", productId: id }) });
+    setProducts(prev => prev.filter(p => p.id !== id));
+    if (selectedProduct?.id === id) setSelectedProduct(null);
+  }
+
+  async function saveMaterial(m: Material) {
+    await fetch("/api/product-list/master", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "upsert", material: m }),
+    });
+    setMaterials(prev => prev.some(x => x.id === m.id) ? prev.map(x => x.id === m.id ? m : x) : [...prev, m]);
+    setShowMaterialForm(false); setEditingMaterial(null);
+  }
+
+  async function deleteMaterial(id: string) {
+    if (!confirm("Delete this material?")) return;
+    await fetch("/api/product-list/master", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete", material: { id } }) });
+    setMaterials(prev => prev.filter(m => m.id !== id));
+  }
+
+  async function saveSettings() {
+    await fetch("/api/product-list/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(settingsDraft) });
+    setSettings(settingsDraft);
+    setEditSettings(false);
+  }
+
+  function addRecipeRow() {
+    setProductRecipe(prev => [...prev, { id: genId(), productId: selectedProduct?.id ?? "", materialId: "", materialName: "", qty: 1, unitType: "PCS", sortOrder: prev.length }]);
+  }
+
+  function updateRecipeRow(idx: number, field: keyof RecipeItem, value: unknown) {
+    setProductRecipe(prev => prev.map((r, i) => i === idx ? { ...r, [field]: value } : r));
+  }
+
+  function copyShareLink(productId: string) {
+    const url = `${window.location.origin}/product-list/share/${productId}`;
+    navigator.clipboard.writeText(url);
+    setCopiedId(productId);
+    setTimeout(() => setCopiedId(""), 2000);
+  }
+
+  const fmt2 = (n: number) => n.toFixed(2);
+  const filteredProducts = products.filter(p => !search || p.name.toLowerCase().includes(search.toLowerCase()) || p.sku.toLowerCase().includes(search.toLowerCase()));
+  const filteredMaterials = materials.filter(m => (!search || m.name.toLowerCase().includes(search.toLowerCase())) && (!matCatFilter || m.category === matCatFilter));
+
+  if (!loaded) return null;
+
+  return (
+    <div className="flex-1 flex flex-col h-screen" onClick={() => showGear && setShowGear(false)}>
+      {/* Header */}
+      <header className="border-b border-border bg-surface/50 backdrop-blur px-4 md:px-6 py-3 flex items-center gap-3 shrink-0">
+        {selectedProduct ? (
+          <button onClick={() => setSelectedProduct(null)} className="text-muted hover:text-foreground cursor-pointer"><ArrowLeft className="w-5 h-5" /></button>
+        ) : (
+          <button onClick={() => router.push("/dashboard")} className="text-muted hover:text-foreground cursor-pointer"><ArrowLeft className="w-5 h-5" /></button>
+        )}
+        <div className="w-7 h-7 rounded-lg bg-green-500/20 flex items-center justify-center"><Package className="w-3.5 h-3.5 text-green-400" /></div>
+        <span className="text-sm font-bold text-foreground">{selectedProduct ? selectedProduct.name : "Product List / Recipes / Price List"}</span>
+        {selectedProduct && <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 font-semibold">{selectedProduct.sku}</span>}
+        <div className="ml-auto flex items-center gap-2">
+          {/* Gear icon — login + access control */}
+          <div className="relative">
+            <button onClick={() => setShowGear(v => !v)}
+              className={`p-1.5 rounded-lg cursor-pointer transition-colors ${session ? "text-green-400 bg-green-500/10 hover:bg-green-500/20" : "text-muted hover:text-foreground hover:bg-surface-light/40"}`}>
+              <Settings2 className="w-4 h-4" />
+            </button>
+          </div>
+          {selectedProduct && (
+            <button onClick={() => requireAuth(() => { saveRecipe(); })} disabled={savingRecipe}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-green-500 hover:bg-green-500/80 text-white rounded-lg cursor-pointer disabled:opacity-50">
+              <Save className="w-3 h-3" /> {savingRecipe ? "Saving..." : "Save Recipe"}
+            </button>
+          )}
+        </div>
+      </header>
+
+      {/* ── PRODUCT DETAIL VIEW ── */}
+      {selectedProduct && (() => {
+        const calc = calcCost(productRecipe, materials, productDraft ?? selectedProduct, settings, quoteQty);
+        return (
+          <div className="flex-1 overflow-y-auto p-4 md:p-6">
+            <div className="max-w-6xl mx-auto space-y-5 animate-fade-in">
+
+              {/* Product Info */}
+              {productDraft && (
+              <div className="bg-surface rounded-2xl border border-border p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xs font-semibold text-green-400 uppercase tracking-wide">Product Settings</h3>
+                  <button onClick={() => requireAuth(() => saveProductSettings())} disabled={savingSettings}
+                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-green-500 hover:bg-green-500/80 text-white rounded-lg cursor-pointer disabled:opacity-50 transition-colors">
+                    <Save className="w-3 h-3" /> {savingSettings ? "Saving..." : "Save Settings"}
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                  <div className="col-span-2">
+                    <label className="text-[10px] text-muted uppercase tracking-wide block mb-1">Product Name</label>
+                    <input value={productDraft.name} onChange={e => updateDraft("name", e.target.value)}
+                      className="w-full bg-background border border-border rounded-lg px-2.5 py-1.5 text-sm text-foreground focus:outline-none focus:border-green-500/50" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-muted uppercase tracking-wide block mb-1">SKU</label>
+                    <input value={productDraft.sku} onChange={e => updateDraft("sku", e.target.value)}
+                      className="w-full bg-background border border-border rounded-lg px-2.5 py-1.5 text-sm text-foreground focus:outline-none focus:border-green-500/50" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-muted uppercase tracking-wide block mb-1">Product Type</label>
+                    <select value={productDraft.productType} onChange={e => updateDraft("productType", e.target.value)}
+                      className="w-full bg-background border border-border rounded-lg px-2.5 py-1.5 text-sm text-foreground focus:outline-none focus:border-green-500/50 cursor-pointer">
+                      {PRODUCT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </div>
+                  {([
+                    ["fclQty","FCL Container Qty","number"],["adminPct","Admin %","number"],
+                    ["grossProfitPct","Gross Profit %","number"],["whtPct","WHT %","number"],
+                    ["serviceCharges","Service Charges (USD)","number"],["eds","EDS (USD)","number"],
+                    ["courierCharges","Courier Charges (USD)","number"],
+                  ] as [keyof Product, string, string][]).map(([k, l]) => (
+                    <div key={k}>
+                      <label className="text-[10px] text-muted uppercase tracking-wide block mb-1">{l}</label>
+                      <input type="number" step="0.01" value={Number(productDraft[k])}
+                        onChange={e => updateDraft(k, parseFloat(e.target.value) || 0 as never)}
+                        className="w-full bg-background border border-border rounded-lg px-2.5 py-1.5 text-sm text-foreground focus:outline-none focus:border-green-500/50" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+              )}
+
+              {/* Recipe + Calculation side by side */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+                {/* Recipe table */}
+                <div className="lg:col-span-2 bg-surface rounded-2xl border border-border overflow-hidden">
+                  <div className="flex items-center justify-between px-5 py-3 border-b border-border">
+                    <h3 className="text-xs font-semibold text-muted uppercase tracking-wide">Recipe / Ingredients</h3>
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-muted uppercase tracking-wide font-semibold">Quote Qty</span>
+                        <input type="number" min="1" value={quoteQty} onChange={e => setQuoteQty(Math.max(1, parseInt(e.target.value) || 1))}
+                          className="w-16 bg-background border border-green-500/40 rounded-lg px-2 py-1 text-sm text-center font-bold text-green-400 focus:outline-none focus:border-green-500" />
+                        <span className="text-[10px] text-muted">carton{quoteQty > 1 ? "s" : ""}</span>
+                      </div>
+                      <button onClick={() => requireAuth(addRecipeRow)} className="flex items-center gap-1 text-[11px] text-green-400 hover:text-green-300 cursor-pointer"><Plus className="w-3 h-3" /> Add Row</button>
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead><tr className="bg-green-500/10 text-green-400">
+                        <th className="px-3 py-2 text-left font-semibold">Ingredient</th>
+                        <th className="px-3 py-2 text-left font-semibold w-[90px]">Qty</th>
+                        <th className="px-3 py-2 text-left font-semibold w-[110px]">Type</th>
+                        <th className="px-3 py-2 text-right font-semibold w-[90px]">Rate (PKR)</th>
+                        <th className="px-3 py-2 text-right font-semibold w-[90px]">Total</th>
+                        <th className="px-3 py-2 w-[30px]"></th>
+                      </tr></thead>
+                      <tbody>
+                        {productRecipe.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-muted">No ingredients. Click "Add Row" to start.</td></tr>}
+                        {productRecipe.map((item, idx) => {
+                          const mat = materials.find(m => m.id === item.materialId);
+                          const price = mat?.pricePerUnit ?? 0;
+                          const total = item.unitType === "CONTAINER" ? price / (selectedProduct.fclQty || 1500) : item.qty * price;
+                          return (
+                            <tr key={item.id} className={idx % 2 === 0 ? "" : "bg-surface-light/20"}>
+                              <td className="px-3 py-1.5">
+                                <select value={item.materialId} onChange={e => {
+                                  const m = materials.find(x => x.id === e.target.value);
+                                  updateRecipeRow(idx, "materialId", e.target.value);
+                                  if (m) updateRecipeRow(idx, "materialName", m.name);
+                                }} className="w-full bg-background border border-border rounded px-2 py-1 text-xs text-foreground focus:outline-none focus:border-green-500/50 cursor-pointer">
+                                  <option value="">— Select —</option>
+                                  {materials.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                                </select>
+                              </td>
+                              <td className="px-3 py-1.5">
+                                <input type="number" value={item.qty} onChange={e => updateRecipeRow(idx, "qty", parseFloat(e.target.value) || 0)} disabled={false}
+                                  className="w-full bg-background border border-border rounded px-2 py-1 text-xs text-right text-foreground focus:outline-none focus:border-green-500/50 disabled:opacity-50" />
+                              </td>
+                              <td className="px-3 py-1.5">
+                                <select value={item.unitType} onChange={e => updateRecipeRow(idx, "unitType", e.target.value)}
+                                  className="w-full bg-background border border-border rounded px-2 py-1 text-xs text-foreground focus:outline-none focus:border-green-500/50 cursor-pointer">
+                                  {UNIT_TYPES.map(u => <option key={u} value={u}>{u === "PCS" ? "PCS (×qty)" : u === "CONTAINER" ? "CONTAINER (÷FCL)" : "FIXED (flat)"}</option>)}
+                                </select>
+                              </td>
+                              <td className="px-3 py-1.5 text-right text-muted">{price.toFixed(2)}</td>
+                              <td className="px-3 py-1.5 text-right font-mono font-semibold text-foreground">{total.toFixed(2)}</td>
+                              <td className="px-3 py-1.5"><button onClick={() => setProductRecipe(prev => prev.filter((_, i) => i !== idx))} className="text-muted hover:text-red-400 cursor-pointer"><X className="w-3 h-3" /></button></td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Cost Breakdown */}
+                <div className="bg-surface rounded-2xl border border-border p-5 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-semibold text-muted uppercase tracking-wide">Cost Breakdown</h3>
+                    {quoteQty > 1 && <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 font-semibold">{quoteQty} cartons</span>}
+                  </div>
+                  {[
+                    ["COG (PKR)", quoteQty > 1 ? `PKR ${fmt2(calc.cogTotal)} total / ${fmt2(calc.cogPerCarton)}/ctn` : `PKR ${fmt2(calc.cogPerCarton)}`, "text-foreground"],
+                    [`Admin ${(productDraft ?? selectedProduct).adminPct}%`, `PKR ${fmt2(calc.adminAmt)}`, "text-muted"],
+                    ["COG + Admin", `PKR ${fmt2(calc.cogWithAdmin)}`, "text-foreground font-bold"],
+                    [`÷ FC Rate (${settings.fcRate})`, `USD ${fmt2(calc.cogUSD)}`, "text-blue-400"],
+                    [`× GP ${(productDraft ?? selectedProduct).grossProfitPct}%`, quoteQty > 1 ? `USD ${fmt2(calc.sellingUSD)} total / ${fmt2(calc.sellingPerCarton)}/ctn` : `USD ${fmt2(calc.sellingUSD)}`, "text-green-400 font-bold"],
+                    [`WHT ${(productDraft ?? selectedProduct).whtPct}%`, `USD ${fmt2(calc.whtUSD)}`, "text-muted"],
+                    ["Service Charges", `USD ${fmt2((productDraft ?? selectedProduct).serviceCharges)}`, "text-muted"],
+                    ["EDS", `USD ${fmt2((productDraft ?? selectedProduct).eds)}`, "text-muted"],
+                    ["Courier Charges", `USD ${fmt2((productDraft ?? selectedProduct).courierCharges)}`, "text-muted"],
+                  ].map(([label, value, cls]) => (
+                    <div key={String(label)} className="flex items-center justify-between border-b border-border/50 pb-2">
+                      <span className="text-[11px] text-muted">{label}</span>
+                      <span className={`text-xs font-mono ${cls}`}>{value}</span>
+                    </div>
+                  ))}
+                  <div className="flex items-center justify-between pt-1">
+                    <div>
+                      <p className="text-sm font-bold text-foreground">FOB Price</p>
+                      {quoteQty > 1 && <p className="text-[10px] text-muted">per carton: USD {fmt2(calc.fobPerCarton)}</p>}
+                    </div>
+                    <span className="text-lg font-bold text-green-400">USD {fmt2(calc.fobTotal)}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-muted">CNF (freight TBD)</span>
+                    <span className="text-sm font-semibold text-foreground">USD {fmt2(calc.fobTotal)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── MAIN TABS ── */}
+      {!selectedProduct && (
+        <div className="flex-1 overflow-y-auto p-4 md:p-6">
+          <div className="max-w-7xl mx-auto space-y-5 animate-fade-in">
+
+            {/* Module cards — shown when no section selected */}
+            {!tab && (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
+                {([
+                  { key: "products" as const, Icon: Package, label: "Products", desc: "Manage products, recipes & BOM. Auto-calculates FOB price per carton.", count: products.length, color: "green" },
+                  { key: "master" as const, Icon: List, label: "Master Prices", desc: "Raw material & component prices. Update once — all products recalculate.", count: materials.length, color: "blue" },
+                  { key: "pricelist" as const, Icon: DollarSign, label: "Price List", desc: "Calculated price list with images. Generate shareable links per product.", count: products.length, color: "amber" },
+                ]).map(({ key, Icon, label, desc, count, color }) => {
+                  const allowed = canAccess(key);
+                  return (
+                    <button key={key}
+                      onClick={() => { if (allowed) { setTab(key); setSearch(""); } }}
+                      className={`group text-left p-5 bg-white/65 backdrop-blur-sm rounded-2xl border transition-all shadow-sm ${
+                        allowed
+                          ? `border-gray-200/80 hover:border-${color}-400/60 hover:bg-white/95 hover:shadow-md cursor-pointer`
+                          : "border-gray-200/40 opacity-50 cursor-not-allowed"
+                      }`}>
+                      <div className="flex items-start justify-between mb-3">
+                        <div className={`w-10 h-10 rounded-xl bg-${color}-100/60 flex items-center justify-center`}>
+                          <Icon className={`w-5 h-5 text-${color}-500`} />
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs text-gray-400 font-semibold">{count}</span>
+                          {!allowed && <Lock className="w-3.5 h-3.5 text-gray-300" />}
+                          {allowed && <ChevronRight className={`w-4 h-4 text-gray-300 group-hover:text-${color}-400 transition-colors`} />}
+                        </div>
+                      </div>
+                      <p className="text-sm font-bold text-gray-800 mb-1">{label}</p>
+                      <p className="text-xs text-gray-500 leading-relaxed">{desc}</p>
+                      {!allowed && <p className="text-[10px] text-red-400 font-semibold mt-2">No Access — contact Accountant</p>}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Back button + action bar when inside a section */}
+            {tab && (
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <button onClick={() => { setTab(null); setSearch(""); }}
+                  className="flex items-center gap-2 text-sm text-muted hover:text-foreground cursor-pointer transition-colors">
+                  <ArrowLeft className="w-4 h-4" />
+                  <span className="font-semibold">{tab === "products" ? "Products" : tab === "master" ? "Master Prices" : "Price List"}</span>
+                </button>
+                <div className="flex items-center gap-2">
+                  {tab === "master" && (
+                    <button onClick={() => { setSettingsDraft(settings); setEditSettings(true); }} className="flex items-center gap-1.5 text-xs px-3 py-1.5 border border-border text-muted hover:text-foreground hover:border-green-500/40 rounded-lg cursor-pointer">
+                      <Settings2 className="w-3 h-3" /> FC Rate: {settings.fcRate}
+                    </button>
+                  )}
+                  {tab !== "pricelist" && (
+                    <button onClick={() => requireAuth(() => {
+                      if (tab === "products") { setEditingProduct(null); setShowProductForm(true); }
+                      else { setEditingMaterial(null); setShowMaterialForm(true); }
+                    })} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-green-500 hover:bg-green-500/80 text-white rounded-lg cursor-pointer">
+                      <Plus className="w-3 h-3" /> Add {tab === "products" ? "Product" : "Material"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Search — only inside a section */}
+            {tab && (
+              <div className="flex items-center gap-3">
+                <div className="relative flex-1 max-w-sm">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted" />
+                  <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder={`Search ${tab}...`}
+                    className="w-full bg-surface border border-border rounded-xl pl-9 pr-4 py-2.5 text-sm text-foreground focus:outline-none focus:border-green-500/50" />
+                </div>
+                {tab === "master" && (
+                  <select value={matCatFilter} onChange={e => setMatCatFilter(e.target.value)} className="bg-surface border border-border rounded-xl px-3 py-2.5 text-sm text-foreground focus:outline-none focus:border-green-500/50 cursor-pointer">
+                    <option value="">All Categories</option>
+                    {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                )}
+              </div>
+            )}
+
+            {/* ── PRODUCTS TAB ── */}
+            {tab === "products" && (
+              <div className="bg-surface rounded-2xl border border-border overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead><tr className="bg-green-500/10 text-green-400">
+                    <th className="px-4 py-3 text-left font-semibold w-[40px]">#</th>
+                    <th className="px-4 py-3 text-left font-semibold w-[120px]">SKU</th>
+                    <th className="px-4 py-3 text-left font-semibold">Product Name</th>
+                    <th className="px-4 py-3 text-left font-semibold w-[120px]">Type</th>
+                    <th className="px-4 py-3 text-right font-semibold w-[90px]">GP%</th>
+                    <th className="px-4 py-3 text-right font-semibold w-[100px]">FOB (USD)</th>
+                    <th className="px-4 py-3 text-center w-[80px]">Actions</th>
+                  </tr></thead>
+                  <tbody>
+                    {filteredProducts.length === 0 && <tr><td colSpan={7} className="px-4 py-10 text-center text-muted">No products yet. Click "Add Product" to get started.</td></tr>}
+                    {filteredProducts.map((p, i) => {
+                      const recipe = recipes.get(p.id) ?? [];
+                      const calc = calcCost(recipe, materials, p, settings);
+                      return (
+                        <tr key={p.id} onClick={() => openProduct(p)} className={`cursor-pointer hover:bg-green-500/5 transition-colors ${i % 2 === 0 ? "" : "bg-surface-light/20"}`}>
+                          <td className="px-4 py-3 text-muted">{i + 1}</td>
+                          <td className="px-4 py-3 font-mono text-[11px] text-muted">{p.sku}</td>
+                          <td className="px-4 py-3 font-semibold text-foreground">{p.name}</td>
+                          <td className="px-4 py-3"><span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 font-semibold">{p.productType}</span></td>
+                          <td className="px-4 py-3 text-right text-muted">{p.grossProfitPct}%</td>
+                          <td className="px-4 py-3 text-right font-mono font-bold text-green-400">{recipe.length > 0 ? `$${fmt2(calc.fobUSD)}` : "—"}</td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center justify-center gap-1" onClick={e => e.stopPropagation()}>
+                              <button onClick={() => requireAuth(() => { setEditingProduct(p); setShowProductForm(true); })} className="p-1 text-muted hover:text-green-400 cursor-pointer"><Pencil className="w-3 h-3" /></button>
+                              <button onClick={() => requireAuth(() => deleteProduct(p.id))} className="p-1 text-muted hover:text-red-400 cursor-pointer"><Trash2 className="w-3 h-3" /></button>
+                              <ChevronRight className="w-3 h-3 text-muted" />
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* ── MASTER PRICES TAB ── */}
+            {tab === "master" && (
+              <div className="bg-surface rounded-2xl border border-border overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead><tr className="bg-green-500/10 text-green-400">
+                    <th className="px-4 py-3 text-left font-semibold w-[40px]">#</th>
+                    <th className="px-4 py-3 text-left font-semibold">Material / Component</th>
+                    <th className="px-4 py-3 text-left font-semibold w-[70px]">Unit</th>
+                    <th className="px-4 py-3 text-left font-semibold w-[140px]">Category</th>
+                    <th className="px-4 py-3 text-right font-semibold w-[155px]">Price (PKR)</th>
+                    <th className="px-4 py-3 text-left font-semibold w-[110px]">Updated</th>
+                    <th className="px-4 py-3 text-center w-[70px]">Actions</th>
+                  </tr></thead>
+                  <tbody>
+                    {filteredMaterials.length === 0 && <tr><td colSpan={7} className="px-4 py-10 text-center text-muted">No materials yet.</td></tr>}
+                    {filteredMaterials.map((m, i) => (
+                      <tr key={m.id} className={`hover:bg-green-500/5 transition-colors ${i % 2 === 0 ? "" : "bg-surface-light/20"}`}>
+                        <td className="px-4 py-3 text-muted">{i + 1}</td>
+                        <td className="px-4 py-3 font-semibold text-foreground">{m.name}</td>
+                        <td className="px-4 py-3 text-muted">{m.unit}</td>
+                        <td className="px-4 py-3 text-muted text-xs">{m.category}</td>
+                        <td className="px-4 py-3 text-right font-mono font-bold text-foreground whitespace-nowrap">PKR {m.pricePerUnit.toFixed(2)}</td>
+                        <td className="px-4 py-3 text-muted">{m.updatedAt ? new Date(m.updatedAt).toLocaleDateString("en-PK") : "—"}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-center gap-1">
+                            <button onClick={() => requireAuth(() => { setEditingMaterial(m); setShowMaterialForm(true); })} className="p-1 text-muted hover:text-green-400 cursor-pointer"><Pencil className="w-3 h-3" /></button>
+                            <button onClick={() => requireAuth(() => deleteMaterial(m.id))} className="p-1 text-muted hover:text-red-400 cursor-pointer"><Trash2 className="w-3 h-3" /></button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* ── PRICE LIST TAB ── */}
+            {tab === "pricelist" && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredProducts.map(p => {
+                  const recipe = recipes.get(p.id) ?? [];
+                  const calc = calcCost(recipe, materials, p, settings);
+                  return (
+                    <div key={p.id} className="bg-surface rounded-2xl border border-border overflow-hidden hover:border-green-500/40 transition-all">
+                      {p.imageUrl ? (
+                        <img src={p.imageUrl} alt={p.name} className="w-full h-40 object-cover" />
+                      ) : (
+                        <div className="w-full h-40 bg-green-500/5 flex items-center justify-center">
+                          <Package className="w-12 h-12 text-green-500/20" />
+                        </div>
+                      )}
+                      <div className="p-4">
+                        <p className="text-[10px] font-mono text-muted">{p.sku}</p>
+                        <p className="text-sm font-bold text-foreground mt-0.5 leading-snug">{p.name}</p>
+                        <div className="flex items-center justify-between mt-3">
+                          <div>
+                            <p className="text-[10px] text-muted">FOB Price</p>
+                            <p className="text-xl font-bold text-green-400">USD {fmt2(calc.fobUSD)}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-[10px] text-muted">COG (PKR)</p>
+                            <p className="text-sm font-semibold text-muted">PKR {fmt2(calc.cogPKR)}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 mt-3">
+                          <button onClick={() => openProduct(p)} className="flex-1 flex items-center justify-center gap-1 text-[11px] px-3 py-1.5 border border-border text-muted hover:text-foreground hover:border-green-500/40 rounded-lg cursor-pointer">
+                            <Pencil className="w-3 h-3" /> Recipe
+                          </button>
+                          <button onClick={() => copyShareLink(p.id)} className={`flex-1 flex items-center justify-center gap-1 text-[11px] px-3 py-1.5 rounded-lg cursor-pointer transition-colors ${copiedId === p.id ? "bg-green-500/20 text-green-400 border border-green-500/30" : "border border-border text-muted hover:text-green-400 hover:border-green-500/40"}`}>
+                            {copiedId === p.id ? <><Copy className="w-3 h-3" /> Copied!</> : <><ExternalLink className="w-3 h-3" /> Share</>}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+                {filteredProducts.length === 0 && <div className="col-span-3 py-12 text-center text-muted">No products yet.</div>}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── PRODUCT FORM MODAL ── */}
+      {showProductForm && (
+        <ProductForm item={editingProduct} onSave={saveProduct} onClose={() => { setShowProductForm(false); setEditingProduct(null); }} />
+      )}
+
+      {/* ── MATERIAL FORM MODAL ── */}
+      {showMaterialForm && (
+        <MaterialForm item={editingMaterial} onSave={saveMaterial} onClose={() => { setShowMaterialForm(false); setEditingMaterial(null); }} />
+      )}
+
+      {/* ── SETTINGS MODAL ── */}
+      {editSettings && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setEditSettings(false)}>
+          <div className="bg-surface rounded-2xl border border-border w-full max-w-sm p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <h3 className="text-sm font-semibold text-foreground">Global Settings</h3>
+            {[["FC Rate (PKR per USD)", "fcRate", "number"], ["Base Currency", "currency", "text"], ["Target Currency", "targetCurrency", "text"]].map(([l, k, t]) => (
+              <div key={k}><label className="text-[10px] text-muted uppercase tracking-wide block mb-1">{l}</label>
+                <input type={t} value={String(settingsDraft[k as keyof Settings])} onChange={e => setSettingsDraft(p => ({ ...p, [k]: t === "number" ? parseFloat(e.target.value) || 0 : e.target.value }))}
+                  className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50" /></div>
+            ))}
+            <div className="flex gap-2 pt-2"><button onClick={() => setEditSettings(false)} className="flex-1 px-4 py-2 text-sm text-muted cursor-pointer">Cancel</button>
+              <button onClick={saveSettings} className="flex-1 px-4 py-2 bg-green-500 text-white text-sm font-semibold rounded-lg cursor-pointer">Save</button></div>
+          </div>
+        </div>
+      )}
+
+      {pinModal && <PinModal onSuccess={s => { login(s); pinModal.action(s); }} onClose={() => setPinModal(null)} />}
+
+      {/* Gear panel — rendered at root level to avoid backdrop-blur stacking context */}
+      {showGear && (
+        <div className="fixed right-4 top-14 w-72 bg-white rounded-2xl border border-gray-200 shadow-2xl overflow-hidden" style={{zIndex: 9999}} onClick={e => e.stopPropagation()}>
+          {!session ? (
+            <div className="p-4 space-y-3">
+              <p className="text-xs font-semibold text-foreground">Login to Product List</p>
+              <input type="password" value={gearPin} onChange={e => { setGearPin(e.target.value); setGearPinErr(""); }}
+                onKeyDown={e => e.key === "Enter" && gearLogin()} placeholder="Enter your PIN" autoFocus
+                className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50" />
+              {gearPinErr && <p className="text-xs text-red-400">{gearPinErr}</p>}
+              <button onClick={gearLogin} className="w-full px-4 py-2 bg-green-500 hover:bg-green-500/80 text-white text-sm font-semibold rounded-lg cursor-pointer">Login</button>
+            </div>
+          ) : (
+            <div className="p-4 space-y-4">
+              <div className="flex items-center justify-between">
+                <div><p className="text-xs font-semibold text-foreground">{session.name}</p><p className="text-[10px] text-muted capitalize">{session.role}</p></div>
+                <button onClick={logout} className="text-[10px] text-muted hover:text-red-400 cursor-pointer px-2 py-1 border border-border rounded-lg">Logout</button>
+              </div>
+              {session.role === "accountant" && (
+                <div>
+                  <p className="text-[10px] text-muted uppercase tracking-wide font-semibold mb-2">Access Rights {savingAccess && <span className="text-green-400">Saving...</span>}</p>
+                  <table className="w-full text-xs">
+                    <thead><tr className="text-[10px] text-muted">
+                      <th className="text-left py-1 font-semibold">Section</th>
+                      <th className="text-center py-1 font-semibold">Moiz (AA1)</th>
+                      <th className="text-center py-1 font-semibold">Hamza (AA2)</th>
+                    </tr></thead>
+                    <tbody>
+                      {([["Master Prices","master"],["Products & Recipes","products"],["Price List","pricelist"]] as [string,string][]).map(([label, section]) => (
+                        <tr key={section} className="border-t border-border/40">
+                          <td className="py-2 text-foreground">{label}</td>
+                          {(["aa1","aa2"] as const).map(role => {
+                            const key = `${section}_${role}` as keyof typeof accessConfig;
+                            return (
+                              <td key={role} className="py-2 text-center">
+                                <button onClick={() => toggleAccess(key)}
+                                  className={`w-8 h-4 rounded-full transition-colors cursor-pointer relative ${accessConfig[key] ? "bg-green-500" : "bg-gray-200"}`}>
+                                  <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-all ${accessConfig[key] ? "right-0.5" : "left-0.5"}`} />
+                                </button>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {session.role !== "accountant" && (
+                <div className="space-y-1">
+                  <p className="text-[10px] text-muted uppercase tracking-wide font-semibold mb-2">Your Access</p>
+                  {([["Master Prices","master"],["Products & Recipes","products"],["Price List","pricelist"]] as [string,string][]).map(([label, section]) => (
+                    <div key={section} className="flex items-center justify-between py-1">
+                      <span className="text-xs text-foreground">{label}</span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${canAccess(section as "master"|"products"|"pricelist") ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400"}`}>
+                        {canAccess(section as "master"|"products"|"pricelist") ? "Allowed" : "No Access"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ════════════════════════════════ PRODUCT FORM */
+function ProductForm({ item, onSave, onClose }: { item: Product | null; onSave: (p: Product) => void; onClose: () => void }) {
+  const empty: Product = { id: Math.random().toString(36).slice(2, 10), sku: "", name: "", productType: "FINISH GOODS", fclQty: 1500, adminPct: 5, grossProfitPct: 50, whtPct: 2, serviceCharges: 0, eds: 0, courierCharges: 0, imageUrl: "", notes: "", active: true };
+  const [f, setF] = useState<Product>(item ?? empty);
+  const [uploading, setUploading] = useState(false);
+  const s = <K extends keyof Product>(k: K, v: Product[K]) => setF(p => ({ ...p, [k]: v }));
+
+  async function handleImageUpload(file: File) {
+    setUploading(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const base64 = (e.target?.result as string).split(",")[1];
+        const res = await fetch("/api/product-list/upload-image", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ filename: file.name, mimeType: file.type, base64 }),
+        });
+        const data = await res.json();
+        if (data.thumbnailUrl) s("imageUrl", data.thumbnailUrl);
+        else alert(data.error || "Upload failed");
+        setUploading(false);
+      };
+      reader.readAsDataURL(file);
+    } catch { setUploading(false); }
+  }
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-surface rounded-2xl border border-border max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border"><h3 className="text-sm font-semibold text-foreground">{item ? "Edit" : "Add"} Product</h3><button onClick={onClose} className="text-muted hover:text-foreground cursor-pointer"><X className="w-4 h-4" /></button></div>
+        <div className="overflow-auto p-5 flex-1">
+          <div className="grid grid-cols-2 gap-3">
+            {([["sku","SKU *","text"],["name","Product Name *","text"],["notes","Notes","text"]] as [keyof Product, string, string][]).map(([k, l, t]) => (
+              <div key={k} className={k === "name" || k === "notes" ? "col-span-2" : ""}>
+                <label className="text-[10px] text-muted uppercase tracking-wide block mb-1">{l}</label>
+                <input type={t} value={String(f[k] ?? "")} onChange={e => s(k, e.target.value as never)} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50" />
+              </div>
+            ))}
+            {/* Image upload */}
+            <div className="col-span-2">
+              <label className="text-[10px] text-muted uppercase tracking-wide block mb-1">Product Image</label>
+              <div className="flex items-start gap-3">
+                {f.imageUrl ? (
+                  <div className="relative shrink-0">
+                    <img src={f.imageUrl} alt="preview" className="w-20 h-20 rounded-lg object-cover border border-border" />
+                    <button onClick={() => s("imageUrl", "")} className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 text-white flex items-center justify-center cursor-pointer text-[10px]">×</button>
+                  </div>
+                ) : (
+                  <div className="w-20 h-20 rounded-lg border border-dashed border-border bg-surface-light/30 flex items-center justify-center shrink-0">
+                    <Package className="w-6 h-6 text-muted/40" />
+                  </div>
+                )}
+                <div className="flex-1 space-y-2">
+                  <label className={`flex items-center justify-center gap-2 w-full px-4 py-2.5 border border-dashed border-green-500/40 text-green-400 hover:bg-green-500/5 rounded-lg cursor-pointer transition-colors text-sm ${uploading ? "opacity-50 cursor-not-allowed" : ""}`}>
+                    {uploading ? "Uploading to Drive..." : "Upload Image"}
+                    <input type="file" accept="image/*" className="hidden" disabled={uploading}
+                      onChange={e => { const file = e.target.files?.[0]; if (file) handleImageUpload(file); e.target.value = ""; }} />
+                  </label>
+                  <p className="text-[10px] text-muted">Uploads to Google Drive · Only thumbnail stored · JPG/PNG recommended</p>
+                  {f.imageUrl && <input type="text" value={f.imageUrl} onChange={e => s("imageUrl", e.target.value)} placeholder="Or paste Drive URL" className="w-full bg-background border border-border rounded-lg px-2 py-1.5 text-xs text-foreground focus:outline-none focus:border-green-500/50" />}
+                </div>
+              </div>
+            </div>
+            <div><label className="text-[10px] text-muted uppercase tracking-wide block mb-1">Product Type</label>
+              <select value={f.productType} onChange={e => s("productType", e.target.value)} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50 cursor-pointer">
+                {PRODUCT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+              </select></div>
+            {([["fclQty","FCL Container Qty"],["adminPct","Admin %"],["grossProfitPct","Gross Profit %"],["whtPct","WHT %"],["serviceCharges","Service Charges (USD)"],["eds","EDS (USD)"],["courierCharges","Courier Charges (USD)"]] as [keyof Product, string][]).map(([k, l]) => (
+              <div key={k}><label className="text-[10px] text-muted uppercase tracking-wide block mb-1">{l}</label>
+                <input type="number" step="0.01" value={Number(f[k])} onChange={e => s(k, parseFloat(e.target.value) || 0 as never)} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50" /></div>
+            ))}
+          </div>
+        </div>
+        <div className="px-5 py-4 border-t border-border flex justify-end gap-3">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-muted cursor-pointer">Cancel</button>
+          <button onClick={() => { if (!f.sku.trim() || !f.name.trim()) return; onSave(f); }} className="flex items-center gap-1.5 px-5 py-2 bg-green-500 text-white text-sm font-semibold rounded-lg cursor-pointer"><Save className="w-3.5 h-3.5" /> Save</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════ MATERIAL FORM */
+function MaterialForm({ item, onSave, onClose }: { item: Material | null; onSave: (m: Material) => void; onClose: () => void }) {
+  const empty: Material = { id: Math.random().toString(36).slice(2, 10), name: "", unit: "PCS", category: "Raw Material", pricePerUnit: 0, updatedAt: "" };
+  const [f, setF] = useState<Material>(item ?? empty);
+  const UNITS = ["PCS", "KG", "GRAM", "LITRE", "METER", "CARTON", "BOTTLE", "POUCH", "CONTAINER"];
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-surface rounded-2xl border border-border max-w-md w-full p-6 space-y-4" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between"><h3 className="text-sm font-semibold text-foreground">{item ? "Edit" : "Add"} Material</h3><button onClick={onClose} className="text-muted hover:text-foreground cursor-pointer"><X className="w-4 h-4" /></button></div>
+        <div><label className="text-[10px] text-muted uppercase tracking-wide block mb-1">Material Name *</label><input type="text" value={f.name} onChange={e => setF(p => ({ ...p, name: e.target.value }))} autoFocus className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50" /></div>
+        <div className="grid grid-cols-2 gap-3">
+          <div><label className="text-[10px] text-muted uppercase tracking-wide block mb-1">Unit</label>
+            <select value={f.unit} onChange={e => setF(p => ({ ...p, unit: e.target.value }))} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50 cursor-pointer">
+              {UNITS.map(u => <option key={u} value={u}>{u}</option>)}</select></div>
+          <div><label className="text-[10px] text-muted uppercase tracking-wide block mb-1">Category</label>
+            <select value={f.category} onChange={e => setF(p => ({ ...p, category: e.target.value }))} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50 cursor-pointer">
+              {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
+        </div>
+        <div><label className="text-[10px] text-muted uppercase tracking-wide block mb-1">Price per Unit (PKR) *</label>
+          <input type="number" step="0.01" value={f.pricePerUnit} onChange={e => setF(p => ({ ...p, pricePerUnit: parseFloat(e.target.value) || 0 }))} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50" /></div>
+        <div className="flex gap-2 pt-2"><button onClick={onClose} className="flex-1 px-4 py-2 text-sm text-muted cursor-pointer">Cancel</button>
+          <button onClick={() => { if (!f.name.trim()) return; onSave(f); }} className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 bg-green-500 text-white text-sm font-semibold rounded-lg cursor-pointer"><Save className="w-3.5 h-3.5" /> Save</button></div>
+      </div>
+    </div>
+  );
+}

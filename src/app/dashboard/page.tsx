@@ -253,7 +253,7 @@ const MODULES = [
   {
     key: "vendors",
     route: "/vendors",
-    title: "Vendor Directory",
+    title: "Master Directory",
     desc: "Vendor profiles — contacts, rates, tax filer status, NTN, bank accounts",
     icon: Building2,
     color: "blue",
