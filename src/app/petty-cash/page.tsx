@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   ArrowLeft, Plus, Trash2, Download,
   Wallet, Lock, Unlock, ChevronRight, ChevronLeft, CalendarDays, X,
+  HandCoins, Calculator, Check, AlertTriangle,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
@@ -12,6 +13,8 @@ import ReminderBell from "@/components/ReminderBell";
 /* ═══════════════════════════════════════════
    TYPES
    ═══════════════════════════════════════════ */
+type CashHolder = "main" | "aa1" | "aa2";
+
 interface PettyCashEntry {
   id: string;
   date: string;
@@ -21,7 +24,20 @@ interface PettyCashEntry {
   approvedBy: string;
   cashOut: number | null;
   cashIn: number | null;
+  holder: CashHolder;
 }
+
+interface CashHandover {
+  id: string; date: string; holder: "aa1" | "aa2"; amount: number; notes: string; givenBy: string; createdAt: string;
+}
+
+const DENOMINATIONS = [5000, 1000, 500, 100, 50, 20, 10];
+
+interface DenominationCount {
+  id: string; date: string; holder: "aa1" | "aa2"; denominations: Record<string, number>; total: number; countedBy: string; createdAt: string;
+}
+
+const HOLDER_LABELS: Record<CashHolder, string> = { main: "Main Box", aa1: "AA1 (Moiz)", aa2: "AA2 (Hamza)" };
 
 const STORAGE_KEY_ENTRIES = "pc_entries";
 const STORAGE_KEY_CONFIG = "pc_config";
@@ -52,7 +68,7 @@ function emptyEntry(monthKey?: string): PettyCashEntry {
   }
   return {
     id: genId(), date, acHead: "", txnNo: "",
-    purpose: "", approvedBy: "", cashOut: null, cashIn: null,
+    purpose: "", approvedBy: "", cashOut: null, cashIn: null, holder: "aa2",
   };
 }
 
@@ -273,6 +289,13 @@ export default function PettyCashPage() {
   const [session, setSession] = useState<PCSession | null>(null);
   const [pinModal, setPinModal] = useState<{ action: (s: PCSession) => void } | null>(null);
 
+  // Cash Handover
+  const [handovers, setHandovers] = useState<CashHandover[]>([]);
+  const [denomCounts, setDenomCounts] = useState<DenominationCount[]>([]);
+  const [showHandoverForm, setShowHandoverForm] = useState(false);
+  const [showDenomModal, setShowDenomModal] = useState<"aa1" | "aa2" | null>(null);
+  const [showHandoverHistory, setShowHandoverHistory] = useState<"aa1" | "aa2" | null>(null);
+
   useEffect(() => {
     try {
       const saved = localStorage.getItem(PC_SESSION_KEY);
@@ -317,6 +340,12 @@ export default function PettyCashPage() {
     setFilterTo(`${mk}-${String(lastDay).padStart(2, "0")}`);
     setEditMode(false);
   }
+
+  // Load Cash Handover data
+  useEffect(() => {
+    fetch("/api/petty-cash/handovers").then(r => r.json()).then(d => setHandovers(d.handovers ?? [])).catch(() => {});
+    fetch("/api/petty-cash/denominations").then(r => r.json()).then(d => setDenomCounts(d.counts ?? [])).catch(() => {});
+  }, []);
 
   // Load from Google Sheets
   useEffect(() => {
@@ -404,6 +433,51 @@ export default function PettyCashPage() {
     return entries
       .filter((e) => e.date?.slice(0, 7) === monthKey)
       .sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  // Cash in hand for a given holder = handovers received + cashIn - cashOut on entries tagged to that holder
+  function cashInHand(holder: "aa1" | "aa2"): number {
+    const handedTotal = handovers.filter(h => h.holder === holder).reduce((s, h) => s + h.amount, 0);
+    const entryNet = entries.filter(e => e.holder === holder)
+      .reduce((s, e) => s + (e.cashIn ?? 0) - (e.cashOut ?? 0), 0);
+    return handedTotal + entryNet;
+  }
+
+  function totalHandedOver(holder: "aa1" | "aa2"): number {
+    return handovers.filter(h => h.holder === holder).reduce((s, h) => s + h.amount, 0);
+  }
+
+  function lastDenomCount(holder: "aa1" | "aa2"): DenominationCount | null {
+    const list = denomCounts.filter(c => c.holder === holder).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return list[0] ?? null;
+  }
+
+  async function createHandover(h: { date: string; holder: "aa1" | "aa2"; amount: number; notes: string; givenBy: string }) {
+    await fetch("/api/petty-cash/handovers", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "create", handover: h }),
+    });
+    const res = await fetch("/api/petty-cash/handovers");
+    const data = await res.json();
+    setHandovers(data.handovers ?? []);
+  }
+
+  async function deleteHandover(id: string) {
+    await fetch("/api/petty-cash/handovers", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "delete", id }),
+    });
+    setHandovers(prev => prev.filter(h => h.id !== id));
+  }
+
+  async function saveDenomCount(c: { date: string; holder: "aa1" | "aa2"; denominations: Record<string, number>; total: number; countedBy: string }) {
+    await fetch("/api/petty-cash/denominations", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "create", count: c }),
+    });
+    const res = await fetch("/api/petty-cash/denominations");
+    const data = await res.json();
+    setDenomCounts(data.counts ?? []);
   }
 
   function updateEntry(id: string, field: keyof PettyCashEntry, value: string | number | null) {
@@ -655,6 +729,81 @@ export default function PettyCashPage() {
             </div>
           </div>
 
+          {/* Cash Handover */}
+          <div className="bg-surface rounded-2xl border border-border p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <HandCoins className="w-3.5 h-3.5 text-orange-400" />
+                <h3 className="text-xs font-semibold text-muted uppercase tracking-wide">Cash Handover</h3>
+              </div>
+              {session?.role === "accountant" && (
+                <button onClick={() => setShowHandoverForm(true)} className="flex items-center gap-1.5 text-[10px] px-2.5 py-1.5 bg-orange-500 hover:bg-orange-500/80 text-white rounded-lg cursor-pointer transition-colors">
+                  <Plus className="w-3 h-3" /> New Handover
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {(["aa1", "aa2"] as const).map((holder) => {
+                const inHand = cashInHand(holder);
+                const handedTotal = totalHandedOver(holder);
+                const lastCount = lastDenomCount(holder);
+                const variance = lastCount ? lastCount.total - inHand : null;
+                return (
+                  <div key={holder} className="p-3 rounded-xl border border-border bg-background">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-bold text-foreground">{HOLDER_LABELS[holder]}</span>
+                      <button onClick={() => setShowDenomModal(holder)} className="flex items-center gap-1 text-[9px] px-2 py-1 border border-border text-muted hover:text-foreground hover:border-orange-500/40 rounded-lg cursor-pointer transition-colors">
+                        <Calculator className="w-2.5 h-2.5" /> Count Cash
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-[10px] mb-2">
+                      <div>
+                        <p className="text-muted">Total Handed Over</p>
+                        <p className="font-mono font-semibold text-foreground">{handedTotal > 0 ? handedTotal.toLocaleString("en-PK") : "—"}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted">Cash In Hand</p>
+                        <p className="font-mono font-bold text-orange-400">{fmtBal(inHand)}</p>
+                      </div>
+                    </div>
+                    {lastCount ? (
+                      <div className={`flex items-center gap-1.5 text-[9px] px-2 py-1.5 rounded-lg ${variance === 0 ? "bg-emerald-500/10 text-emerald-400" : "bg-red-500/10 text-red-400"}`}>
+                        {variance === 0 ? <Check className="w-2.5 h-2.5" /> : <AlertTriangle className="w-2.5 h-2.5" />}
+                        {variance === 0
+                          ? `Verified ${lastCount.date} — matches physical count`
+                          : `Variance ${lastCount.date}: counted ${fmtBal(lastCount.total)} (${variance! > 0 ? "+" : ""}${fmtBal(variance!)})`}
+                      </div>
+                    ) : (
+                      <p className="text-[9px] text-muted italic">No physical count recorded yet.</p>
+                    )}
+                    <button onClick={() => setShowHandoverHistory(showHandoverHistory === holder ? null : holder)} className="text-[9px] text-muted hover:text-orange-400 cursor-pointer mt-2 transition-colors">
+                      {showHandoverHistory === holder ? "Hide history" : "Show handover history"}
+                    </button>
+                    {showHandoverHistory === holder && (
+                      <div className="mt-2 pt-2 border-t border-border space-y-1 max-h-40 overflow-y-auto">
+                        {handovers.filter(h => h.holder === holder).sort((a, b) => b.date.localeCompare(a.date)).map(h => (
+                          <div key={h.id} className="flex items-center justify-between text-[9px]">
+                            <span className="text-muted">{h.date} — {h.notes || "Handover"}</span>
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-mono font-semibold text-emerald-400">+{h.amount.toLocaleString("en-PK")}</span>
+                              {session?.role === "accountant" && (
+                                <button onClick={() => deleteHandover(h.id)} className="text-muted hover:text-red-400 cursor-pointer"><Trash2 className="w-2.5 h-2.5" /></button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                        {handovers.filter(h => h.holder === holder).length === 0 && (
+                          <p className="text-[9px] text-muted italic">No handovers recorded yet.</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
           {/* Ledger (expanded) */}
           {selectedMonth && (() => {
             const allMonthEntries = getMonthEntries(selectedMonth);
@@ -794,6 +943,7 @@ export default function PettyCashPage() {
                         <th className="px-2 py-2.5 text-left font-semibold w-[110px]">TXN / Cheque #</th>
                         <th className="px-2 py-2.5 text-left font-semibold">Purpose</th>
                         <th className="px-2 py-2.5 text-left font-semibold w-[100px]">Approved By</th>
+                        <th className="px-2 py-2.5 text-left font-semibold w-[90px]">Holder</th>
                         <th className="px-2 py-2.5 text-right font-semibold w-[120px]">Cash Out</th>
                         <th className="px-2 py-2.5 text-right font-semibold w-[120px]">Cash In</th>
                         <th className="px-2 py-2.5 text-right font-semibold w-[130px]">Balance</th>
@@ -804,14 +954,14 @@ export default function PettyCashPage() {
                       {/* Beginning Balance row */}
                       <tr className="bg-orange-500/5">
                         <td className="px-2 py-2"></td>
-                        <td className="px-2 py-2" colSpan={7}><span className="text-[10px] font-semibold text-orange-400/70">BEGINNING BALANCE</span></td>
+                        <td className="px-2 py-2" colSpan={8}><span className="text-[10px] font-semibold text-orange-400/70">BEGINNING BALANCE</span></td>
                         <td className="px-2 py-2 text-right font-mono font-bold text-orange-400">{fmtBal(viewStartBal)}</td>
                         <td></td>
                       </tr>
 
                       {me.length === 0 && (
                         <tr>
-                          <td colSpan={10} className="px-4 py-8 text-center text-muted">
+                          <td colSpan={11} className="px-4 py-8 text-center text-muted">
                             {filterMode === "single" && filterSingle ? `No entries for ${filterSingle}.` : `No entries for ${monthLabel(selectedMonth)}.`}
                             {editMode ? ' Click "Add Row" below.' : ' Click "Edit Ledger" to add entries.'}
                           </td>
@@ -836,7 +986,7 @@ export default function PettyCashPage() {
                               {/* Date sub-header — only in range/all view */}
                               {showDayGroups && (
                                 <tr key={`hdr-${date}`} className="bg-surface-light/40">
-                                  <td colSpan={10} className="px-3 py-1.5">
+                                  <td colSpan={11} className="px-3 py-1.5">
                                     <span className="text-[10px] font-bold text-orange-400/80 uppercase tracking-wide">{formattedDate}</span>
                                   </td>
                                 </tr>
@@ -889,6 +1039,20 @@ export default function PettyCashPage() {
                                       />
                                     </td>
                                     <td className="px-2 py-1.5">
+                                      {editMode ? (
+                                        <select value={entry.holder} onChange={(e) => updateEntry(entry.id, "holder", e.target.value)}
+                                          className="w-full bg-transparent border border-transparent hover:border-border focus:border-orange-500/50 rounded px-1.5 py-1 text-foreground focus:outline-none text-xs cursor-pointer">
+                                          <option value="main">Main</option>
+                                          <option value="aa1">AA1</option>
+                                          <option value="aa2">AA2</option>
+                                        </select>
+                                      ) : (
+                                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${entry.holder === "aa2" ? "bg-orange-500/10 text-orange-400" : entry.holder === "aa1" ? "bg-blue-500/10 text-blue-400" : "bg-surface-light/50 text-muted"}`}>
+                                          {entry.holder === "aa2" ? "AA2" : entry.holder === "aa1" ? "AA1" : "Main"}
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td className="px-2 py-1.5">
                                       <input type="text" inputMode="decimal"
                                         value={entry.cashOut === null ? "" : entry.cashOut}
                                         onChange={(e) => { const v = e.target.value.replace(/[^0-9.]/g, ""); updateEntry(entry.id, "cashOut", v === "" ? null : parseFloat(v) || 0); }}
@@ -923,7 +1087,7 @@ export default function PettyCashPage() {
                               {/* Day total row — only in range/all view */}
                               {showDayGroups && dayEntries.length > 0 && (
                                 <tr key={`tot-${date}`} className="bg-orange-500/5 border-t border-orange-500/10">
-                                  <td colSpan={6} className="px-3 py-1 text-right text-[10px] text-muted font-semibold">Day Total</td>
+                                  <td colSpan={7} className="px-3 py-1 text-right text-[10px] text-muted font-semibold">Day Total</td>
                                   <td className="px-2 py-1 text-right text-[10px] font-mono font-semibold text-red-400">{dayOut > 0 ? dayOut.toLocaleString("en-PK", { minimumFractionDigits: 2 }) : "—"}</td>
                                   <td className="px-2 py-1 text-right text-[10px] font-mono font-semibold text-emerald-400">{dayIn > 0 ? dayIn.toLocaleString("en-PK", { minimumFractionDigits: 2 }) : "—"}</td>
                                   <td className="px-2 py-1 text-right text-[10px] font-mono font-bold text-orange-400">{fmtBal(dayClosingBal)}</td>
@@ -990,6 +1154,183 @@ export default function PettyCashPage() {
           </button>
         </div>
       )}
+
+      {/* New Handover Modal */}
+      {showHandoverForm && session && (
+        <HandoverFormModal
+          givenBy={session.name}
+          onSave={async (h) => { await createHandover(h); setShowHandoverForm(false); }}
+          onClose={() => setShowHandoverForm(false)}
+        />
+      )}
+
+      {/* Denomination Count Modal */}
+      {showDenomModal && session && (
+        <DenominationModal
+          holder={showDenomModal}
+          currentCashInHand={cashInHand(showDenomModal)}
+          countedBy={session.name}
+          onSave={async (c) => { await saveDenomCount(c); setShowDenomModal(null); }}
+          onClose={() => setShowDenomModal(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════
+   CASH HANDOVER MODALS
+   ═══════════════════════════════════════════ */
+function HandoverFormModal({ givenBy, onSave, onClose }: {
+  givenBy: string;
+  onSave: (h: { date: string; holder: "aa1" | "aa2"; amount: number; notes: string; givenBy: string }) => void;
+  onClose: () => void;
+}) {
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [holder, setHolder] = useState<"aa1" | "aa2">("aa2");
+  const [amount, setAmount] = useState<number>(0);
+  const [notes, setNotes] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function submit() {
+    if (amount <= 0) return;
+    setSaving(true);
+    await onSave({ date, holder, amount, notes, givenBy });
+    setSaving(false);
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-surface rounded-2xl border border-border w-full max-w-sm p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <HandCoins className="w-4 h-4 text-orange-400" />
+            <h3 className="text-sm font-semibold text-foreground">New Cash Handover</h3>
+          </div>
+          <button onClick={onClose} className="text-muted hover:text-foreground cursor-pointer"><X className="w-4 h-4" /></button>
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <label className="text-[10px] text-muted uppercase tracking-wide block mb-1">Hand Over To</label>
+            <div className="flex gap-2">
+              {(["aa1", "aa2"] as const).map((h) => (
+                <button key={h} onClick={() => setHolder(h)}
+                  className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold border cursor-pointer transition-colors ${holder === h ? "bg-orange-500 text-white border-orange-500" : "border-border text-muted hover:text-foreground"}`}>
+                  {HOLDER_LABELS[h]}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="text-[10px] text-muted uppercase tracking-wide block mb-1">Date</label>
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
+              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-orange-500/50" />
+          </div>
+          <div>
+            <label className="text-[10px] text-muted uppercase tracking-wide block mb-1">Amount (PKR)</label>
+            <input type="number" value={amount || ""} onChange={(e) => setAmount(parseFloat(e.target.value) || 0)} autoFocus
+              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-orange-500/50" />
+          </div>
+          <div>
+            <label className="text-[10px] text-muted uppercase tracking-wide block mb-1">Notes (optional)</label>
+            <input type="text" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. Weekly cash advance"
+              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-orange-500/50" />
+          </div>
+        </div>
+
+        <div className="flex gap-2 mt-5">
+          <button onClick={onClose} className="flex-1 px-4 py-2 text-sm text-muted hover:text-foreground cursor-pointer transition-colors">Cancel</button>
+          <button onClick={submit} disabled={saving || amount <= 0}
+            className="flex-1 px-4 py-2 bg-orange-500 hover:bg-orange-500/80 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg cursor-pointer transition-colors">
+            {saving ? "Saving..." : "Hand Over"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DenominationModal({ holder, currentCashInHand, countedBy, onSave, onClose }: {
+  holder: "aa1" | "aa2";
+  currentCashInHand: number;
+  countedBy: string;
+  onSave: (c: { date: string; holder: "aa1" | "aa2"; denominations: Record<string, number>; total: number; countedBy: string }) => void;
+  onClose: () => void;
+}) {
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [counts, setCounts] = useState<Record<string, number>>(() => Object.fromEntries(DENOMINATIONS.map((d) => [String(d), 0])));
+  const [otherAmount, setOtherAmount] = useState(0);
+  const [saving, setSaving] = useState(false);
+
+  const total = DENOMINATIONS.reduce((s, d) => s + d * (counts[String(d)] || 0), 0) + otherAmount;
+  const variance = total - currentCashInHand;
+
+  async function submit() {
+    setSaving(true);
+    const denominations = { ...counts, other: otherAmount };
+    await onSave({ date, holder, denominations, total, countedBy });
+    setSaving(false);
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-surface rounded-2xl border border-border w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Calculator className="w-4 h-4 text-orange-400" />
+            <h3 className="text-sm font-semibold text-foreground">Count Physical Cash — {HOLDER_LABELS[holder]}</h3>
+          </div>
+          <button onClick={onClose} className="text-muted hover:text-foreground cursor-pointer"><X className="w-4 h-4" /></button>
+        </div>
+
+        <div className="mb-3">
+          <label className="text-[10px] text-muted uppercase tracking-wide block mb-1">Date</label>
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
+            className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-orange-500/50" />
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 mb-3">
+          {DENOMINATIONS.map((d) => (
+            <div key={d} className="flex items-center gap-2">
+              <span className="text-xs text-muted w-16 shrink-0">Rs. {d}</span>
+              <span className="text-xs text-muted">×</span>
+              <input type="number" min={0} value={counts[String(d)] || ""} placeholder="0"
+                onChange={(e) => setCounts((p) => ({ ...p, [String(d)]: parseInt(e.target.value) || 0 }))}
+                className="w-full bg-background border border-border rounded-lg px-2 py-1.5 text-xs text-foreground focus:outline-none focus:border-orange-500/50" />
+            </div>
+          ))}
+          <div className="flex items-center gap-2 col-span-2">
+            <span className="text-xs text-muted w-16 shrink-0">Coins/Other</span>
+            <input type="number" min={0} value={otherAmount || ""} placeholder="0"
+              onChange={(e) => setOtherAmount(parseFloat(e.target.value) || 0)}
+              className="w-full bg-background border border-border rounded-lg px-2 py-1.5 text-xs text-foreground focus:outline-none focus:border-orange-500/50" />
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-border p-3 space-y-1.5 bg-background">
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-muted">Physical Count Total</span>
+            <span className="font-mono font-bold text-foreground">{fmtBal(total)}</span>
+          </div>
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-muted">System Cash In Hand</span>
+            <span className="font-mono font-semibold text-foreground">{fmtBal(currentCashInHand)}</span>
+          </div>
+          <div className={`flex items-center gap-1.5 text-xs pt-1.5 border-t border-border ${variance === 0 ? "text-emerald-400" : "text-red-400"}`}>
+            {variance === 0 ? <Check className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />}
+            <span className="font-semibold">{variance === 0 ? "Matches — no variance" : `Variance: ${variance > 0 ? "+" : ""}${fmtBal(variance)}`}</span>
+          </div>
+        </div>
+
+        <div className="flex gap-2 mt-5">
+          <button onClick={onClose} className="flex-1 px-4 py-2 text-sm text-muted hover:text-foreground cursor-pointer transition-colors">Cancel</button>
+          <button onClick={submit} disabled={saving}
+            className="flex-1 px-4 py-2 bg-orange-500 hover:bg-orange-500/80 disabled:opacity-40 text-white text-sm font-semibold rounded-lg cursor-pointer transition-colors">
+            {saving ? "Saving..." : "Save Count"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

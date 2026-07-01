@@ -3,7 +3,7 @@ import { ensureSheet, readSheet, clearAndWrite } from "@/lib/google-sheets";
 const LEDGER_SHEET = "PC_Ledger";
 const CONFIG_SHEET = "PC_Config";
 
-const LEDGER_HEADERS = ["id", "date", "acHead", "txnNo", "purpose", "approvedBy", "cashOut", "cashIn"];
+const LEDGER_HEADERS = ["id", "date", "acHead", "txnNo", "purpose", "approvedBy", "cashOut", "cashIn", "holder"];
 const CONFIG_HEADERS = ["key", "value"];
 
 async function init() {
@@ -29,6 +29,7 @@ export async function GET() {
         approvedBy: r[5] ?? "",
         cashOut: r[6] === "" || r[6] === undefined ? null : parseFloat(r[6]) || 0,
         cashIn: r[7] === "" || r[7] === undefined ? null : parseFloat(r[7]) || 0,
+        holder: (r[8] || "main") as "main" | "aa1" | "aa2",
       }));
 
     const config: Record<string, string> = {};
@@ -56,6 +57,7 @@ export async function POST(request: Request) {
         id: string; date: string; acHead: string; txnNo: string;
         purpose: string; approvedBy: string;
         cashOut: number | null; cashIn: number | null;
+        holder?: "main" | "aa1" | "aa2";
       }>;
       openingBalance: number;
       openingDate: string;
@@ -67,6 +69,7 @@ export async function POST(request: Request) {
         e.id, e.date, e.acHead, e.txnNo, e.purpose, e.approvedBy,
         e.cashOut === null ? "" : String(e.cashOut),
         e.cashIn === null ? "" : String(e.cashIn),
+        e.holder ?? "main",
       ]),
     ];
     await clearAndWrite(LEDGER_SHEET, ledgerData);
