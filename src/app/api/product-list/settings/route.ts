@@ -15,9 +15,14 @@ export async function GET() {
       fcRate: parseFloat(settings.fcRate || "275") || 275,
       currency: settings.currency || "PKR",
       targetCurrency: settings.targetCurrency || "USD",
+      adminPct: parseFloat(settings.adminPct || "5") || 5,
+      whtPct: parseFloat(settings.whtPct || "2") || 2,
+      serviceCharges: parseFloat(settings.serviceCharges || "0") || 0,
+      eds: parseFloat(settings.eds || "0") || 0,
+      courierCharges: parseFloat(settings.courierCharges || "0") || 0,
     });
   } catch (err) {
-    return Response.json({ fcRate: 275, currency: "PKR", targetCurrency: "USD" });
+    return Response.json({ fcRate: 275, currency: "PKR", targetCurrency: "USD", adminPct: 5, whtPct: 2, serviceCharges: 0, eds: 0, courierCharges: 0 });
   }
 }
 

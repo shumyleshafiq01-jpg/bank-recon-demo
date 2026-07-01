@@ -1,13 +1,17 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
-import { ArrowLeft, Plus, Trash2, Pencil, X, Save, Lock, Search, Package, List, DollarSign, Settings2, ChevronRight, ChevronDown, ExternalLink, Copy } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Pencil, X, Save, Lock, Search, Package, List, DollarSign, Settings2, ChevronRight, ChevronDown, ExternalLink, Copy, Ship, Upload, Check } from "lucide-react";
 import { useRouter } from "next/navigation";
+import * as XLSX from "xlsx";
 
 /* ════════════════════════════════ TYPES */
 interface Material { id: string; name: string; unit: string; category: string; pricePerUnit: number; updatedAt: string; }
-interface Product { id: string; sku: string; name: string; productType: string; fclQty: number; adminPct: number; grossProfitPct: number; whtPct: number; serviceCharges: number; eds: number; courierCharges: number; imageUrl: string; notes: string; active: boolean; }
+interface Product { id: string; sku: string; name: string; productType: string; fclQty: number; grossProfitPct: number; imageUrl: string; notes: string; active: boolean; specs: string; packagingDesc: string; }
 interface RecipeItem { id: string; productId: string; materialId: string; materialName: string; qty: number; unitType: "PCS" | "CONTAINER" | "FIXED"; sortOrder: number; }
-interface Settings { fcRate: number; currency: string; targetCurrency: string; }
+interface Settings { fcRate: number; currency: string; targetCurrency: string; adminPct: number; whtPct: number; serviceCharges: number; eds: number; courierCharges: number; }
+
+// Materials that must exist on every product's recipe (accountant-mandated standard export charges)
+const DEFAULT_RECIPE_MATERIALS = ["Unloading/Loading", "CONTAINER SEALS", "Labour Expense", "Craft Paper", "Clearing FOB", "Inspection", "Fumigation", "Certificate SGS"];
 
 const genId = () => Math.random().toString(36).slice(2, 10);
 const UNIT_TYPES = ["PCS", "CONTAINER", "FIXED"] as const;
@@ -53,13 +57,13 @@ function calcCost(recipe: RecipeItem[], materials: Material[], product: Product,
   const r = (n: number) => Math.round(n * 100) / 100;
   const cogTotal    = r(pcsCOG * quoteQty + fixedCOG);
   const cogPerCarton = r(cogTotal / quoteQty);
-  const adminAmt    = r(cogTotal * (product.adminPct / 100));
+  const adminAmt    = r(cogTotal * (settings.adminPct / 100));
   const cogWithAdmin = r(cogTotal + adminAmt);
   const cogUSD      = r(cogWithAdmin / (settings.fcRate || 275));
   const sellingUSD  = r(cogUSD * (1 + product.grossProfitPct / 100));
   const sellingPerCarton = r(sellingUSD / quoteQty);
-  const whtUSD      = r(sellingUSD * (product.whtPct / 100));
-  const fobTotal    = r(sellingUSD + whtUSD + product.serviceCharges + product.eds + product.courierCharges);
+  const whtUSD      = r(sellingUSD * (settings.whtPct / 100));
+  const fobTotal    = r(sellingUSD + whtUSD + settings.serviceCharges + settings.eds + settings.courierCharges);
   const fobPerCarton = r(fobTotal / quoteQty);
   return { cogPerCarton, cogTotal, adminAmt, cogWithAdmin, cogUSD, sellingUSD, sellingPerCarton, whtUSD, fobTotal, fobPerCarton,
     // legacy alias for price list tab
@@ -73,7 +77,7 @@ export default function ProductListPage() {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [recipes, setRecipes] = useState<Map<string, RecipeItem[]>>(new Map());
-  const [settings, setSettings] = useState<Settings>({ fcRate: 275, currency: "PKR", targetCurrency: "USD" });
+  const [settings, setSettings] = useState<Settings>({ fcRate: 275, currency: "PKR", targetCurrency: "USD", adminPct: 5, whtPct: 2, serviceCharges: 0, eds: 0, courierCharges: 0 });
   const [loaded, setLoaded] = useState(false);
   const [search, setSearch] = useState("");
   const [session, setSession] = useState<PLSession | null>(null);
@@ -95,6 +99,7 @@ export default function ProductListPage() {
   const [quoteQty, setQuoteQty] = useState(1);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [showProductForm, setShowProductForm] = useState(false);
+  const [showCartonImport, setShowCartonImport] = useState(false);
   const [savingRecipe, setSavingRecipe] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
 
@@ -105,7 +110,7 @@ export default function ProductListPage() {
 
   // Settings edit
   const [editSettings, setEditSettings] = useState(false);
-  const [settingsDraft, setSettingsDraft] = useState<Settings>({ fcRate: 275, currency: "PKR", targetCurrency: "USD" });
+  const [settingsDraft, setSettingsDraft] = useState<Settings>({ fcRate: 275, currency: "PKR", targetCurrency: "USD", adminPct: 5, whtPct: 2, serviceCharges: 0, eds: 0, courierCharges: 0 });
 
   // Price list
   const [copiedId, setCopiedId] = useState("");
@@ -206,13 +211,70 @@ export default function ProductListPage() {
     setSavingRecipe(false);
   }
 
+  // Ensures the accountant-mandated standard charge materials exist in Master Prices,
+  // creating any that are missing. Returns their material ids in DEFAULT_RECIPE_MATERIALS order.
+  async function ensureStandardMaterials(): Promise<Material[]> {
+    let current = materials;
+    for (const name of DEFAULT_RECIPE_MATERIALS) {
+      const exists = current.some(m => m.name.trim().toLowerCase() === name.toLowerCase());
+      if (!exists) {
+        const mat: Material = { id: genId(), name, unit: "PCS", category: "Export Charges", pricePerUnit: 0, updatedAt: new Date().toISOString() };
+        await fetch("/api/product-list/master", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "upsert", material: mat }),
+        });
+        current = [...current, mat];
+      }
+    }
+    if (current !== materials) setMaterials(current);
+    return current;
+  }
+
+  // Adds any of the 8 standard charge materials missing from a recipe, without touching existing items.
+  async function addMissingStandardCharges(productId: string, existingItems: RecipeItem[]): Promise<RecipeItem[]> {
+    const allMaterials = await ensureStandardMaterials();
+    const existingMaterialIds = new Set(existingItems.map(i => i.materialId));
+    const missing = DEFAULT_RECIPE_MATERIALS
+      .map(name => allMaterials.find(m => m.name.trim().toLowerCase() === name.toLowerCase()))
+      .filter((m): m is Material => !!m && !existingMaterialIds.has(m.id));
+    const newItems: RecipeItem[] = missing.map((m, i) => ({
+      id: genId(), productId, materialId: m.id, materialName: m.name,
+      qty: 1, unitType: "FIXED", sortOrder: existingItems.length + i,
+    }));
+    return [...existingItems, ...newItems];
+  }
+
   async function saveProduct(p: Product) {
+    const isNew = !products.some(x => x.id === p.id);
     await fetch("/api/product-list/products", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "upsert", product: p }),
     });
     setProducts(prev => prev.some(x => x.id === p.id) ? prev.map(x => x.id === p.id ? p : x) : [...prev, p]);
     setShowProductForm(false); setEditingProduct(null);
+
+    if (isNew) {
+      const items = await addMissingStandardCharges(p.id, []);
+      await fetch("/api/product-list/recipes", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "save-product-recipe", productId: p.id, items }),
+      });
+      setRecipes(prev => new Map(prev).set(p.id, items));
+    }
+  }
+
+  async function applyCartonImport(updates: { id: string; specs: string; packagingDesc: string }[]) {
+    const merged = updates.map(u => {
+      const existing = products.find(p => p.id === u.id);
+      return existing ? { ...existing, specs: u.specs, packagingDesc: u.packagingDesc } : null;
+    }).filter((p): p is Product => p !== null);
+    for (const p of merged) {
+      await fetch("/api/product-list/products", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "upsert", product: p }),
+      });
+    }
+    setProducts(prev => prev.map(p => merged.find(m => m.id === p.id) ?? p));
   }
 
   async function deleteProduct(id: string) {
@@ -330,10 +392,8 @@ export default function ProductListPage() {
                     </select>
                   </div>
                   {([
-                    ["fclQty","FCL Container Qty","number"],["adminPct","Admin %","number"],
-                    ["grossProfitPct","Gross Profit %","number"],["whtPct","WHT %","number"],
-                    ["serviceCharges","Service Charges (USD)","number"],["eds","EDS (USD)","number"],
-                    ["courierCharges","Courier Charges (USD)","number"],
+                    ["fclQty","FCL Container Qty","number"],
+                    ["grossProfitPct","Gross Profit %","number"],
                   ] as [keyof Product, string, string][]).map(([k, l]) => (
                     <div key={k}>
                       <label className="text-[10px] text-muted uppercase tracking-wide block mb-1">{l}</label>
@@ -343,6 +403,7 @@ export default function ProductListPage() {
                     </div>
                   ))}
                 </div>
+                <p className="text-[10px] text-muted mt-3">Admin %, WHT %, Service Charges, EDS &amp; Courier Charges are shared across all products — edit them in Master Prices → Global Cost Settings.</p>
               </div>
               )}
 
@@ -359,6 +420,10 @@ export default function ProductListPage() {
                           className="w-16 bg-background border border-green-500/40 rounded-lg px-2 py-1 text-sm text-center font-bold text-green-400 focus:outline-none focus:border-green-500" />
                         <span className="text-[10px] text-muted">carton{quoteQty > 1 ? "s" : ""}</span>
                       </div>
+                      <button onClick={() => requireAuth(async () => { setProductRecipe(await addMissingStandardCharges(selectedProduct.id, productRecipe)); })}
+                        className="flex items-center gap-1 text-[11px] text-amber-400 hover:text-amber-300 cursor-pointer">
+                        <Plus className="w-3 h-3" /> Add Standard Charges
+                      </button>
                       <button onClick={() => requireAuth(addRecipeRow)} className="flex items-center gap-1 text-[11px] text-green-400 hover:text-green-300 cursor-pointer"><Plus className="w-3 h-3" /> Add Row</button>
                     </div>
                   </div>
@@ -419,14 +484,14 @@ export default function ProductListPage() {
                   </div>
                   {[
                     ["COG (PKR)", quoteQty > 1 ? `PKR ${fmt2(calc.cogTotal)} total / ${fmt2(calc.cogPerCarton)}/ctn` : `PKR ${fmt2(calc.cogPerCarton)}`, "text-foreground"],
-                    [`Admin ${(productDraft ?? selectedProduct).adminPct}%`, `PKR ${fmt2(calc.adminAmt)}`, "text-muted"],
+                    [`Admin ${settings.adminPct}%`, `PKR ${fmt2(calc.adminAmt)}`, "text-muted"],
                     ["COG + Admin", `PKR ${fmt2(calc.cogWithAdmin)}`, "text-foreground font-bold"],
                     [`÷ FC Rate (${settings.fcRate})`, `USD ${fmt2(calc.cogUSD)}`, "text-blue-400"],
                     [`× GP ${(productDraft ?? selectedProduct).grossProfitPct}%`, quoteQty > 1 ? `USD ${fmt2(calc.sellingUSD)} total / ${fmt2(calc.sellingPerCarton)}/ctn` : `USD ${fmt2(calc.sellingUSD)}`, "text-green-400 font-bold"],
-                    [`WHT ${(productDraft ?? selectedProduct).whtPct}%`, `USD ${fmt2(calc.whtUSD)}`, "text-muted"],
-                    ["Service Charges", `USD ${fmt2((productDraft ?? selectedProduct).serviceCharges)}`, "text-muted"],
-                    ["EDS", `USD ${fmt2((productDraft ?? selectedProduct).eds)}`, "text-muted"],
-                    ["Courier Charges", `USD ${fmt2((productDraft ?? selectedProduct).courierCharges)}`, "text-muted"],
+                    [`WHT ${settings.whtPct}%`, `USD ${fmt2(calc.whtUSD)}`, "text-muted"],
+                    ["Service Charges", `USD ${fmt2(settings.serviceCharges)}`, "text-muted"],
+                    ["EDS", `USD ${fmt2(settings.eds)}`, "text-muted"],
+                    ["Courier Charges", `USD ${fmt2(settings.courierCharges)}`, "text-muted"],
                   ].map(([label, value, cls]) => (
                     <div key={String(label)} className="flex items-center justify-between border-b border-border/50 pb-2">
                       <span className="text-[11px] text-muted">{label}</span>
@@ -458,16 +523,22 @@ export default function ProductListPage() {
 
             {/* Module cards — shown when no section selected */}
             {!tab && (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mt-4">
                 {([
-                  { key: "products" as const, Icon: Package, label: "Products", desc: "Manage products, recipes & BOM. Auto-calculates FOB price per carton.", count: products.length, color: "green" },
-                  { key: "master" as const, Icon: List, label: "Master Prices", desc: "Raw material & component prices. Update once — all products recalculate.", count: materials.length, color: "blue" },
-                  { key: "pricelist" as const, Icon: DollarSign, label: "Price List", desc: "Calculated price list with images. Generate shareable links per product.", count: products.length, color: "amber" },
-                ]).map(({ key, Icon, label, desc, count, color }) => {
-                  const allowed = canAccess(key);
+                  { key: "products" as const, Icon: Package, label: "Products", desc: "Manage products, recipes & BOM. Auto-calculates FOB price per carton.", count: products.length, color: "green", external: false, route: "", newTab: false },
+                  { key: "master" as const, Icon: List, label: "Master Prices", desc: "Raw material & component prices. Update once — all products recalculate.", count: materials.length, color: "blue", external: false, route: "", newTab: false },
+                  { key: "pricelist" as const, Icon: DollarSign, label: "Price List", desc: "Calculated price list with images. Generate shareable links per product.", count: products.length, color: "amber", external: false, route: "", newTab: false },
+                  { key: "cnf" as const, Icon: Ship, label: "CNF Quotations", desc: "Generate immutable CNF export quotes — master freight card, shareable client price list.", count: null, color: "sky", external: true, route: "/cnf", newTab: false },
+                  { key: "cnf-public" as const, Icon: ExternalLink, label: "Client Quotation List", desc: "Public link — clients & CNF editors browse all active quotes and open their price list. No login required.", count: null, color: "teal", external: true, route: "/cnf/all-quotes", newTab: true },
+                ]).map(({ key, Icon, label, desc, count, color, external, route, newTab }) => {
+                  const allowed = external ? true : canAccess(key as "master" | "products" | "pricelist");
                   return (
                     <button key={key}
-                      onClick={() => { if (allowed) { setTab(key); setSearch(""); } }}
+                      onClick={() => {
+                        if (!allowed) return;
+                        if (external) { if (newTab) window.open(route, "_blank"); else router.push(route); return; }
+                        setTab(key as "master" | "products" | "pricelist"); setSearch("");
+                      }}
                       className={`group text-left p-5 bg-white/65 backdrop-blur-sm rounded-2xl border transition-all shadow-sm ${
                         allowed
                           ? `border-gray-200/80 hover:border-${color}-400/60 hover:bg-white/95 hover:shadow-md cursor-pointer`
@@ -478,7 +549,7 @@ export default function ProductListPage() {
                           <Icon className={`w-5 h-5 text-${color}-500`} />
                         </div>
                         <div className="flex items-center gap-1.5">
-                          <span className="text-xs text-gray-400 font-semibold">{count}</span>
+                          {count !== null && <span className="text-xs text-gray-400 font-semibold">{count}</span>}
                           {!allowed && <Lock className="w-3.5 h-3.5 text-gray-300" />}
                           {allowed && <ChevronRight className={`w-4 h-4 text-gray-300 group-hover:text-${color}-400 transition-colors`} />}
                         </div>
@@ -503,7 +574,12 @@ export default function ProductListPage() {
                 <div className="flex items-center gap-2">
                   {tab === "master" && (
                     <button onClick={() => { setSettingsDraft(settings); setEditSettings(true); }} className="flex items-center gap-1.5 text-xs px-3 py-1.5 border border-border text-muted hover:text-foreground hover:border-green-500/40 rounded-lg cursor-pointer">
-                      <Settings2 className="w-3 h-3" /> FC Rate: {settings.fcRate}
+                      <Settings2 className="w-3 h-3" /> Global Cost Settings (FC Rate: {settings.fcRate})
+                    </button>
+                  )}
+                  {tab === "products" && (
+                    <button onClick={() => requireAuth(() => setShowCartonImport(true))} className="flex items-center gap-1.5 text-xs px-3 py-1.5 border border-border text-muted hover:text-foreground hover:border-green-500/40 rounded-lg cursor-pointer">
+                      <Upload className="w-3 h-3" /> Import Carton Sizes
                     </button>
                   )}
                   {tab !== "pricelist" && (
@@ -664,6 +740,10 @@ export default function ProductListPage() {
         <ProductForm item={editingProduct} onSave={saveProduct} onClose={() => { setShowProductForm(false); setEditingProduct(null); }} />
       )}
 
+      {showCartonImport && (
+        <CartonImportModal products={products} onApply={applyCartonImport} onClose={() => setShowCartonImport(false)} />
+      )}
+
       {/* ── MATERIAL FORM MODAL ── */}
       {showMaterialForm && (
         <MaterialForm item={editingMaterial} onSave={saveMaterial} onClose={() => { setShowMaterialForm(false); setEditingMaterial(null); }} />
@@ -672,13 +752,21 @@ export default function ProductListPage() {
       {/* ── SETTINGS MODAL ── */}
       {editSettings && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setEditSettings(false)}>
-          <div className="bg-surface rounded-2xl border border-border w-full max-w-sm p-6 space-y-4" onClick={e => e.stopPropagation()}>
+          <div className="bg-surface rounded-2xl border border-border w-full max-w-sm p-6 space-y-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <h3 className="text-sm font-semibold text-foreground">Global Settings</h3>
             {[["FC Rate (PKR per USD)", "fcRate", "number"], ["Base Currency", "currency", "text"], ["Target Currency", "targetCurrency", "text"]].map(([l, k, t]) => (
               <div key={k}><label className="text-[10px] text-muted uppercase tracking-wide block mb-1">{l}</label>
                 <input type={t} value={String(settingsDraft[k as keyof Settings])} onChange={e => setSettingsDraft(p => ({ ...p, [k]: t === "number" ? parseFloat(e.target.value) || 0 : e.target.value }))}
                   className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50" /></div>
             ))}
+            <div className="pt-2 border-t border-border">
+              <p className="text-[10px] text-green-400 uppercase tracking-wide font-semibold mb-2">Global Cost Settings — same for every product</p>
+              {[["Admin %", "adminPct", "number"], ["WHT %", "whtPct", "number"], ["Service Charges (USD)", "serviceCharges", "number"], ["EDS (USD)", "eds", "number"], ["Courier Charges (USD)", "courierCharges", "number"]].map(([l, k, t]) => (
+                <div key={k} className="mb-3"><label className="text-[10px] text-muted uppercase tracking-wide block mb-1">{l}</label>
+                  <input type={t} step="0.01" value={String(settingsDraft[k as keyof Settings])} onChange={e => setSettingsDraft(p => ({ ...p, [k]: t === "number" ? parseFloat(e.target.value) || 0 : e.target.value }))}
+                    className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50" /></div>
+              ))}
+            </div>
             <div className="flex gap-2 pt-2"><button onClick={() => setEditSettings(false)} className="flex-1 px-4 py-2 text-sm text-muted cursor-pointer">Cancel</button>
               <button onClick={saveSettings} className="flex-1 px-4 py-2 bg-green-500 text-white text-sm font-semibold rounded-lg cursor-pointer">Save</button></div>
           </div>
@@ -758,7 +846,7 @@ export default function ProductListPage() {
 
 /* ════════════════════════════════ PRODUCT FORM */
 function ProductForm({ item, onSave, onClose }: { item: Product | null; onSave: (p: Product) => void; onClose: () => void }) {
-  const empty: Product = { id: Math.random().toString(36).slice(2, 10), sku: "", name: "", productType: "FINISH GOODS", fclQty: 1500, adminPct: 5, grossProfitPct: 50, whtPct: 2, serviceCharges: 0, eds: 0, courierCharges: 0, imageUrl: "", notes: "", active: true };
+  const empty: Product = { id: Math.random().toString(36).slice(2, 10), sku: "", name: "", productType: "FINISH GOODS", fclQty: 1500, grossProfitPct: 50, imageUrl: "", notes: "", active: true, specs: "", packagingDesc: "" };
   const [f, setF] = useState<Product>(item ?? empty);
   const [uploading, setUploading] = useState(false);
   const s = <K extends keyof Product>(k: K, v: Product[K]) => setF(p => ({ ...p, [k]: v }));
@@ -788,10 +876,10 @@ function ProductForm({ item, onSave, onClose }: { item: Product | null; onSave: 
         <div className="flex items-center justify-between px-5 py-4 border-b border-border"><h3 className="text-sm font-semibold text-foreground">{item ? "Edit" : "Add"} Product</h3><button onClick={onClose} className="text-muted hover:text-foreground cursor-pointer"><X className="w-4 h-4" /></button></div>
         <div className="overflow-auto p-5 flex-1">
           <div className="grid grid-cols-2 gap-3">
-            {([["sku","SKU *","text"],["name","Product Name *","text"],["notes","Notes","text"]] as [keyof Product, string, string][]).map(([k, l, t]) => (
-              <div key={k} className={k === "name" || k === "notes" ? "col-span-2" : ""}>
+            {([["sku","SKU *","text"],["name","Product Name *","text"],["specs","Specs / Description (for CNF quotes)","text"],["packagingDesc","Packaging (for CNF quotes)","text"],["notes","Product Packaging","text"]] as [keyof Product, string, string][]).map(([k, l, t]) => (
+              <div key={k} className={k === "name" || k === "notes" || k === "specs" || k === "packagingDesc" ? "col-span-2" : ""}>
                 <label className="text-[10px] text-muted uppercase tracking-wide block mb-1">{l}</label>
-                <input type={t} value={String(f[k] ?? "")} onChange={e => s(k, e.target.value as never)} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50" />
+                <input type={t} value={String(f[k] ?? "")} onChange={e => s(k, e.target.value as never)} placeholder={k === "specs" ? "e.g. 24 PCS × 1kg" : k === "packagingDesc" ? "e.g. 24 × 1 CTN, 45x30x20cm" : ""} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50" />
               </div>
             ))}
             {/* Image upload */}
@@ -823,7 +911,7 @@ function ProductForm({ item, onSave, onClose }: { item: Product | null; onSave: 
               <select value={f.productType} onChange={e => s("productType", e.target.value)} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50 cursor-pointer">
                 {PRODUCT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
               </select></div>
-            {([["fclQty","FCL Container Qty"],["adminPct","Admin %"],["grossProfitPct","Gross Profit %"],["whtPct","WHT %"],["serviceCharges","Service Charges (USD)"],["eds","EDS (USD)"],["courierCharges","Courier Charges (USD)"]] as [keyof Product, string][]).map(([k, l]) => (
+            {([["fclQty","FCL Container Qty"],["grossProfitPct","Gross Profit %"]] as [keyof Product, string][]).map(([k, l]) => (
               <div key={k}><label className="text-[10px] text-muted uppercase tracking-wide block mb-1">{l}</label>
                 <input type="number" step="0.01" value={Number(f[k])} onChange={e => s(k, parseFloat(e.target.value) || 0 as never)} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50" /></div>
             ))}
@@ -832,6 +920,175 @@ function ProductForm({ item, onSave, onClose }: { item: Product | null; onSave: 
         <div className="px-5 py-4 border-t border-border flex justify-end gap-3">
           <button onClick={onClose} className="px-4 py-2 text-sm text-muted cursor-pointer">Cancel</button>
           <button onClick={() => { if (!f.sku.trim() || !f.name.trim()) return; onSave(f); }} className="flex items-center gap-1.5 px-5 py-2 bg-green-500 text-white text-sm font-semibold rounded-lg cursor-pointer"><Save className="w-3.5 h-3.5" /> Save</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════ CARTON IMPORT */
+interface CartonRow { key: string; rawName: string; packing: string; dims: string; matchId: string; }
+
+function normalizeTokens(s: string): string[] {
+  return s.toUpperCase().replace(/[^A-Z0-9]+/g, " ").trim().split(" ").filter(Boolean);
+}
+
+function bestMatch(rawName: string, products: Product[]): string {
+  const rowTokens = normalizeTokens(rawName);
+  let best = ""; let bestScore = 0;
+  for (const p of products) {
+    const prodTokens = normalizeTokens(p.name);
+    if (prodTokens.length === 0) continue;
+    const common = prodTokens.filter(t => rowTokens.includes(t)).length;
+    const score = common / prodTokens.length;
+    if (score > bestScore) { bestScore = score; best = p.id; }
+  }
+  return bestScore >= 0.4 ? best : "";
+}
+
+function parseCartonWorkbook(wb: XLSX.WorkBook, products: Product[]): CartonRow[] {
+  const out: CartonRow[] = [];
+  for (const sheetName of wb.SheetNames) {
+    const ws = wb.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json<unknown>(ws, { header: 1, defval: "" }) as (string | number)[][];
+
+    let headerIdx = -1, nameCol = -1, packingCol = -1, dimsCol = -1, lCol = -1, wCol = -1, hCol = -1;
+    for (let i = 0; i < rows.length; i++) {
+      const cells = rows[i].map(c => String(c).trim().toUpperCase());
+      const nc = cells.findIndex(c => c === "PRODUCT" || c === "DESCRIPTION");
+      if (nc >= 0) {
+        headerIdx = i; nameCol = nc;
+        packingCol = cells.findIndex(c => c === "PACKING");
+        dimsCol = cells.findIndex(c => c === "CARTONS SIZE");
+        lCol = cells.findIndex(c => c === "L");
+        wCol = cells.findIndex(c => c === "W");
+        hCol = cells.findIndex(c => c === "H");
+        break;
+      }
+    }
+    if (headerIdx === -1) continue;
+
+    for (let i = headerIdx + 1; i < rows.length; i++) {
+      const row = rows[i];
+      const rawName = String(row[nameCol] ?? "").trim();
+      if (!rawName) continue;
+      const packing = packingCol >= 0 ? String(row[packingCol] ?? "").trim() : "";
+      let dims = "";
+      if (dimsCol >= 0 && row[dimsCol]) dims = String(row[dimsCol]).trim();
+      else if (lCol >= 0 && wCol >= 0 && hCol >= 0) {
+        const l = row[lCol], w = row[wCol], h = row[hCol];
+        if (l !== "" && w !== "" && h !== "") dims = `${l} x ${w} x ${h}`;
+      }
+      if (!packing && !dims) continue; // section-header row with no carton data
+      out.push({ key: `${sheetName}-${i}`, rawName, packing, dims, matchId: bestMatch(rawName, products) });
+    }
+  }
+  return out;
+}
+
+function CartonImportModal({ products, onApply, onClose }: { products: Product[]; onApply: (u: { id: string; specs: string; packagingDesc: string }[]) => Promise<void>; onClose: () => void }) {
+  const [rows, setRows] = useState<CartonRow[]>([]);
+  const [parsing, setParsing] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [fileName, setFileName] = useState("");
+  const sortedProducts = [...products].sort((a, b) => a.name.localeCompare(b.name));
+
+  function handleFile(file: File) {
+    setParsing(true);
+    setFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const wb = XLSX.read(e.target?.result, { type: "binary" });
+        setRows(parseCartonWorkbook(wb, products));
+      } catch {
+        setRows([]);
+      }
+      setParsing(false);
+    };
+    reader.readAsBinaryString(file);
+  }
+
+  function updateMatch(key: string, matchId: string) {
+    setRows(prev => prev.map(r => r.key === key ? { ...r, matchId } : r));
+  }
+
+  const matchedCount = rows.filter(r => r.matchId).length;
+
+  async function apply() {
+    setApplying(true);
+    const updates = rows.filter(r => r.matchId).map(r => ({ id: r.matchId, specs: r.packing, packagingDesc: r.dims }));
+    await onApply(updates);
+    setApplying(false);
+    onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-surface rounded-2xl border border-border max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">Import Carton Sizes</h3>
+            <p className="text-[10px] text-muted mt-0.5">Upload the carton size list — match each row to a product to fill its Specs &amp; Packaging fields.</p>
+          </div>
+          <button onClick={onClose} className="text-muted hover:text-foreground cursor-pointer"><X className="w-4 h-4" /></button>
+        </div>
+
+        <div className="p-5 flex-1 overflow-auto space-y-4">
+          {rows.length === 0 && (
+            <label className={`flex flex-col items-center justify-center gap-2 w-full py-10 border border-dashed border-green-500/40 text-green-400 hover:bg-green-500/5 rounded-xl cursor-pointer transition-colors ${parsing ? "opacity-50 cursor-not-allowed" : ""}`}>
+              <Upload className="w-6 h-6" />
+              <span className="text-sm font-medium">{parsing ? "Parsing..." : "Click to upload carton size list (.xlsx)"}</span>
+              <input type="file" accept=".xlsx,.xls" className="hidden" disabled={parsing}
+                onChange={e => { const file = e.target.files?.[0]; if (file) handleFile(file); e.target.value = ""; }} />
+            </label>
+          )}
+
+          {rows.length > 0 && (
+            <>
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-muted">{fileName} — {rows.length} rows found, <span className="text-green-400 font-semibold">{matchedCount} matched</span></p>
+                <button onClick={() => setRows([])} className="text-xs text-muted hover:text-foreground cursor-pointer">Upload a different file</button>
+              </div>
+              <div className="border border-border rounded-xl overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-surface-light/40 border-b border-border">
+                      <th className="text-left px-3 py-2 font-semibold text-muted uppercase tracking-wide">Row from File</th>
+                      <th className="text-left px-3 py-2 font-semibold text-muted uppercase tracking-wide w-64">Match to Product</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map(r => (
+                      <tr key={r.key} className="border-b border-border/50">
+                        <td className="px-3 py-2 align-top">
+                          <p className="font-medium text-foreground">{r.rawName}</p>
+                          <p className="text-[10px] text-muted">{[r.packing, r.dims].filter(Boolean).join(" · ")}</p>
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <select value={r.matchId} onChange={e => updateMatch(r.key, e.target.value)}
+                            className={`w-full bg-background border rounded-lg px-2 py-1.5 text-xs focus:outline-none cursor-pointer ${r.matchId ? "border-green-500/40 text-foreground" : "border-border text-muted"}`}>
+                            <option value="">— Skip —</option>
+                            {sortedProducts.map(p => <option key={p.id} value={p.id}>{p.name}{p.sku ? ` (${p.sku})` : ""}</option>)}
+                          </select>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="px-5 py-4 border-t border-border flex justify-end gap-3">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-muted cursor-pointer">Cancel</button>
+          {rows.length > 0 && (
+            <button onClick={apply} disabled={applying || matchedCount === 0}
+              className="flex items-center gap-1.5 px-5 py-2 bg-green-500 hover:bg-green-500/80 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg cursor-pointer">
+              <Check className="w-3.5 h-3.5" /> Apply to {matchedCount} Product{matchedCount !== 1 ? "s" : ""}
+            </button>
+          )}
         </div>
       </div>
     </div>

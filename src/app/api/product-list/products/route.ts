@@ -1,28 +1,27 @@
 import { ensureSheet, readSheet, clearAndWrite, writeRows } from "@/lib/google-sheets";
 
 const SHEET = "PL_Products";
-const HEADERS = ["id","sku","name","productType","fclQty","adminPct","grossProfitPct","whtPct","serviceCharges","eds","courierCharges","imageUrl","notes","active"];
+const HEADERS = ["id","sku","name","productType","fclQty","grossProfitPct","imageUrl","notes","active","specs","packagingDesc"];
 
 async function init() { await ensureSheet(SHEET, HEADERS); }
 
 function parseRow(r: string[]) {
   return {
     id: r[0] ?? "", sku: r[1] ?? "", name: r[2] ?? "", productType: r[3] ?? "FINISH GOODS",
-    fclQty: parseFloat(r[4]) || 1500, adminPct: parseFloat(r[5]) || 5,
-    grossProfitPct: parseFloat(r[6]) || 50, whtPct: parseFloat(r[7]) || 2,
-    serviceCharges: parseFloat(r[8]) || 0, eds: parseFloat(r[9]) || 0,
-    courierCharges: parseFloat(r[10]) || 0, imageUrl: r[11] ?? "",
-    notes: r[12] ?? "", active: r[13] !== "false",
+    fclQty: parseFloat(r[4]) || 1500,
+    grossProfitPct: parseFloat(r[5]) || 50,
+    imageUrl: r[6] ?? "",
+    notes: r[7] ?? "", active: r[8] !== "false",
+    specs: r[9] ?? "", packagingDesc: r[10] ?? "",
   };
 }
 
 function serializeRow(p: Record<string, unknown>): string[] {
   return [
     String(p.id ?? ""), String(p.sku ?? ""), String(p.name ?? ""), String(p.productType ?? "FINISH GOODS"),
-    String(p.fclQty ?? 1500), String(p.adminPct ?? 5), String(p.grossProfitPct ?? 50),
-    String(p.whtPct ?? 2), String(p.serviceCharges ?? 0), String(p.eds ?? 0),
-    String(p.courierCharges ?? 0), String(p.imageUrl ?? ""), String(p.notes ?? ""),
-    String(p.active !== false),
+    String(p.fclQty ?? 1500), String(p.grossProfitPct ?? 50),
+    String(p.imageUrl ?? ""), String(p.notes ?? ""),
+    String(p.active !== false), String(p.specs ?? ""), String(p.packagingDesc ?? ""),
   ];
 }
 
