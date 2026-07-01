@@ -543,7 +543,7 @@ export default function CNFPage() {
   const [catalogProducts, setCatalogProducts] = useState<CostProduct[]>([]);
   const [catalogMaterials, setCatalogMaterials] = useState<CostMaterial[]>([]);
   const [catalogRecipes, setCatalogRecipes] = useState<Map<string, CostRecipeItem[]>>(new Map());
-  const [catalogSettings, setCatalogSettings] = useState<CostSettings>({ fcRate: 275, currency: "PKR", targetCurrency: "USD" });
+  const [catalogSettings, setCatalogSettings] = useState<CostSettings>({ fcRate: 275, currency: "PKR", targetCurrency: "USD", adminPct: 5, whtPct: 2, serviceCharges: 0, eds: 0, courierCharges: 0 });
   const [loading, setLoading] = useState(true);
   const [showNew, setShowNew] = useState(false);
 
@@ -568,7 +568,11 @@ export default function CNFPage() {
     setFreightCards(f.freightCards ?? []);
     setCatalogProducts((prod.products ?? []).filter((p: CostProduct) => p.active !== false));
     setCatalogMaterials(mat.materials ?? []);
-    setCatalogSettings({ fcRate: settings.fcRate ?? 275, currency: settings.currency ?? "PKR", targetCurrency: settings.targetCurrency ?? "USD" });
+    setCatalogSettings({
+      fcRate: settings.fcRate ?? 275, currency: settings.currency ?? "PKR", targetCurrency: settings.targetCurrency ?? "USD",
+      adminPct: settings.adminPct ?? 5, whtPct: settings.whtPct ?? 2,
+      serviceCharges: settings.serviceCharges ?? 0, eds: settings.eds ?? 0, courierCharges: settings.courierCharges ?? 0,
+    });
     const recMap = new Map<string, CostRecipeItem[]>();
     for (const item of (rec.items ?? []) as CostRecipeItem[]) {
       if (!recMap.has(item.productId)) recMap.set(item.productId, []);
