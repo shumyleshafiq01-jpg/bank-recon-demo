@@ -37,7 +37,7 @@ interface DenominationCount {
   id: string; date: string; holder: "aa1" | "aa2"; denominations: Record<string, number>; total: number; countedBy: string; createdAt: string;
 }
 
-const HOLDER_LABELS: Record<CashHolder, string> = { main: "Main Box", aa1: "Moiz", aa2: "Hamza" };
+const HOLDER_LABELS: Record<CashHolder, string> = { main: "Main", aa1: "Moiz", aa2: "Hamza" };
 
 const STORAGE_KEY_ENTRIES = "pc_entries";
 const STORAGE_KEY_CONFIG = "pc_config";
@@ -964,7 +964,7 @@ export default function PettyCashPage() {
                                 rowCounter++;
                                 const rowNum = rowCounter;
                                 return (
-                                  <tr key={entry.id} className={rowNum % 2 === 0 ? "bg-surface-light/20" : ""}>
+                                  <tr key={entry.id} className={`align-top ${rowNum % 2 === 0 ? "bg-surface-light/20" : ""}`}>
                                     <td className="px-2 py-1.5 text-muted">{rowNum}</td>
                                     <td className="px-2 py-1.5">
                                       <input type="date" value={entry.date}
@@ -973,13 +973,16 @@ export default function PettyCashPage() {
                                         className={`w-full bg-transparent rounded px-1.5 py-1 text-foreground focus:outline-none text-xs ${editMode ? "border border-transparent hover:border-border focus:border-orange-500/50" : "border border-transparent cursor-default"}`}
                                       />
                                     </td>
-                                    <td className="px-2 py-1.5">
-                                      <input type="text" value={entry.acHead} title={entry.acHead}
-                                        onChange={(e) => updateEntry(entry.id, "acHead", e.target.value)}
-                                        placeholder={editMode ? "A/C Head..." : ""}
-                                        readOnly={!editMode}
-                                        className={`w-full bg-transparent rounded px-1.5 py-1 text-foreground focus:outline-none text-xs ${editMode ? "border border-transparent hover:border-border focus:border-orange-500/50" : "border border-transparent cursor-default"}`}
-                                      />
+                                    <td className="px-2 py-1.5 align-top">
+                                      {editMode ? (
+                                        <input type="text" value={entry.acHead}
+                                          onChange={(e) => updateEntry(entry.id, "acHead", e.target.value)}
+                                          placeholder="A/C Head..."
+                                          className="w-full bg-transparent rounded px-1.5 py-1 text-foreground focus:outline-none text-xs border border-transparent hover:border-border focus:border-orange-500/50"
+                                        />
+                                      ) : (
+                                        <p className="w-full px-1.5 py-1 text-foreground text-xs whitespace-normal break-words">{entry.acHead}</p>
+                                      )}
                                     </td>
                                     <td className="px-2 py-1.5">
                                       <input type="text" value={entry.txnNo}
@@ -989,13 +992,16 @@ export default function PettyCashPage() {
                                         className={`w-full bg-transparent rounded px-1.5 py-1 text-foreground focus:outline-none text-xs ${editMode ? "border border-transparent hover:border-border focus:border-orange-500/50" : "border border-transparent cursor-default"}`}
                                       />
                                     </td>
-                                    <td className="px-2 py-1.5">
-                                      <input type="text" value={entry.purpose} title={entry.purpose}
-                                        onChange={(e) => updateEntry(entry.id, "purpose", e.target.value)}
-                                        placeholder={editMode ? "Enter purpose..." : ""}
-                                        readOnly={!editMode}
-                                        className={`w-full bg-transparent rounded px-1.5 py-1 text-foreground focus:outline-none text-xs ${editMode ? "border border-transparent hover:border-border focus:border-orange-500/50" : "border border-transparent cursor-default"}`}
-                                      />
+                                    <td className="px-2 py-1.5 align-top">
+                                      {editMode ? (
+                                        <input type="text" value={entry.purpose}
+                                          onChange={(e) => updateEntry(entry.id, "purpose", e.target.value)}
+                                          placeholder="Enter purpose..."
+                                          className="w-full bg-transparent rounded px-1.5 py-1 text-foreground focus:outline-none text-xs border border-transparent hover:border-border focus:border-orange-500/50"
+                                        />
+                                      ) : (
+                                        <p className="w-full px-1.5 py-1 text-foreground text-xs whitespace-normal break-words">{entry.purpose}</p>
+                                      )}
                                     </td>
                                     <td className="px-2 py-1.5">
                                       <input type="text" value={entry.approvedBy}
