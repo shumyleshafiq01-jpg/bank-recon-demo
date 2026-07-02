@@ -1001,9 +1001,9 @@ export default function FundEstimatorPage() {
                 if (pdcRows.length === 0) return null;
                 return (
                   <div className="px-5 py-3 border-t border-border bg-red-500/5">
-                    <p className="text-xs text-red-400 font-semibold mb-1.5">Please note the PDC cheques issued:</p>
+                    <p className="text-xs text-black font-semibold mb-1.5">Please note the PDC cheques issued:</p>
                     {pdcRows.map((r, i) => (
-                      <p key={r.id} className="text-xs text-red-300/80 font-mono ml-2">
+                      <p key={r.id} className="text-xs text-black font-mono ml-2">
                         #{i + 1} {r.chequeNo ? `Cheque #${r.chequeNo}` : "—"} &nbsp;·&nbsp; Amount = {fmt(r.debit ?? r.credit ?? 0)} &nbsp;·&nbsp; PDC Date: {r.pdcDate} &nbsp;·&nbsp; {r.description}
                       </p>
                     ))}

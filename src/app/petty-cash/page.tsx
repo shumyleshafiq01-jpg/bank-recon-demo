@@ -37,7 +37,7 @@ interface DenominationCount {
   id: string; date: string; holder: "aa1" | "aa2"; denominations: Record<string, number>; total: number; countedBy: string; createdAt: string;
 }
 
-const HOLDER_LABELS: Record<CashHolder, string> = { main: "Main Box", aa1: "AA1 (Moiz)", aa2: "AA2 (Hamza)" };
+const HOLDER_LABELS: Record<CashHolder, string> = { main: "Main Box", aa1: "Moiz", aa2: "Hamza" };
 
 const STORAGE_KEY_ENTRIES = "pc_entries";
 const STORAGE_KEY_CONFIG = "pc_config";
@@ -144,6 +144,16 @@ function getMonthStartBalance(monthKey: string, entries: PettyCashEntry[], openi
   let running = openingBalance;
   for (const e of sorted) {
     if (!e.date || e.date.slice(0, 7) >= monthKey) break;
+    running += (e.cashIn ?? 0) - (e.cashOut ?? 0);
+  }
+  return running;
+}
+
+function getBalanceBeforeDate(dateStr: string, entries: PettyCashEntry[], openingBalance: number): number {
+  const sorted = [...entries].sort((a, b) => a.date.localeCompare(b.date));
+  let running = openingBalance;
+  for (const e of sorted) {
+    if (!e.date || e.date >= dateStr) break;
     running += (e.cashIn ?? 0) - (e.cashOut ?? 0);
   }
   return running;
@@ -258,8 +268,6 @@ export default function PettyCashPage() {
   const [entries, setEntries] = useState<PettyCashEntry[]>([]);
   const [openingBalance, setOpeningBalance] = useState(0);
   const [openingDate, setOpeningDate] = useState("");
-  const [editingOpening, setEditingOpening] = useState(false);
-  const [openingDraft, setOpeningDraft] = useState({ balance: 0, date: "" });
 
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
   const [calendarOpen, setCalendarOpen] = useState(false);
@@ -508,11 +516,6 @@ export default function PettyCashPage() {
     setUndoState(null);
   }
 
-  function saveOpeningBalance() {
-    setOpeningBalance(openingDraft.balance);
-    setOpeningDate(openingDraft.date);
-    setEditingOpening(false);
-  }
 
   function downloadXLS() {
     const wb = XLSX.utils.book_new();
@@ -563,6 +566,8 @@ export default function PettyCashPage() {
   if (!loaded) return null;
 
   const bm = balanceMap();
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayOpeningBalance = getBalanceBeforeDate(todayStr, entries, openingBalance);
 
   return (
     <div className="flex-1 flex flex-col h-screen">
@@ -596,53 +601,15 @@ export default function PettyCashPage() {
       <div className="flex-1 overflow-y-auto p-4 md:p-6">
         <div className="max-w-7xl mx-auto space-y-5 animate-fade-in">
 
-          {/* Opening Balance Card */}
+          {/* Opening Balance Card — view-only, auto-computed as of today from the running ledger */}
           <div className="bg-surface rounded-2xl border border-border p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-[10px] text-muted uppercase tracking-wide font-semibold">Opening Balance</p>
-                {editingOpening ? (
-                  <div className="flex items-center gap-3 mt-2">
-                    <div>
-                      <label className="text-[10px] text-muted block mb-1">Amount (PKR)</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={openingDraft.balance}
-                        onChange={(e) => setOpeningDraft((p) => ({ ...p, balance: parseFloat(e.target.value) || 0 }))}
-                        className="bg-background border border-border rounded-lg px-3 py-1.5 text-sm text-foreground focus:outline-none focus:border-orange-500/50 w-40"
-                        autoFocus
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-muted block mb-1">Date</label>
-                      <input
-                        type="date"
-                        value={openingDraft.date}
-                        onChange={(e) => setOpeningDraft((p) => ({ ...p, date: e.target.value }))}
-                        className="bg-background border border-border rounded-lg px-3 py-1.5 text-sm text-foreground focus:outline-none focus:border-orange-500/50"
-                      />
-                    </div>
-                    <div className="flex items-center gap-2 mt-4">
-                      <button onClick={saveOpeningBalance} className="px-4 py-1.5 bg-orange-500 hover:bg-orange-500/80 text-white text-xs font-semibold rounded-lg cursor-pointer transition-colors">Save</button>
-                      <button onClick={() => setEditingOpening(false)} className="px-3 py-1.5 text-xs text-muted hover:text-foreground cursor-pointer transition-colors">Cancel</button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-4 mt-1">
-                    <span className="text-xl font-bold text-orange-400">{fmtBal(openingBalance)}</span>
-                    {openingDate && <span className="text-xs text-muted">as of {openingDate}</span>}
-                  </div>
-                )}
+            <div>
+              <p className="text-[10px] text-muted uppercase tracking-wide font-semibold">Opening Balance</p>
+              <div className="flex items-center gap-4 mt-1">
+                <span className="text-xl font-bold text-orange-400">{fmtBal(todayOpeningBalance)}</span>
+                <span className="text-xs text-muted">as of {todayStr}</span>
               </div>
-              {!editingOpening && (
-                <button
-                  onClick={() => requireAuth(() => { setOpeningDraft({ balance: openingBalance, date: openingDate }); setEditingOpening(true); })}
-                  className="text-xs px-3 py-1.5 border border-border text-muted hover:text-foreground hover:border-orange-500/40 rounded-lg cursor-pointer transition-colors"
-                >
-                  Edit
-                </button>
-              )}
+              <p className="text-[10px] text-muted/70 mt-1">Auto-carried forward from yesterday&apos;s closing balance</p>
             </div>
           </div>
 
@@ -939,11 +906,11 @@ export default function PettyCashPage() {
                       <tr className="bg-orange-500/10 text-orange-400">
                         <th className="px-2 py-2.5 text-left font-semibold w-[36px]">#</th>
                         <th className="px-2 py-2.5 text-left font-semibold w-[110px]">Date</th>
-                        <th className="px-2 py-2.5 text-left font-semibold w-[160px]">A/C Head</th>
+                        <th className="px-2 py-2.5 text-left font-semibold w-[220px]">A/C Head</th>
                         <th className="px-2 py-2.5 text-left font-semibold w-[110px]">TXN / Cheque #</th>
                         <th className="px-2 py-2.5 text-left font-semibold">Purpose</th>
-                        <th className="px-2 py-2.5 text-left font-semibold w-[100px]">Approved By</th>
-                        <th className="px-2 py-2.5 text-left font-semibold w-[90px]">Holder</th>
+                        <th className="px-2 py-2.5 text-left font-semibold w-[70px]">Approved By</th>
+                        <th className="px-2 py-2.5 text-left font-semibold w-[60px]">Holder</th>
                         <th className="px-2 py-2.5 text-right font-semibold w-[120px]">Cash Out</th>
                         <th className="px-2 py-2.5 text-right font-semibold w-[120px]">Cash In</th>
                         <th className="px-2 py-2.5 text-right font-semibold w-[130px]">Balance</th>
@@ -1007,7 +974,7 @@ export default function PettyCashPage() {
                                       />
                                     </td>
                                     <td className="px-2 py-1.5">
-                                      <input type="text" value={entry.acHead}
+                                      <input type="text" value={entry.acHead} title={entry.acHead}
                                         onChange={(e) => updateEntry(entry.id, "acHead", e.target.value)}
                                         placeholder={editMode ? "A/C Head..." : ""}
                                         readOnly={!editMode}
@@ -1023,7 +990,7 @@ export default function PettyCashPage() {
                                       />
                                     </td>
                                     <td className="px-2 py-1.5">
-                                      <input type="text" value={entry.purpose}
+                                      <input type="text" value={entry.purpose} title={entry.purpose}
                                         onChange={(e) => updateEntry(entry.id, "purpose", e.target.value)}
                                         placeholder={editMode ? "Enter purpose..." : ""}
                                         readOnly={!editMode}
@@ -1043,12 +1010,12 @@ export default function PettyCashPage() {
                                         <select value={entry.holder} onChange={(e) => updateEntry(entry.id, "holder", e.target.value)}
                                           className="w-full bg-transparent border border-transparent hover:border-border focus:border-orange-500/50 rounded px-1.5 py-1 text-foreground focus:outline-none text-xs cursor-pointer">
                                           <option value="main">Main</option>
-                                          <option value="aa1">AA1</option>
-                                          <option value="aa2">AA2</option>
+                                          <option value="aa1">{HOLDER_LABELS.aa1}</option>
+                                          <option value="aa2">{HOLDER_LABELS.aa2}</option>
                                         </select>
                                       ) : (
                                         <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${entry.holder === "aa2" ? "bg-orange-500/10 text-orange-400" : entry.holder === "aa1" ? "bg-blue-500/10 text-blue-400" : "bg-surface-light/50 text-muted"}`}>
-                                          {entry.holder === "aa2" ? "AA2" : entry.holder === "aa1" ? "AA1" : "Main"}
+                                          {HOLDER_LABELS[entry.holder]}
                                         </span>
                                       )}
                                     </td>
