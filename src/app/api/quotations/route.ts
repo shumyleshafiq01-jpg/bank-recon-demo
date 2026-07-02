@@ -14,6 +14,7 @@ export const maxDuration = 300;
 export const runtime = "nodejs";
 
 import Anthropic from "@anthropic-ai/sdk";
+import * as XLSX from "xlsx";
 import { logUsage } from "@/lib/usage-tracker";
 
 const EXTRACT_PROMPT = `You are extracting line items from a vendor quotation / price quote.
@@ -95,6 +96,186 @@ type ParsedQuotation = {
   error?: string;
 };
 
+function blankQuotation(fileName: string, error?: string): ParsedQuotation {
+  return { fileName, vendor: "", quoteNumber: null, quoteDate: null, currency: "PKR", validUntil: null, lineItems: [], subtotal: null, tax: 0, grandTotal: null, notes: null, error };
+}
+
+/* ═══════════════════════════════════════════
+   LOCAL (NON-AI) EXTRACTION — no API cost, best-effort.
+   Only works on files with real text (digital PDFs, DOCX, CSV, XLS/XLSX).
+   Scanned/image quotations have no text layer to parse locally, so those
+   are reported back to the user rather than attempting OCR (unreliable
+   in this environment — use AI mode for scans instead).
+   ═══════════════════════════════════════════ */
+function getPDFJS() {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const PDFJS = require("pdf-parse/lib/pdf.js/v2.0.550/build/pdf.js");
+  PDFJS.disableWorker = true;
+  return PDFJS;
+}
+
+async function extractPdfTextLocal(buffer: Buffer): Promise<string> {
+  try {
+    const PDFJS = getPDFJS();
+    const doc = await PDFJS.getDocument(new Uint8Array(buffer));
+    let text = "";
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i);
+      const content = await page.getTextContent();
+      let lastY: number | undefined;
+      for (const item of content.items) {
+        const y = (item as { transform: number[] }).transform[5];
+        if (lastY !== undefined && lastY !== y) text += "\n";
+        text += (item as { str: string }).str;
+        lastY = y;
+      }
+      text += "\n\n";
+    }
+    doc.destroy();
+    return text;
+  } catch {
+    return "";
+  }
+}
+
+const LABOR_KEYWORDS = /\b(labor|labour|installation|install|service|manpower|transport|handling|loading|unloading|fitting|welding|commissioning|delivery|freight)\b/i;
+
+// Best-effort heuristic: a line item is any line ending in a properly
+// formatted amount (1-3 digits, comma-grouped thousands, 2 decimals),
+// optionally preceded by a small leading quantity. Everything before the
+// trailing amount(s) becomes the description.
+function localExtractLineItems(text: string): LineItem[] {
+  const AMOUNT_RX = /([\d,]{1,12}\.\d{2})\s*$/;
+  const LEADING_QTY_RX = /^(\d{1,4})\s+(?=\D)/;
+
+  const items: LineItem[] = [];
+  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+
+  for (const line of lines) {
+    const amountMatch = line.match(AMOUNT_RX);
+    if (!amountMatch) continue;
+
+    const amount = parseFloat(amountMatch[1].replace(/,/g, ""));
+    if (!amount || amount <= 0) continue;
+
+    let rest = line.slice(0, amountMatch.index).trim();
+    // Strip a second trailing number if present (rate column before total column)
+    const secondAmount = rest.match(AMOUNT_RX);
+    let unitPrice = amount;
+    if (secondAmount) {
+      unitPrice = parseFloat(secondAmount[1].replace(/,/g, ""));
+      rest = rest.slice(0, secondAmount.index).trim();
+    }
+
+    const qtyMatch = rest.match(LEADING_QTY_RX);
+    const quantity = qtyMatch ? parseInt(qtyMatch[1], 10) : 1;
+    const description = (qtyMatch ? rest.slice(qtyMatch[0].length) : rest).trim();
+
+    if (description.length < 3 || /^[\d\s.,#-]+$/.test(description)) continue; // not a real description
+
+    items.push({
+      description: description.substring(0, 120),
+      quantity: quantity || 1,
+      unit: null,
+      unitPrice: secondAmount ? unitPrice : amount,
+      totalPrice: amount,
+      isLabor: LABOR_KEYWORDS.test(description),
+    });
+  }
+
+  return items;
+}
+
+function parseCsvLocal(text: string): LineItem[] {
+  const rows = text.split(/\r?\n/).map((r) => r.split(",").map((c) => c.trim().replace(/^"|"$/g, ""))).filter((r) => r.some((c) => c));
+  if (rows.length < 2) return [];
+
+  const header = rows[0].map((h) => h.toLowerCase());
+  const findCol = (...names: string[]) => header.findIndex((h) => names.some((n) => h.includes(n)));
+  const descCol = findCol("description", "item", "particular");
+  const qtyCol = findCol("qty", "quantity");
+  const priceCol = findCol("unit price", "unit cost", "rate", "price");
+  const totalCol = findCol("total", "amount");
+  // "unit" alone (not "unit price"/"unit cost") — e.g. pcs, kg, hrs
+  const unitCol = header.findIndex((h, i) => (h === "unit" || h.includes("uom")) && i !== priceCol);
+
+  if (descCol === -1 || (priceCol === -1 && totalCol === -1)) return [];
+
+  const items: LineItem[] = [];
+  for (const row of rows.slice(1)) {
+    const description = row[descCol]?.trim();
+    if (!description) continue;
+    const quantity = qtyCol >= 0 ? parseFloat(row[qtyCol]?.replace(/,/g, "")) || 1 : 1;
+    const unitPrice = priceCol >= 0 ? parseFloat(row[priceCol]?.replace(/,/g, "")) || 0 : 0;
+    const totalPrice = totalCol >= 0 ? parseFloat(row[totalCol]?.replace(/,/g, "")) || 0 : quantity * unitPrice;
+    if (!totalPrice && !unitPrice) continue;
+    items.push({
+      description: description.substring(0, 120),
+      quantity,
+      unit: unitCol >= 0 ? (row[unitCol]?.trim() || null) : null,
+      unitPrice: unitPrice || (quantity ? totalPrice / quantity : totalPrice),
+      totalPrice: totalPrice || quantity * unitPrice,
+      isLabor: LABOR_KEYWORDS.test(description),
+    });
+  }
+  return items;
+}
+
+function parseExcelLocal(buffer: Buffer): LineItem[] {
+  try {
+    const wb = XLSX.read(buffer, { type: "buffer" });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const csv = XLSX.utils.sheet_to_csv(ws);
+    return parseCsvLocal(csv);
+  } catch {
+    return [];
+  }
+}
+
+async function parseQuotationLocal(file: File, buffer: Buffer, ext: string): Promise<ParsedQuotation> {
+  const fileName = file.name;
+  const vendor = fileName.replace(/\.[^.]+$/, "").substring(0, 80);
+
+  let lineItems: LineItem[] = [];
+
+  if (ext === "csv") {
+    lineItems = parseCsvLocal(buffer.toString("utf-8"));
+  } else if (ext === "xls" || ext === "xlsx") {
+    lineItems = parseExcelLocal(buffer);
+  } else if (ext === "pdf") {
+    const text = await extractPdfTextLocal(buffer);
+    if (text.replace(/\s/g, "").length < 50) {
+      return blankQuotation(fileName, `${fileName} looks like a scanned/image PDF — no text layer to parse locally. Please enable AI mode for this file.`);
+    }
+    lineItems = localExtractLineItems(text);
+  } else if (ext === "docx") {
+    try {
+      const JSZip = (await import("jszip")).default;
+      const zip = await JSZip.loadAsync(buffer);
+      const docXml = await zip.file("word/document.xml")?.async("text");
+      const text = docXml ? docXml.replace(/<[^>]+>/g, "\n").replace(/\n+/g, "\n").trim() : "";
+      lineItems = localExtractLineItems(text);
+    } catch {
+      return blankQuotation(fileName, `Could not read ${fileName} locally. Please enable AI mode for this file.`);
+    }
+  } else if (MIME_MAP[ext]) {
+    return blankQuotation(fileName, `${fileName} is an image — local parsing needs a text layer, which images don't have. Please enable AI mode for this file.`);
+  } else {
+    const text = buffer.toString("utf-8");
+    lineItems = localExtractLineItems(text);
+  }
+
+  if (lineItems.length === 0) {
+    return blankQuotation(fileName, `Local parser could not find any line items in ${fileName}. Try enabling AI mode.`);
+  }
+
+  const subtotal = lineItems.reduce((s, i) => s + i.totalPrice, 0);
+  return {
+    fileName, vendor, quoteNumber: null, quoteDate: null, currency: "PKR", validUntil: null,
+    lineItems, subtotal, tax: 0, grandTotal: subtotal, notes: null,
+  };
+}
+
 const MIME_MAP: Record<string, string> = {
   pdf: "application/pdf",
   png: "image/png",
@@ -107,10 +288,14 @@ const MIME_MAP: Record<string, string> = {
   tif: "image/tiff",
 };
 
-async function parseQuotation(file: File, category: string): Promise<ParsedQuotation> {
+async function parseQuotation(file: File, category: string, useAI: boolean): Promise<ParsedQuotation> {
   const fileName = file.name;
   const buffer = Buffer.from(await file.arrayBuffer());
   const ext = fileName.toLowerCase().split(".").pop() ?? "";
+
+  if (!useAI) {
+    return parseQuotationLocal(file, buffer, ext);
+  }
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -313,6 +498,7 @@ export async function POST(request: Request) {
     const formData = await request.formData();
     const files = formData.getAll("files") as File[];
     const category = (formData.get("category") as string) || "";
+    const useAI = formData.get("useAI") !== "false";
 
     if (files.length < 2) {
       return Response.json({ error: "Upload at least 2 quotations to compare." }, { status: 400 });
@@ -323,7 +509,7 @@ export async function POST(request: Request) {
     }
 
     const results = await Promise.all(
-      files.map((file) => parseQuotation(file, category))
+      files.map((file) => parseQuotation(file, category, useAI))
     );
 
     const successful = results.filter((r) => r.lineItems.length > 0);
@@ -340,8 +526,9 @@ export async function POST(request: Request) {
     // Semantic matching across vendors — groups the same real-world product
     // together even when brand spelling differs between scanned quotations.
     // Falls back to null (frontend uses plain description matching) if the
-    // AI call fails or its grouping can't be trusted.
-    const matchGroups = await groupLineItems(successful);
+    // AI call fails or its grouping can't be trusted. Skipped entirely in
+    // local mode, since the point of local mode is avoiding API calls.
+    const matchGroups = useAI ? await groupLineItems(successful) : null;
 
     return Response.json({
       success: true,

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   Landmark, ArrowLeft, Upload, X, FileText,
   AlertTriangle, Loader2, ChevronDown, Download,
-  Scale, Check,
+  Scale, Check, Sparkles,
 } from "lucide-react";
 import ApiCodeGate from "@/components/ApiCodeGate";
 
@@ -154,6 +154,7 @@ export default function QuotationsPage() {
   const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(false);
   const [includeLabor, setIncludeLabor] = useState(true);
+  const [useAI, setUseAI] = useState(true);
   const [result, setResult] = useState<ApiResponse | null>(null);
 
   const addFiles = useCallback((newFiles: File[]) => {
@@ -185,6 +186,7 @@ export default function QuotationsPage() {
     const formData = new FormData();
     for (const file of files) formData.append("files", file);
     formData.append("category", category);
+    formData.append("useAI", String(useAI));
 
     try {
       const res = await fetch("/api/quotations", { method: "POST", body: formData });
@@ -341,6 +343,29 @@ export default function QuotationsPage() {
           </div>
         )}
 
+        {/* AI / Local toggle */}
+        {files.length > 0 && (
+          <div className="flex items-center justify-between bg-surface rounded-xl border border-border px-4 py-3">
+            <div className="flex items-center gap-2.5">
+              {useAI ? <Sparkles className="w-4 h-4 text-amber-400" /> : <FileText className="w-4 h-4 text-muted" />}
+              <div>
+                <p className="text-sm font-semibold text-foreground">{useAI ? "AI Extraction" : "Local Parser"}</p>
+                <p className="text-[11px] text-muted">
+                  {useAI
+                    ? "Uses Anthropic API — handles scanned/handwritten quotes and matches items across vendors"
+                    : "Regex-based extraction — no API cost, but only works on digital PDFs/CSV/XLS with real text (not scans)"}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setUseAI(!useAI)}
+              className={`relative w-11 h-6 rounded-full transition-colors cursor-pointer ${useAI ? "bg-amber-500" : "bg-muted/30"}`}
+            >
+              <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${useAI ? "translate-x-5" : "translate-x-0"}`} />
+            </button>
+          </div>
+        )}
+
         {/* Compare button */}
         {files.length > 0 && (
           <button
@@ -351,7 +376,7 @@ export default function QuotationsPage() {
             {loading ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                Extracting quotation data… (AI is reading {files.length} files)
+                {useAI ? `Extracting quotation data… (AI is reading ${files.length} files)` : "Parsing files locally…"}
               </>
             ) : (
               <>
