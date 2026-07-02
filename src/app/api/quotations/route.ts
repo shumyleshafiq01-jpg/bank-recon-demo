@@ -52,6 +52,25 @@ Rules:
 - Do NOT skip any line item. Do NOT invent items.
 - If you see a discount line, include it as a line item with negative totalPrice`;
 
+// Fixes "mojibake" — UTF-8 punctuation (en/em dashes, curly quotes, bullets,
+// ellipsis, ©/®/°) that got misread as Windows-1252 and re-encoded, which is
+// a common artifact when the AI transcribes styled punctuation from a PDF.
+// Only replaces these exact known-bad byte sequences, so it can't corrupt
+// text that wasn't already broken.
+const MOJIBAKE_MAP: [string, string][] = [
+  ["â€“", "–"], ["â€”", "—"],
+  ["â€˜", "‘"], ["â€™", "’"],
+  ["â€œ", "“"], ["â€", "”"], ["â€", "”"],
+  ["â€¢", "•"], ["â€¦", "…"],
+  ["Â®", "®"], ["Â©", "©"], ["Â°", "°"], ["Â ", " "],
+];
+
+function fixMojibake(s: string): string {
+  let out = s;
+  for (const [bad, good] of MOJIBAKE_MAP) out = out.split(bad).join(good);
+  return out;
+}
+
 type LineItem = {
   description: string;
   quantity: number;
@@ -175,9 +194,9 @@ async function parseQuotation(file: File, category: string): Promise<ParsedQuota
     const parsed = JSON.parse(jsonMatch[0]);
 
     const lineItems: LineItem[] = (parsed.lineItems ?? []).map((item: Record<string, unknown>) => ({
-      description: String(item.description ?? "").substring(0, 120),
+      description: fixMojibake(String(item.description ?? "").substring(0, 120)),
       quantity: Number(item.quantity) || 1,
-      unit: item.unit ? String(item.unit) : null,
+      unit: item.unit ? fixMojibake(String(item.unit)) : null,
       unitPrice: Number(item.unitPrice) || 0,
       totalPrice: Number(item.totalPrice) || 0,
       isLabor: Boolean(item.isLabor),
@@ -185,8 +204,8 @@ async function parseQuotation(file: File, category: string): Promise<ParsedQuota
 
     return {
       fileName,
-      vendor: String(parsed.vendor ?? "Unknown Vendor").substring(0, 80),
-      quoteNumber: parsed.quoteNumber ? String(parsed.quoteNumber) : null,
+      vendor: fixMojibake(String(parsed.vendor ?? "Unknown Vendor").substring(0, 80)),
+      quoteNumber: parsed.quoteNumber ? fixMojibake(String(parsed.quoteNumber)) : null,
       quoteDate: parsed.quoteDate ? String(parsed.quoteDate) : null,
       currency: String(parsed.currency ?? "PKR").toUpperCase(),
       validUntil: parsed.validUntil ? String(parsed.validUntil) : null,
@@ -194,11 +213,98 @@ async function parseQuotation(file: File, category: string): Promise<ParsedQuota
       subtotal: typeof parsed.subtotal === "number" ? parsed.subtotal : null,
       tax: Number(parsed.tax) || 0,
       grandTotal: typeof parsed.grandTotal === "number" ? parsed.grandTotal : null,
-      notes: parsed.notes ? String(parsed.notes).substring(0, 200) : null,
+      notes: parsed.notes ? fixMojibake(String(parsed.notes).substring(0, 200)) : null,
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { fileName, vendor: "", quoteNumber: null, quoteDate: null, currency: "PKR", validUntil: null, lineItems: [], subtotal: null, tax: 0, grandTotal: null, notes: null, error: `AI extraction failed: ${msg}` };
+  }
+}
+
+type MatchGroup = { label: string; items: { vendor: number; item: number }[] };
+
+const MATCH_PROMPT = `You are matching line items across quotations from DIFFERENT vendors competing for the SAME procurement request. Each vendor may list several different brands/models on one sheet — some items refer to the exact same real-world product that another vendor also quoted (same brand AND same capacity/spec), just written with different spelling because these are handwritten/scanned documents read by OCR (e.g. "Ziewhic" and "Ziewnie" are likely the same brand misread two different ways). Other items are unique to a single vendor and have no match elsewhere.
+
+Group items that represent the SAME product/spec together. Rules:
+- Group by brand/model AND capacity/spec together — e.g. "5KW" only matches "5KW", never "6.2KW" or "10KW", even if the brand looks similar.
+- Account for spelling/OCR variance in brand names, but do not force a match just because two items are the same capacity with completely different brand names.
+- EVERY item from EVERY vendor must appear in exactly one group. Items with no match anywhere else still get their own group, containing just that one item.
+- When in doubt whether two items are the same product, do NOT group them — leave them separate. A wrong "no match" is far less costly than a wrong forced match.
+
+ITEMS TO GROUP:
+{{ITEMS}}
+
+Respond with ONLY a JSON array, no other text:
+[
+  { "label": "<short canonical description for this product, e.g. 'Ziewnic 5KW Lithium Battery'>", "items": [{"vendor": <vendor index>, "item": <item index>}, ...] }
+]`;
+
+async function groupLineItems(vendors: ParsedQuotation[]): Promise<MatchGroup[] | null> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return null;
+
+  const itemLines: string[] = [];
+  for (let vi = 0; vi < vendors.length; vi++) {
+    itemLines.push(`Vendor ${vi}: ${vendors[vi].vendor}`);
+    vendors[vi].lineItems.forEach((item, ii) => {
+      itemLines.push(`  Item ${ii}: "${item.description}" qty=${item.quantity} unit=${item.unit ?? "null"} unitPrice=${item.unitPrice} totalPrice=${item.totalPrice}${item.isLabor ? " (labor)" : ""}`);
+    });
+  }
+
+  const prompt = MATCH_PROMPT.replace("{{ITEMS}}", itemLines.join("\n"));
+
+  try {
+    const client = new Anthropic({ apiKey });
+    const response = await client.messages.stream({
+      model: "claude-sonnet-4-6",
+      max_tokens: 8000,
+      messages: [{ role: "user", content: [{ type: "text", text: prompt }] }],
+    }).finalMessage();
+
+    if (response.usage) {
+      logUsage("Quotations-Match", "claude-sonnet-4-6", response.usage.input_tokens, response.usage.output_tokens);
+    }
+
+    const textBlock = response.content.find((b) => b.type === "text");
+    const raw = textBlock && textBlock.type === "text" ? textBlock.text : "";
+    const jsonMatch = raw.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) return null;
+
+    const parsed = JSON.parse(jsonMatch[0]) as unknown;
+    if (!Array.isArray(parsed)) return null;
+
+    const groups: MatchGroup[] = parsed
+      .filter((g): g is { label: unknown; items: unknown } => typeof g === "object" && g !== null)
+      .map((g) => ({
+        label: fixMojibake(String((g as { label?: unknown }).label ?? "")),
+        items: Array.isArray((g as { items?: unknown }).items)
+          ? ((g as { items: unknown[] }).items)
+              .filter((it): it is { vendor: unknown; item: unknown } => typeof it === "object" && it !== null)
+              .map((it) => ({ vendor: Number((it as { vendor?: unknown }).vendor), item: Number((it as { item?: unknown }).item) }))
+              .filter((it) => Number.isInteger(it.vendor) && Number.isInteger(it.item))
+          : [],
+      }))
+      .filter((g) => g.label && g.items.length > 0);
+
+    // Validate coverage: every real item must be referenced exactly once.
+    // If the AI missed or duplicated anything, don't trust the grouping —
+    // fall back to per-item rows rather than risk silently dropping a line item.
+    const covered = new Set<string>();
+    for (const g of groups) {
+      for (const it of g.items) {
+        if (it.vendor < 0 || it.vendor >= vendors.length) return null;
+        if (it.item < 0 || it.item >= vendors[it.vendor].lineItems.length) return null;
+        const key = `${it.vendor}:${it.item}`;
+        if (covered.has(key)) return null; // duplicate reference
+        covered.add(key);
+      }
+    }
+    const totalItems = vendors.reduce((s, v) => s + v.lineItems.length, 0);
+    if (covered.size !== totalItems) return null; // missing coverage
+
+    return groups;
+  } catch {
+    return null;
   }
 }
 
@@ -231,10 +337,17 @@ export async function POST(request: Request) {
       }, { status: 400 });
     }
 
+    // Semantic matching across vendors — groups the same real-world product
+    // together even when brand spelling differs between scanned quotations.
+    // Falls back to null (frontend uses plain description matching) if the
+    // AI call fails or its grouping can't be trusted.
+    const matchGroups = await groupLineItems(successful);
+
     return Response.json({
       success: true,
       category,
       quotations: results,
+      matchGroups,
       errors,
     });
   } catch (err) {

@@ -50,10 +50,13 @@ type ParsedQuotation = {
   error?: string;
 };
 
+type MatchGroup = { label: string; items: { vendor: number; item: number }[] };
+
 type ApiResponse = {
   success?: boolean;
   category: string;
   quotations: ParsedQuotation[];
+  matchGroups?: MatchGroup[] | null;
   errors: string[];
   error?: string;
   details?: string[];
@@ -64,22 +67,51 @@ const fmt = (n: number, currency?: string) => {
   return n.toLocaleString("en-PK", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " " + c;
 };
 
-function buildComparisonTable(quotations: ParsedQuotation[], includeLabor: boolean) {
+type RowData = {
+  description: string;
+  prices: (number | null)[];
+  quantities: (number | null)[];
+  units: (string | null)[];
+  isLabor: boolean;
+  matchedVendorCount: number;
+};
+
+function buildComparisonTable(quotations: ParsedQuotation[], includeLabor: boolean, matchGroups?: MatchGroup[] | null) {
   const vendors = quotations.filter((q) => q.lineItems.length > 0);
   if (vendors.length === 0) return { rows: [], vendors: [], currency: "PKR" };
 
   const currency = vendors[0].currency;
 
+  // Prefer AI-grouped rows — matches the same real-world product across
+  // vendors even when brand names are spelled differently (handwritten/OCR
+  // quotations). Falls back to exact description matching if grouping
+  // wasn't available or couldn't be trusted.
+  if (matchGroups && matchGroups.length > 0) {
+    const rows: RowData[] = matchGroups.map((group) => {
+      const prices = new Array<number | null>(vendors.length).fill(null);
+      const quantities = new Array<number | null>(vendors.length).fill(null);
+      const units = new Array<string | null>(vendors.length).fill(null);
+      let isLabor = false;
+      let matchedVendorCount = 0;
+      let firstDescription = group.label;
+      for (const ref of group.items) {
+        const vendor = vendors[ref.vendor];
+        const item = vendor?.lineItems[ref.item];
+        if (!vendor || !item) continue;
+        if (prices[ref.vendor] === null) matchedVendorCount++;
+        prices[ref.vendor] = item.totalPrice;
+        quantities[ref.vendor] = item.quantity;
+        units[ref.vendor] = item.unit;
+        if (item.isLabor) isLabor = true;
+        if (!firstDescription) firstDescription = item.description;
+      }
+      return { description: firstDescription || "Unnamed item", prices, quantities, units, isLabor, matchedVendorCount };
+    });
+    return { rows: rows.filter((row) => includeLabor || !row.isLabor), vendors, currency };
+  }
+
   // Collect all unique descriptions (normalized for fuzzy match)
   const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, " ").replace(/\s+/g, " ").trim();
-
-  type RowData = {
-    description: string;
-    prices: (number | null)[];
-    quantities: (number | null)[];
-    units: (string | null)[];
-    isLabor: boolean;
-  };
 
   const descMap = new Map<string, RowData>();
   const descOrder: string[] = [];
@@ -94,10 +126,12 @@ function buildComparisonTable(quotations: ParsedQuotation[], includeLabor: boole
           quantities: new Array(vendors.length).fill(null),
           units: new Array(vendors.length).fill(null),
           isLabor: item.isLabor,
+          matchedVendorCount: 0,
         });
         descOrder.push(norm);
       }
       const row = descMap.get(norm)!;
+      if (row.prices[vi] === null) row.matchedVendorCount++;
       row.prices[vi] = item.totalPrice;
       row.quantities[vi] = item.quantity;
       row.units[vi] = item.unit;
@@ -165,7 +199,7 @@ export default function QuotationsPage() {
 
   const downloadCSV = () => {
     if (!result?.quotations) return;
-    const { rows, vendors, currency } = buildComparisonTable(result.quotations, includeLabor);
+    const { rows, vendors, currency } = buildComparisonTable(result.quotations, includeLabor, result.matchGroups);
     if (rows.length === 0 || vendors.length === 0) return;
 
     const headers = ["#", "Item Description", "Labor?", ...vendors.map((v) => v.vendor + ` (${currency})`)];
@@ -200,7 +234,7 @@ export default function QuotationsPage() {
   const canCompare = hasFiles && category && !loading;
 
   // Build comparison data
-  const comparison = result?.quotations ? buildComparisonTable(result.quotations, includeLabor) : null;
+  const comparison = result?.quotations ? buildComparisonTable(result.quotations, includeLabor, result.matchGroups) : null;
 
   return (
     <ApiCodeGate moduleName="Quotation Comparison">
@@ -396,7 +430,14 @@ export default function QuotationsPage() {
                     return (
                       <tr key={ri} className="border-b border-border/50 hover:bg-surface-light/50 transition-colors">
                         <td className="px-4 py-2.5 text-xs text-muted">{ri + 1}</td>
-                        <td className="px-4 py-2.5 text-foreground">{row.description}</td>
+                        <td className="px-4 py-2.5 text-foreground">
+                          {row.description}
+                          {row.matchedVendorCount <= 1 && (
+                            <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400" title="Only one vendor quoted this item — not compared against another price">
+                              Not compared
+                            </span>
+                          )}
+                        </td>
                         <td className="px-2 py-2.5 text-center">
                           <span className={`text-[10px] px-2 py-0.5 rounded-full ${
                             row.isLabor
