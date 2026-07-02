@@ -1,13 +1,13 @@
 import { ensureSheet, readSheet, clearAndWrite, writeRows } from "@/lib/google-sheets";
 
 const SHEET = "PL_Master";
-const HEADERS = ["id", "name", "unit", "category", "pricePerUnit", "updatedAt"];
+const HEADERS = ["id", "name", "unit", "category", "pricePerUnit", "updatedAt", "defaultUnitType"];
 
 async function init() { await ensureSheet(SHEET, HEADERS); }
 
 function parseRow(r: string[]) {
   return { id: r[0] ?? "", name: r[1] ?? "", unit: r[2] ?? "", category: r[3] ?? "",
-    pricePerUnit: parseFloat(r[4]) || 0, updatedAt: r[5] ?? "" };
+    pricePerUnit: parseFloat(r[4]) || 0, updatedAt: r[5] ?? "", defaultUnitType: (r[6] || "PCS") as "PCS" | "CONTAINER" | "FIXED" };
 }
 
 export async function GET() {
@@ -30,7 +30,7 @@ export async function POST(request: Request) {
       const rows = await readSheet(SHEET);
       const idx = rows.findIndex((r, i) => i > 0 && r[0] === m.id);
       const row = [String(m.id ?? ""), String(m.name ?? ""), String(m.unit ?? ""), String(m.category ?? ""),
-        String(m.pricePerUnit ?? 0), new Date().toISOString()];
+        String(m.pricePerUnit ?? 0), new Date().toISOString(), String(m.defaultUnitType ?? "PCS")];
       if (idx > 0) { rows[idx] = row; await clearAndWrite(SHEET, rows); }
       else { await writeRows(SHEET, [row]); }
       return Response.json({ saved: true });
@@ -46,7 +46,7 @@ export async function POST(request: Request) {
     if (body.action === "bulk" && body.materials) {
       const data = [HEADERS, ...body.materials.map(m => [
         String(m.id ?? ""), String(m.name ?? ""), String(m.unit ?? ""), String(m.category ?? ""),
-        String(m.pricePerUnit ?? 0), new Date().toISOString(),
+        String(m.pricePerUnit ?? 0), new Date().toISOString(), String(m.defaultUnitType ?? "PCS"),
       ])];
       await clearAndWrite(SHEET, data);
       return Response.json({ saved: true });

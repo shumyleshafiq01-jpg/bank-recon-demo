@@ -85,13 +85,23 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
     return calcCost(recipe, catalogMaterials, product, catalogSettings, qty || 1).fobPerCarton;
   }
 
+  // Master Freight Card stores the cost of one FULL CONTAINER to a destination.
+  // Each product's own Freight/Carton is that container cost divided by the
+  // product's FCL Container Qty (set in Product List) — different products pack
+  // differently into a container, so the per-carton freight differs per product.
+  function freightFor(productId: string, containerRate: number): number {
+    const product = catalogProducts.find(p => p.id === productId);
+    if (!product) return 0;
+    return Math.round((containerRate / (product.fclQty || 1500)) * 100) / 100;
+  }
+
   function pickDestination(card: FreightCard) {
     setDestination(card.destination);
     setCountry(card.country);
     setFreightPerCarton(card.freightPerCarton);
-    // Update existing products with new freight
+    // Recompute each product's own per-carton freight using its own FCL Container Qty
     setProducts(prev => prev.map(p => {
-      const freight = card.freightPerCarton;
+      const freight = p.productId ? freightFor(p.productId, card.freightPerCarton) : 0;
       return { ...p, freightPerCarton: freight, cnfPerCarton: p.fobPerCarton + freight };
     }));
   }
@@ -107,6 +117,7 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
         p.specs = product?.specs ?? "";
         p.packagingDesc = product?.packagingDesc ?? "";
         p.fobPerCarton = fobFor(String(value), p.qty);
+        p.freightPerCarton = freightFor(String(value), freightPerCarton);
         p.cnfPerCarton = p.fobPerCarton + p.freightPerCarton;
       } else if (field === "qty") {
         const qty = Number(value) || 1;
@@ -124,7 +135,7 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
   function addProduct() {
     setProducts(prev => [...prev, {
       productId: "", productName: "", sku: "", specs: "", packagingDesc: "",
-      qty: 1, fobPerCarton: 0, freightPerCarton, cnfPerCarton: freightPerCarton,
+      qty: 1, fobPerCarton: 0, freightPerCarton: 0, cnfPerCarton: 0,
     }]);
   }
 
@@ -214,7 +225,7 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
                     className="w-full border border-gray-200 rounded-lg px-3.5 py-2.5 text-base text-gray-900 focus:outline-none focus:border-blue-400 bg-white cursor-pointer">
                     <option value="">— Choose a destination —</option>
                     {freightCards.map(c => (
-                      <option key={c.id} value={c.id}>{c.destination}, {c.country} — ${c.freightPerCarton}/ctn</option>
+                      <option key={c.id} value={c.id}>{c.destination}, {c.country} — ${c.freightPerCarton}/container</option>
                     ))}
                   </select>
                 )}
@@ -230,8 +241,15 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
                       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-400" />
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-500 mb-1">Freight/Ctn (USD)</label>
-                    <input type="number" min={0} value={freightPerCarton} onChange={e => { const v = Math.max(0, parseFloat(e.target.value) || 0); setFreightPerCarton(v); setProducts(prev => prev.map(p => ({ ...p, freightPerCarton: v, cnfPerCarton: p.fobPerCarton + v }))); }}
+                    <label className="block text-xs text-gray-500 mb-1">Freight/Container (USD)</label>
+                    <input type="number" min={0} value={freightPerCarton} onChange={e => {
+                      const v = Math.max(0, parseFloat(e.target.value) || 0);
+                      setFreightPerCarton(v);
+                      setProducts(prev => prev.map(p => {
+                        const freight = p.productId ? freightFor(p.productId, v) : 0;
+                        return { ...p, freightPerCarton: freight, cnfPerCarton: p.fobPerCarton + freight };
+                      }));
+                    }}
                       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-400" />
                   </div>
                 </div>
@@ -256,7 +274,7 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
           {step === 2 && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <p className="text-sm text-gray-500">Freight: <span className="font-semibold text-gray-800">${freightPerCarton}/ctn</span> to <span className="font-semibold text-gray-800">{destination || "—"}</span></p>
+                <p className="text-sm text-gray-500">Freight: <span className="font-semibold text-gray-800">${freightPerCarton}/container</span> to <span className="font-semibold text-gray-800">{destination || "—"}</span> — per-carton freight is calculated automatically per product below</p>
                 <button onClick={addProduct} className="flex items-center gap-1.5 text-sm bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 cursor-pointer transition-colors">
                   <Plus className="w-4 h-4" /> Add Product
                 </button>
@@ -294,29 +312,31 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
                     </div>
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Packaging <span className="text-gray-400">(auto-filled from Product List, editable)</span></label>
-                      <input value={p.packagingDesc} onChange={e => updateProduct(i, "packagingDesc", e.target.value)} placeholder="e.g. 24 × 1 CTN — add manually if not on file"
+                      <input value={p.packagingDesc} onChange={e => updateProduct(i, "packagingDesc", e.target.value)} placeholder="e.g. 24 pcs × 1 Carton — add manually if not on file"
                         className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-400 bg-white" />
                     </div>
                   </div>
                   <div className="grid grid-cols-4 gap-3">
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">Qty (Ctns)</label>
-                      <input type="number" value={p.qty} onChange={e => updateProduct(i, "qty", parseFloat(e.target.value) || 0)}
-                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-400 bg-white text-right" />
+                      <label className="block text-xs text-gray-500 mb-1">Qty (Cartons)</label>
+                      <div className="w-full border border-gray-200 bg-gray-100 rounded-lg px-3 py-2 text-sm font-medium text-gray-700 text-right">
+                        1
+                      </div>
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">FOB/Ctn ($) — auto</label>
+                      <label className="block text-xs text-gray-500 mb-1">FOB/Carton ($) — auto</label>
                       <div className="w-full border border-gray-200 bg-gray-100 rounded-lg px-3 py-2 text-sm font-medium text-gray-700 text-right">
                         {p.productId ? fmtUSD(p.fobPerCarton) : "—"}
                       </div>
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">Freight/Ctn ($)</label>
-                      <input type="number" min={0} value={p.freightPerCarton} onChange={e => updateProduct(i, "freightPerCarton", parseFloat(e.target.value) || 0)}
-                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-400 bg-white text-right" />
+                      <label className="block text-xs text-gray-500 mb-1">Freight/Carton ($) — auto</label>
+                      <div className="w-full border border-gray-200 bg-gray-100 rounded-lg px-3 py-2 text-sm font-medium text-gray-700 text-right">
+                        {fmtUSD(p.freightPerCarton)}
+                      </div>
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">CNF/Ctn ($)</label>
+                      <label className="block text-xs text-gray-500 mb-1">CNF/Carton ($)</label>
                       <div className="w-full border border-blue-200 bg-blue-50 rounded-lg px-3 py-2 text-sm font-semibold text-blue-700 text-right">
                         {fmtUSD(p.cnfPerCarton)}
                       </div>
@@ -364,7 +384,7 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
                 <div className="grid grid-cols-2 gap-y-2.5 text-base">
                   <span className="text-gray-500">Client</span><span className="font-medium text-gray-900">{clientName || "—"}</span>
                   <span className="text-gray-500">Destination</span><span className="font-medium text-gray-900">{destination || "—"}{country ? `, ${country}` : ""}</span>
-                  <span className="text-gray-500">Freight/Ctn</span><span className="font-medium text-gray-900">${freightPerCarton}</span>
+                  <span className="text-gray-500">Freight/Container</span><span className="font-medium text-gray-900">${freightPerCarton}</span>
                   <span className="text-gray-500">Valid Until</span><span className="font-medium text-gray-900">{validTill ? fmtDate(validTill + "T00:00:00") : "—"}</span>
                   <span className="text-gray-500">Products</span><span className="font-medium text-gray-900">{validProducts} item{validProducts !== 1 ? "s" : ""}</span>
                   <span className="text-gray-500">Grand Total CNF</span><span className="font-bold text-blue-700 text-lg">{fmtUSD(totalCNF)}</span>
@@ -450,8 +470,13 @@ function MasterFreightSection({ cards, onUpdate }: { cards: FreightCard[]; onUpd
       <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
         <div className="flex items-center gap-2">
           <Anchor className="w-4 h-4 text-blue-500" />
-          <h3 className="text-sm font-semibold text-gray-900">Master Freight Card</h3>
-          <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-medium">{cards.length} destinations</span>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-gray-900">Master Freight Card</h3>
+              <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-medium">{cards.length} destinations</span>
+            </div>
+            <p className="text-[10px] text-gray-400 mt-0.5">Cost per full container — each product&apos;s per-carton freight is calculated automatically from this ÷ its FCL Container Qty</p>
+          </div>
         </div>
         <div className="flex gap-2">
           {editing ? (
@@ -483,7 +508,7 @@ function MasterFreightSection({ cards, onUpdate }: { cards: FreightCard[]; onUpd
               <tr className="bg-gray-50 border-b border-gray-100">
                 <th className="text-left px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Destination / Port</th>
                 <th className="text-left px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Country</th>
-                <th className="text-right px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Freight/Ctn (USD)</th>
+                <th className="text-right px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Freight/Container (USD)</th>
                 {editing && <th className="px-4 py-2.5 w-8" />}
               </tr>
             </thead>

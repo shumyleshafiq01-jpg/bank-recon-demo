@@ -5,13 +5,26 @@ import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
 
 /* ════════════════════════════════ TYPES */
-interface Material { id: string; name: string; unit: string; category: string; pricePerUnit: number; updatedAt: string; }
+interface Material { id: string; name: string; unit: string; category: string; pricePerUnit: number; updatedAt: string; defaultUnitType: "PCS" | "CONTAINER" | "FIXED"; }
 interface Product { id: string; sku: string; name: string; productType: string; fclQty: number; grossProfitPct: number; imageUrl: string; notes: string; active: boolean; specs: string; packagingDesc: string; }
 interface RecipeItem { id: string; productId: string; materialId: string; materialName: string; qty: number; unitType: "PCS" | "CONTAINER" | "FIXED"; sortOrder: number; }
 interface Settings { fcRate: number; currency: string; targetCurrency: string; adminPct: number; whtPct: number; serviceCharges: number; eds: number; courierCharges: number; }
 
 // Materials that must exist on every product's recipe (accountant-mandated standard export charges)
-const DEFAULT_RECIPE_MATERIALS = ["Unloading/Loading", "CONTAINER SEALS", "Labour Expense", "Craft Paper", "Clearing FOB", "Inspection", "Fumigation", "Certificate SGS"];
+// Standard export-charge materials that must exist on every product's recipe,
+// with the accountant-mandated default recipe type for each. Unconfirmed ones
+// default to FIXED until the accountant specifies otherwise (adjustable anytime
+// in Master Prices — this only sets the initial default when first added).
+const DEFAULT_RECIPE_MATERIALS: { name: string; defaultUnitType: "PCS" | "CONTAINER" | "FIXED" }[] = [
+  { name: "Unloading/Loading", defaultUnitType: "FIXED" },
+  { name: "CONTAINER SEALS", defaultUnitType: "FIXED" },
+  { name: "Labour Expense", defaultUnitType: "FIXED" },
+  { name: "Craft Paper", defaultUnitType: "FIXED" },
+  { name: "Clearing FOB", defaultUnitType: "FIXED" },
+  { name: "Inspection", defaultUnitType: "CONTAINER" },
+  { name: "Fumigation", defaultUnitType: "FIXED" },
+  { name: "Certificate SGS", defaultUnitType: "CONTAINER" },
+];
 
 const genId = () => Math.random().toString(36).slice(2, 10);
 const UNIT_TYPES = ["PCS", "CONTAINER", "FIXED"] as const;
@@ -215,10 +228,10 @@ export default function ProductListPage() {
   // creating any that are missing. Returns their material ids in DEFAULT_RECIPE_MATERIALS order.
   async function ensureStandardMaterials(): Promise<Material[]> {
     let current = materials;
-    for (const name of DEFAULT_RECIPE_MATERIALS) {
-      const exists = current.some(m => m.name.trim().toLowerCase() === name.toLowerCase());
+    for (const std of DEFAULT_RECIPE_MATERIALS) {
+      const exists = current.some(m => m.name.trim().toLowerCase() === std.name.toLowerCase());
       if (!exists) {
-        const mat: Material = { id: genId(), name, unit: "PCS", category: "Export Charges", pricePerUnit: 0, updatedAt: new Date().toISOString() };
+        const mat: Material = { id: genId(), name: std.name, unit: "PCS", category: "Export Charges", pricePerUnit: 0, updatedAt: new Date().toISOString(), defaultUnitType: std.defaultUnitType };
         await fetch("/api/product-list/master", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "upsert", material: mat }),
@@ -235,11 +248,11 @@ export default function ProductListPage() {
     const allMaterials = await ensureStandardMaterials();
     const existingMaterialIds = new Set(existingItems.map(i => i.materialId));
     const missing = DEFAULT_RECIPE_MATERIALS
-      .map(name => allMaterials.find(m => m.name.trim().toLowerCase() === name.toLowerCase()))
+      .map(std => allMaterials.find(m => m.name.trim().toLowerCase() === std.name.toLowerCase()))
       .filter((m): m is Material => !!m && !existingMaterialIds.has(m.id));
     const newItems: RecipeItem[] = missing.map((m, i) => ({
       id: genId(), productId, materialId: m.id, materialName: m.name,
-      qty: 1, unitType: "FIXED", sortOrder: existingItems.length + i,
+      qty: 1, unitType: m.defaultUnitType || "FIXED", sortOrder: existingItems.length + i,
     }));
     return [...existingItems, ...newItems];
   }
@@ -449,7 +462,10 @@ export default function ProductListPage() {
                                 <select value={item.materialId} onChange={e => {
                                   const m = materials.find(x => x.id === e.target.value);
                                   updateRecipeRow(idx, "materialId", e.target.value);
-                                  if (m) updateRecipeRow(idx, "materialName", m.name);
+                                  if (m) {
+                                    updateRecipeRow(idx, "materialName", m.name);
+                                    updateRecipeRow(idx, "unitType", m.defaultUnitType || "PCS");
+                                  }
                                 }} className="w-full bg-background border border-border rounded px-2 py-1 text-xs text-foreground focus:outline-none focus:border-green-500/50 cursor-pointer">
                                   <option value="">— Select —</option>
                                   {materials.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
@@ -737,7 +753,7 @@ export default function ProductListPage() {
 
       {/* ── PRODUCT FORM MODAL ── */}
       {showProductForm && (
-        <ProductForm item={editingProduct} onSave={saveProduct} onClose={() => { setShowProductForm(false); setEditingProduct(null); }} />
+        <ProductForm item={editingProduct} products={products} onSave={saveProduct} onClose={() => { setShowProductForm(false); setEditingProduct(null); }} />
       )}
 
       {showCartonImport && (
@@ -845,9 +861,24 @@ export default function ProductListPage() {
 }
 
 /* ════════════════════════════════ PRODUCT FORM */
-function ProductForm({ item, onSave, onClose }: { item: Product | null; onSave: (p: Product) => void; onClose: () => void }) {
-  const empty: Product = { id: Math.random().toString(36).slice(2, 10), sku: "", name: "", productType: "FINISH GOODS", fclQty: 1500, grossProfitPct: 50, imageUrl: "", notes: "", active: true, specs: "", packagingDesc: "" };
+const SKU_PREFIX_BY_TYPE: Record<string, string> = {
+  "FINISH GOODS": "SKU-FI", "RAW MATERIAL": "SKU-RM", "SEMI FINISHED": "SKU-SF", "PACKAGING": "SKU-PK",
+};
+
+function suggestNextSku(products: Product[], productType: string): string {
+  const prefix = SKU_PREFIX_BY_TYPE[productType] || "SKU-FI";
+  const rx = new RegExp(`^${prefix}-(\\d+)$`, "i");
+  const maxN = products.reduce((max, p) => {
+    const m = p.sku.match(rx);
+    return m ? Math.max(max, parseInt(m[1], 10)) : max;
+  }, 0);
+  return `${prefix}-${String(maxN + 1).padStart(2, "0")}`;
+}
+
+function ProductForm({ item, products, onSave, onClose }: { item: Product | null; products: Product[]; onSave: (p: Product) => void; onClose: () => void }) {
+  const empty: Product = { id: Math.random().toString(36).slice(2, 10), sku: suggestNextSku(products, "FINISH GOODS"), name: "", productType: "FINISH GOODS", fclQty: 1500, grossProfitPct: 50, imageUrl: "", notes: "", active: true, specs: "", packagingDesc: "" };
   const [f, setF] = useState<Product>(item ?? empty);
+  const [skuTouched, setSkuTouched] = useState(!!item);
   const [uploading, setUploading] = useState(false);
   const s = <K extends keyof Product>(k: K, v: Product[K]) => setF(p => ({ ...p, [k]: v }));
 
@@ -879,7 +910,7 @@ function ProductForm({ item, onSave, onClose }: { item: Product | null; onSave: 
             {([["sku","SKU *","text"],["name","Product Name *","text"],["specs","Specs / Description (for CNF quotes)","text"],["packagingDesc","Packaging (for CNF quotes)","text"],["notes","Product Packaging","text"]] as [keyof Product, string, string][]).map(([k, l, t]) => (
               <div key={k} className={k === "name" || k === "notes" || k === "specs" || k === "packagingDesc" ? "col-span-2" : ""}>
                 <label className="text-[10px] text-muted uppercase tracking-wide block mb-1">{l}</label>
-                <input type={t} value={String(f[k] ?? "")} onChange={e => s(k, e.target.value as never)} placeholder={k === "specs" ? "e.g. 24 PCS × 1kg" : k === "packagingDesc" ? "e.g. 24 × 1 CTN, 45x30x20cm" : ""} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50" />
+                <input type={t} value={String(f[k] ?? "")} onChange={e => { s(k, e.target.value as never); if (k === "sku") setSkuTouched(true); }} placeholder={k === "specs" ? "e.g. 24 PCS × 1kg" : k === "packagingDesc" ? "e.g. 24 × 1 CTN, 45x30x20cm" : ""} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50" />
               </div>
             ))}
             {/* Image upload */}
@@ -908,7 +939,7 @@ function ProductForm({ item, onSave, onClose }: { item: Product | null; onSave: 
               </div>
             </div>
             <div><label className="text-[10px] text-muted uppercase tracking-wide block mb-1">Product Type</label>
-              <select value={f.productType} onChange={e => s("productType", e.target.value)} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50 cursor-pointer">
+              <select value={f.productType} onChange={e => { s("productType", e.target.value); if (!item && !skuTouched) s("sku", suggestNextSku(products, e.target.value)); }} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50 cursor-pointer">
                 {PRODUCT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
               </select></div>
             {([["fclQty","FCL Container Qty"],["grossProfitPct","Gross Profit %"]] as [keyof Product, string][]).map(([k, l]) => (
@@ -1097,7 +1128,7 @@ function CartonImportModal({ products, onApply, onClose }: { products: Product[]
 
 /* ════════════════════════════════ MATERIAL FORM */
 function MaterialForm({ item, onSave, onClose }: { item: Material | null; onSave: (m: Material) => void; onClose: () => void }) {
-  const empty: Material = { id: Math.random().toString(36).slice(2, 10), name: "", unit: "PCS", category: "Raw Material", pricePerUnit: 0, updatedAt: "" };
+  const empty: Material = { id: Math.random().toString(36).slice(2, 10), name: "", unit: "PCS", category: "Raw Material", pricePerUnit: 0, updatedAt: "", defaultUnitType: "PCS" };
   const [f, setF] = useState<Material>(item ?? empty);
   const UNITS = ["PCS", "KG", "GRAM", "LITRE", "METER", "CARTON", "BOTTLE", "POUCH", "CONTAINER"];
   return (
@@ -1112,6 +1143,13 @@ function MaterialForm({ item, onSave, onClose }: { item: Material | null; onSave
           <div><label className="text-[10px] text-muted uppercase tracking-wide block mb-1">Category</label>
             <select value={f.category} onChange={e => setF(p => ({ ...p, category: e.target.value }))} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50 cursor-pointer">
               {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
+        </div>
+        <div>
+          <label className="text-[10px] text-muted uppercase tracking-wide block mb-1">Default Recipe Type</label>
+          <select value={f.defaultUnitType} onChange={e => setF(p => ({ ...p, defaultUnitType: e.target.value as Material["defaultUnitType"] }))} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50 cursor-pointer">
+            {UNIT_TYPES.map(u => <option key={u} value={u}>{u === "PCS" ? "PCS (×qty)" : u === "CONTAINER" ? "CONTAINER (÷FCL)" : "FIXED (flat)"}</option>)}
+          </select>
+          <p className="text-[10px] text-muted mt-1">Auto-selected whenever this material is added to a product&apos;s recipe.</p>
         </div>
         <div><label className="text-[10px] text-muted uppercase tracking-wide block mb-1">Price per Unit (PKR) *</label>
           <input type="number" step="0.01" value={f.pricePerUnit} onChange={e => setF(p => ({ ...p, pricePerUnit: parseFloat(e.target.value) || 0 }))} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50" /></div>

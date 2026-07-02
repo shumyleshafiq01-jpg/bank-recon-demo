@@ -108,7 +108,7 @@ export default async function CNFSharePage({ params }: { params: Promise<{ id: s
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ background: "#f8f9fb" }}>
-                  {["#", "Product", "Qty (Ctns)", "FOB/Ctn", "Freight/Ctn", "CNF/Ctn", "Total CNF"].map((h, i) => (
+                  {["#", "Product", "Qty (Cartons)", "FOB/Carton", "Freight/Carton", "CNF/Carton", "Total CNF"].map((h, i) => (
                     <th key={h} style={{ padding: "10px 12px", textAlign: i >= 2 ? "right" : "left", fontSize: 10, textTransform: "uppercase", letterSpacing: 1, color: "#888", fontWeight: 700, borderBottom: "2px solid #e8eaed" }}>{h}</th>
                   ))}
                 </tr>
