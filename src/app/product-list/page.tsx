@@ -1,12 +1,13 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
-import { ArrowLeft, Plus, Trash2, Pencil, X, Save, Lock, Search, Package, List, DollarSign, Settings2, ChevronRight, ChevronDown, ExternalLink, Copy, Ship, Upload, Check } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Pencil, X, Save, Lock, Search, Package, List, DollarSign, Settings2, ChevronRight, ChevronDown, ExternalLink, Copy, Ship, Upload, Check, Tag } from "lucide-react";
 import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
 
 /* ════════════════════════════════ TYPES */
 interface Material { id: string; name: string; unit: string; category: string; pricePerUnit: number; updatedAt: string; defaultUnitType: "PCS" | "CONTAINER" | "FIXED"; }
-interface Product { id: string; sku: string; name: string; productType: string; fclQty: number; grossProfitPct: number; imageUrl: string; notes: string; active: boolean; specs: string; packagingDesc: string; }
+interface Brand { id: string; name: string; address: string; city: string; country: string; logoUrl: string; createdAt: string; }
+interface Product { id: string; sku: string; name: string; productType: string; fclQty: number; grossProfitPct: number; imageUrl: string; notes: string; active: boolean; specs: string; packagingDesc: string; brandId: string; }
 interface RecipeItem { id: string; productId: string; materialId: string; materialName: string; qty: number; unitType: "PCS" | "CONTAINER" | "FIXED"; sortOrder: number; }
 interface Settings { fcRate: number; currency: string; targetCurrency: string; adminPct: number; whtPct: number; serviceCharges: number; eds: number; courierCharges: number; }
 
@@ -76,9 +77,12 @@ function calcCost(recipe: RecipeItem[], materials: Material[], product: Product,
   const sellingUSD  = r(cogUSD * (1 + product.grossProfitPct / 100));
   const sellingPerCarton = r(sellingUSD / quoteQty);
   const whtUSD      = r(sellingUSD * (settings.whtPct / 100));
-  const fobTotal    = r(sellingUSD + whtUSD + settings.serviceCharges + settings.eds + settings.courierCharges);
+  const serviceChargesAmt = r(sellingUSD * (settings.serviceCharges / 100));
+  const edsAmt            = r(sellingUSD * (settings.eds / 100));
+  const courierChargesAmt = r(sellingUSD * (settings.courierCharges / 100));
+  const fobTotal    = r(sellingUSD + whtUSD + serviceChargesAmt + edsAmt + courierChargesAmt);
   const fobPerCarton = r(fobTotal / quoteQty);
-  return { cogPerCarton, cogTotal, adminAmt, cogWithAdmin, cogUSD, sellingUSD, sellingPerCarton, whtUSD, fobTotal, fobPerCarton,
+  return { cogPerCarton, cogTotal, adminAmt, cogWithAdmin, cogUSD, sellingUSD, sellingPerCarton, whtUSD, serviceChargesAmt, edsAmt, courierChargesAmt, fobTotal, fobPerCarton,
     // legacy alias for price list tab
     cogPKR: cogPerCarton, fobUSD: fobPerCarton };
 }
@@ -86,7 +90,7 @@ function calcCost(recipe: RecipeItem[], materials: Material[], product: Product,
 /* ════════════════════════════════ MAIN */
 export default function ProductListPage() {
   const router = useRouter();
-  const [tab, setTab] = useState<"master" | "products" | "pricelist" | null>(null);
+  const [tab, setTab] = useState<"master" | "products" | "pricelist" | "brands" | null>(null);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [recipes, setRecipes] = useState<Map<string, RecipeItem[]>>(new Map());
@@ -102,6 +106,7 @@ export default function ProductListPage() {
     master_aa1: true,  master_aa2: true,
     products_aa1: true, products_aa2: true,
     pricelist_aa1: true, pricelist_aa2: true,
+    brands_aa1: true, brands_aa2: true,
   });
   const [savingAccess, setSavingAccess] = useState(false);
 
@@ -121,6 +126,11 @@ export default function ProductListPage() {
   const [showMaterialForm, setShowMaterialForm] = useState(false);
   const [matCatFilter, setMatCatFilter] = useState("");
 
+  // Brands
+  const [brands, setBrands] = useState<Brand[]>([]);
+  const [editingBrand, setEditingBrand] = useState<Brand | null>(null);
+  const [showBrandForm, setShowBrandForm] = useState(false);
+
   // Settings edit
   const [editSettings, setEditSettings] = useState(false);
   const [settingsDraft, setSettingsDraft] = useState<Settings>({ fcRate: 275, currency: "PKR", targetCurrency: "USD", adminPct: 5, whtPct: 2, serviceCharges: 0, eds: 0, courierCharges: 0 });
@@ -133,6 +143,7 @@ export default function ProductListPage() {
     Promise.all([
       fetch("/api/product-list/master").then(r => r.json()).then(d => setMaterials(d.materials ?? [])),
       fetch("/api/product-list/products").then(r => r.json()).then(d => setProducts(d.products ?? [])),
+      fetch("/api/product-list/brands").then(r => r.json()).then(d => setBrands(d.brands ?? [])),
       fetch("/api/product-list/settings").then(r => r.json()).then(d => {
         setSettings(d);
         // Load access config from settings
@@ -161,7 +172,7 @@ export default function ProductListPage() {
     login(s); setGearPin(""); setGearPinErr("");
   }
 
-  function canAccess(section: "master" | "products" | "pricelist"): boolean {
+  function canAccess(section: "master" | "products" | "pricelist" | "brands"): boolean {
     if (!session) return false;
     if (session.role === "accountant") return true;
     return accessConfig[`${section}_${session.role}` as keyof typeof accessConfig];
@@ -313,6 +324,21 @@ export default function ProductListPage() {
     setMaterials(prev => prev.filter(m => m.id !== id));
   }
 
+  async function saveBrand(b: Brand) {
+    await fetch("/api/product-list/brands", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "upsert", brand: b }),
+    });
+    setBrands(prev => prev.some(x => x.id === b.id) ? prev.map(x => x.id === b.id ? b : x) : [...prev, b]);
+    setShowBrandForm(false); setEditingBrand(null);
+  }
+
+  async function deleteBrand(id: string) {
+    if (!confirm("Delete this brand? Products already tagged with it will keep their brandId but show as unassigned.")) return;
+    await fetch("/api/product-list/brands", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete", brand: { id } }) });
+    setBrands(prev => prev.filter(b => b.id !== id));
+  }
+
   async function saveSettings() {
     await fetch("/api/product-list/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(settingsDraft) });
     setSettings(settingsDraft);
@@ -337,6 +363,8 @@ export default function ProductListPage() {
   const fmt2 = (n: number) => n.toFixed(2);
   const filteredProducts = products.filter(p => !search || p.name.toLowerCase().includes(search.toLowerCase()) || p.sku.toLowerCase().includes(search.toLowerCase()));
   const filteredMaterials = materials.filter(m => (!search || m.name.toLowerCase().includes(search.toLowerCase())) && (!matCatFilter || m.category === matCatFilter));
+  const filteredBrands = brands.filter(b => !search || b.name.toLowerCase().includes(search.toLowerCase()));
+  const brandName = (id: string) => brands.find(b => b.id === id)?.name || "—";
 
   if (!loaded) return null;
 
@@ -505,9 +533,9 @@ export default function ProductListPage() {
                     [`÷ FC Rate (${settings.fcRate})`, `USD ${fmt2(calc.cogUSD)}`, "text-blue-400"],
                     [`× GP ${(productDraft ?? selectedProduct).grossProfitPct}%`, quoteQty > 1 ? `USD ${fmt2(calc.sellingUSD)} total / ${fmt2(calc.sellingPerCarton)}/ctn` : `USD ${fmt2(calc.sellingUSD)}`, "text-green-400 font-bold"],
                     [`WHT ${settings.whtPct}%`, `USD ${fmt2(calc.whtUSD)}`, "text-muted"],
-                    ["Service Charges", `USD ${fmt2(settings.serviceCharges)}`, "text-muted"],
-                    ["EDS", `USD ${fmt2(settings.eds)}`, "text-muted"],
-                    ["Courier Charges", `USD ${fmt2(settings.courierCharges)}`, "text-muted"],
+                    [`Service Charges ${settings.serviceCharges}%`, `USD ${fmt2(calc.serviceChargesAmt)}`, "text-muted"],
+                    [`EDS ${settings.eds}%`, `USD ${fmt2(calc.edsAmt)}`, "text-muted"],
+                    [`Courier Charges ${settings.courierCharges}%`, `USD ${fmt2(calc.courierChargesAmt)}`, "text-muted"],
                   ].map(([label, value, cls]) => (
                     <div key={String(label)} className="flex items-center justify-between border-b border-border/50 pb-2">
                       <span className="text-[11px] text-muted">{label}</span>
@@ -539,21 +567,22 @@ export default function ProductListPage() {
 
             {/* Module cards — shown when no section selected */}
             {!tab && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mt-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4 mt-4">
                 {([
                   { key: "products" as const, Icon: Package, label: "Products", desc: "Manage products, recipes & BOM. Auto-calculates FOB price per carton.", count: products.length, color: "green", external: false, route: "", newTab: false },
                   { key: "master" as const, Icon: List, label: "Master Prices", desc: "Raw material & component prices. Update once — all products recalculate.", count: materials.length, color: "blue", external: false, route: "", newTab: false },
                   { key: "pricelist" as const, Icon: DollarSign, label: "Price List", desc: "Calculated price list with images. Generate shareable links per product.", count: products.length, color: "amber", external: false, route: "", newTab: false },
+                  { key: "brands" as const, Icon: Tag, label: "Brands", desc: "Manage brands (Kafi, Essence, etc.) — name, address, logo. Assign products to a brand.", count: brands.length, color: "violet", external: false, route: "", newTab: false },
                   { key: "cnf" as const, Icon: Ship, label: "CNF Quotations", desc: "Generate immutable CNF export quotes — master freight card, shareable client price list.", count: null, color: "sky", external: true, route: "/cnf", newTab: false },
                   { key: "cnf-public" as const, Icon: ExternalLink, label: "Client Quotation List", desc: "Public link — clients & CNF editors browse all active quotes and open their price list. No login required.", count: null, color: "teal", external: true, route: "/cnf/all-quotes", newTab: true },
                 ]).map(({ key, Icon, label, desc, count, color, external, route, newTab }) => {
-                  const allowed = external ? true : canAccess(key as "master" | "products" | "pricelist");
+                  const allowed = external ? true : canAccess(key as "master" | "products" | "pricelist" | "brands");
                   return (
                     <button key={key}
                       onClick={() => {
                         if (!allowed) return;
                         if (external) { if (newTab) window.open(route, "_blank"); else router.push(route); return; }
-                        setTab(key as "master" | "products" | "pricelist"); setSearch("");
+                        setTab(key as "master" | "products" | "pricelist" | "brands"); setSearch("");
                       }}
                       className={`group text-left p-5 bg-white/65 backdrop-blur-sm rounded-2xl border transition-all shadow-sm ${
                         allowed
@@ -585,7 +614,7 @@ export default function ProductListPage() {
                 <button onClick={() => { setTab(null); setSearch(""); }}
                   className="flex items-center gap-2 text-sm text-muted hover:text-foreground cursor-pointer transition-colors">
                   <ArrowLeft className="w-4 h-4" />
-                  <span className="font-semibold">{tab === "products" ? "Products" : tab === "master" ? "Master Prices" : "Price List"}</span>
+                  <span className="font-semibold">{tab === "products" ? "Products" : tab === "master" ? "Master Prices" : tab === "brands" ? "Brands" : "Price List"}</span>
                 </button>
                 <div className="flex items-center gap-2">
                   {(tab === "master" || tab === "pricelist") && (
@@ -601,9 +630,10 @@ export default function ProductListPage() {
                   {tab !== "pricelist" && (
                     <button onClick={() => requireAuth(() => {
                       if (tab === "products") { setEditingProduct(null); setShowProductForm(true); }
+                      else if (tab === "brands") { setEditingBrand(null); setShowBrandForm(true); }
                       else { setEditingMaterial(null); setShowMaterialForm(true); }
                     })} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-green-500 hover:bg-green-500/80 text-white rounded-lg cursor-pointer">
-                      <Plus className="w-3 h-3" /> Add {tab === "products" ? "Product" : "Material"}
+                      <Plus className="w-3 h-3" /> Add {tab === "products" ? "Product" : tab === "brands" ? "Brand" : "Material"}
                     </button>
                   )}
                 </div>
@@ -636,12 +666,13 @@ export default function ProductListPage() {
                     <th className="px-4 py-3 text-left font-semibold w-[120px]">SKU</th>
                     <th className="px-4 py-3 text-left font-semibold">Product Name</th>
                     <th className="px-4 py-3 text-left font-semibold w-[120px]">Type</th>
+                    <th className="px-4 py-3 text-left font-semibold w-[110px]">Brand</th>
                     <th className="px-4 py-3 text-right font-semibold w-[90px]">GP%</th>
                     <th className="px-4 py-3 text-right font-semibold w-[100px]">FOB (USD)</th>
                     <th className="px-4 py-3 text-center w-[80px]">Actions</th>
                   </tr></thead>
                   <tbody>
-                    {filteredProducts.length === 0 && <tr><td colSpan={7} className="px-4 py-10 text-center text-muted">No products yet. Click "Add Product" to get started.</td></tr>}
+                    {filteredProducts.length === 0 && <tr><td colSpan={8} className="px-4 py-10 text-center text-muted">No products yet. Click "Add Product" to get started.</td></tr>}
                     {filteredProducts.map((p, i) => {
                       const recipe = recipes.get(p.id) ?? [];
                       const calc = calcCost(recipe, materials, p, settings);
@@ -651,6 +682,7 @@ export default function ProductListPage() {
                           <td className="px-4 py-3 font-mono text-[11px] text-muted">{p.sku}</td>
                           <td className="px-4 py-3 font-semibold text-foreground">{p.name}</td>
                           <td className="px-4 py-3"><span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 font-semibold">{p.productType}</span></td>
+                          <td className="px-4 py-3">{p.brandId ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-400 font-semibold">{brandName(p.brandId)}</span> : <span className="text-[10px] text-red-400">Unassigned</span>}</td>
                           <td className="px-4 py-3 text-right text-muted">{p.grossProfitPct}%</td>
                           <td className="px-4 py-3 text-right font-mono font-bold text-green-400">{recipe.length > 0 ? `$${fmt2(calc.fobUSD)}` : "—"}</td>
                           <td className="px-4 py-3">
@@ -720,7 +752,10 @@ export default function ProductListPage() {
                         </div>
                       )}
                       <div className="p-4">
-                        <p className="text-[10px] font-mono text-muted">{p.sku}</p>
+                        <div className="flex items-center justify-between">
+                          <p className="text-[10px] font-mono text-muted">{p.sku}</p>
+                          {p.brandId && <span className="text-[9px] px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-400 font-semibold">{brandName(p.brandId)}</span>}
+                        </div>
                         <p className="text-sm font-bold text-foreground mt-0.5 leading-snug">{p.name}</p>
                         <div className="flex items-center justify-between mt-3">
                           <div>
@@ -747,13 +782,45 @@ export default function ProductListPage() {
                 {filteredProducts.length === 0 && <div className="col-span-3 py-12 text-center text-muted">No products yet.</div>}
               </div>
             )}
+
+            {/* ── BRANDS TAB ── */}
+            {tab === "brands" && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredBrands.map(b => (
+                  <div key={b.id} className="bg-surface rounded-2xl border border-border overflow-hidden hover:border-violet-500/40 transition-all p-4">
+                    <div className="flex items-start gap-3">
+                      {b.logoUrl ? (
+                        <img src={b.logoUrl} alt={b.name} className="w-14 h-14 rounded-lg object-cover border border-border shrink-0" />
+                      ) : (
+                        <div className="w-14 h-14 rounded-lg border border-dashed border-border bg-surface-light/30 flex items-center justify-center shrink-0">
+                          <Tag className="w-5 h-5 text-muted/40" />
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-foreground leading-snug truncate">{b.name}</p>
+                        <p className="text-[11px] text-muted mt-0.5">{[b.city, b.country].filter(Boolean).join(", ") || "—"}</p>
+                        {b.address && <p className="text-[10px] text-muted mt-0.5 line-clamp-2">{b.address}</p>}
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between mt-3 pt-3 border-t border-border/50">
+                      <span className="text-[10px] text-muted">{products.filter(p => p.brandId === b.id).length} product(s)</span>
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => requireAuth(() => { setEditingBrand(b); setShowBrandForm(true); })} className="p-1 text-muted hover:text-violet-400 cursor-pointer"><Pencil className="w-3.5 h-3.5" /></button>
+                        <button onClick={() => requireAuth(() => deleteBrand(b.id))} className="p-1 text-muted hover:text-red-400 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {filteredBrands.length === 0 && <div className="col-span-3 py-12 text-center text-muted">No brands yet. Click "Add Brand" to get started.</div>}
+              </div>
+            )}
           </div>
         </div>
       )}
 
       {/* ── PRODUCT FORM MODAL ── */}
       {showProductForm && (
-        <ProductForm item={editingProduct} products={products} onSave={saveProduct} onClose={() => { setShowProductForm(false); setEditingProduct(null); }} />
+        <ProductForm item={editingProduct} products={products} brands={brands} onSave={saveProduct} onClose={() => { setShowProductForm(false); setEditingProduct(null); }} />
       )}
 
       {showCartonImport && (
@@ -763,6 +830,11 @@ export default function ProductListPage() {
       {/* ── MATERIAL FORM MODAL ── */}
       {showMaterialForm && (
         <MaterialForm item={editingMaterial} onSave={saveMaterial} onClose={() => { setShowMaterialForm(false); setEditingMaterial(null); }} />
+      )}
+
+      {/* ── BRAND FORM MODAL ── */}
+      {showBrandForm && (
+        <BrandForm item={editingBrand} onSave={saveBrand} onClose={() => { setShowBrandForm(false); setEditingBrand(null); }} />
       )}
 
       {/* ── SETTINGS MODAL ── */}
@@ -777,7 +849,7 @@ export default function ProductListPage() {
             ))}
             <div className="pt-2 border-t border-border">
               <p className="text-[10px] text-green-400 uppercase tracking-wide font-semibold mb-2">Global Cost Settings — same for every product</p>
-              {[["Admin %", "adminPct", "number"], ["WHT %", "whtPct", "number"], ["Service Charges (USD)", "serviceCharges", "number"], ["EDS (USD)", "eds", "number"], ["Courier Charges (USD)", "courierCharges", "number"]].map(([l, k, t]) => (
+              {[["Admin %", "adminPct", "number"], ["WHT %", "whtPct", "number"], ["Service Charges %", "serviceCharges", "number"], ["EDS %", "eds", "number"], ["Courier Charges %", "courierCharges", "number"]].map(([l, k, t]) => (
                 <div key={k} className="mb-3"><label className="text-[10px] text-muted uppercase tracking-wide block mb-1">{l}</label>
                   <input type={t} step="0.01" value={String(settingsDraft[k as keyof Settings])} onChange={e => setSettingsDraft(p => ({ ...p, [k]: t === "number" ? parseFloat(e.target.value) || 0 : e.target.value }))}
                     className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50" /></div>
@@ -819,7 +891,7 @@ export default function ProductListPage() {
                       <th className="text-center py-1 font-semibold">Hamza (AA2)</th>
                     </tr></thead>
                     <tbody>
-                      {([["Master Prices","master"],["Products & Recipes","products"],["Price List","pricelist"]] as [string,string][]).map(([label, section]) => (
+                      {([["Master Prices","master"],["Products & Recipes","products"],["Price List","pricelist"],["Brands","brands"]] as [string,string][]).map(([label, section]) => (
                         <tr key={section} className="border-t border-border/40">
                           <td className="py-2 text-foreground">{label}</td>
                           {(["aa1","aa2"] as const).map(role => {
@@ -842,11 +914,11 @@ export default function ProductListPage() {
               {session.role !== "accountant" && (
                 <div className="space-y-1">
                   <p className="text-[10px] text-muted uppercase tracking-wide font-semibold mb-2">Your Access</p>
-                  {([["Master Prices","master"],["Products & Recipes","products"],["Price List","pricelist"]] as [string,string][]).map(([label, section]) => (
+                  {([["Master Prices","master"],["Products & Recipes","products"],["Price List","pricelist"],["Brands","brands"]] as [string,string][]).map(([label, section]) => (
                     <div key={section} className="flex items-center justify-between py-1">
                       <span className="text-xs text-foreground">{label}</span>
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${canAccess(section as "master"|"products"|"pricelist") ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400"}`}>
-                        {canAccess(section as "master"|"products"|"pricelist") ? "Allowed" : "No Access"}
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${canAccess(section as "master"|"products"|"pricelist"|"brands") ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400"}`}>
+                        {canAccess(section as "master"|"products"|"pricelist"|"brands") ? "Allowed" : "No Access"}
                       </span>
                     </div>
                   ))}
@@ -875,8 +947,8 @@ function suggestNextSku(products: Product[], productType: string): string {
   return `${prefix}-${String(maxN + 1).padStart(2, "0")}`;
 }
 
-function ProductForm({ item, products, onSave, onClose }: { item: Product | null; products: Product[]; onSave: (p: Product) => void; onClose: () => void }) {
-  const empty: Product = { id: Math.random().toString(36).slice(2, 10), sku: suggestNextSku(products, "FINISH GOODS"), name: "", productType: "FINISH GOODS", fclQty: 1500, grossProfitPct: 50, imageUrl: "", notes: "", active: true, specs: "", packagingDesc: "" };
+function ProductForm({ item, products, brands, onSave, onClose }: { item: Product | null; products: Product[]; brands: Brand[]; onSave: (p: Product) => void; onClose: () => void }) {
+  const empty: Product = { id: Math.random().toString(36).slice(2, 10), sku: suggestNextSku(products, "FINISH GOODS"), name: "", productType: "FINISH GOODS", fclQty: 1500, grossProfitPct: 50, imageUrl: "", notes: "", active: true, specs: "", packagingDesc: "", brandId: "" };
   const [f, setF] = useState<Product>(item ?? empty);
   const [skuTouched, setSkuTouched] = useState(!!item);
   const [uploading, setUploading] = useState(false);
@@ -942,6 +1014,13 @@ function ProductForm({ item, products, onSave, onClose }: { item: Product | null
               <select value={f.productType} onChange={e => { s("productType", e.target.value); if (!item && !skuTouched) s("sku", suggestNextSku(products, e.target.value)); }} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50 cursor-pointer">
                 {PRODUCT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
               </select></div>
+            <div><label className="text-[10px] text-muted uppercase tracking-wide block mb-1">Brand *</label>
+              <select value={f.brandId} onChange={e => s("brandId", e.target.value)} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50 cursor-pointer">
+                <option value="">— Select Brand —</option>
+                {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+              {brands.length === 0 && <p className="text-[10px] text-red-400 mt-1">No brands yet — add one in the Brands tab first.</p>}
+            </div>
             {([["fclQty","FCL Container Qty"],["grossProfitPct","Gross Profit %"]] as [keyof Product, string][]).map(([k, l]) => (
               <div key={k}><label className="text-[10px] text-muted uppercase tracking-wide block mb-1">{l}</label>
                 <input type="number" step="0.01" value={Number(f[k])} onChange={e => s(k, parseFloat(e.target.value) || 0 as never)} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50" /></div>
@@ -950,7 +1029,7 @@ function ProductForm({ item, products, onSave, onClose }: { item: Product | null
         </div>
         <div className="px-5 py-4 border-t border-border flex justify-end gap-3">
           <button onClick={onClose} className="px-4 py-2 text-sm text-muted cursor-pointer">Cancel</button>
-          <button onClick={() => { if (!f.sku.trim() || !f.name.trim()) return; onSave(f); }} className="flex items-center gap-1.5 px-5 py-2 bg-green-500 text-white text-sm font-semibold rounded-lg cursor-pointer"><Save className="w-3.5 h-3.5" /> Save</button>
+          <button onClick={() => { if (!f.sku.trim() || !f.name.trim() || !f.brandId) return; onSave(f); }} className="flex items-center gap-1.5 px-5 py-2 bg-green-500 text-white text-sm font-semibold rounded-lg cursor-pointer"><Save className="w-3.5 h-3.5" /> Save</button>
         </div>
       </div>
     </div>
@@ -1155,6 +1234,77 @@ function MaterialForm({ item, onSave, onClose }: { item: Material | null; onSave
           <input type="number" step="0.01" value={f.pricePerUnit} onChange={e => setF(p => ({ ...p, pricePerUnit: parseFloat(e.target.value) || 0 }))} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50" /></div>
         <div className="flex gap-2 pt-2"><button onClick={onClose} className="flex-1 px-4 py-2 text-sm text-muted cursor-pointer">Cancel</button>
           <button onClick={() => { if (!f.name.trim()) return; onSave(f); }} className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 bg-green-500 text-white text-sm font-semibold rounded-lg cursor-pointer"><Save className="w-3.5 h-3.5" /> Save</button></div>
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════ BRAND FORM */
+function BrandForm({ item, onSave, onClose }: { item: Brand | null; onSave: (b: Brand) => void; onClose: () => void }) {
+  const empty: Brand = { id: Math.random().toString(36).slice(2, 10), name: "", address: "", city: "", country: "", logoUrl: "", createdAt: "" };
+  const [f, setF] = useState<Brand>(item ?? empty);
+  const [uploading, setUploading] = useState(false);
+  const s = <K extends keyof Brand>(k: K, v: Brand[K]) => setF(p => ({ ...p, [k]: v }));
+
+  async function handleLogoUpload(file: File) {
+    setUploading(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const base64 = (e.target?.result as string).split(",")[1];
+        const res = await fetch("/api/product-list/upload-image", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ filename: file.name, mimeType: file.type, base64 }),
+        });
+        const data = await res.json();
+        if (data.thumbnailUrl) s("logoUrl", data.thumbnailUrl);
+        else alert(data.error || "Upload failed");
+        setUploading(false);
+      };
+      reader.readAsDataURL(file);
+    } catch { setUploading(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-surface rounded-2xl border border-border max-w-md w-full p-6 space-y-4" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between"><h3 className="text-sm font-semibold text-foreground">{item ? "Edit" : "Add"} Brand</h3><button onClick={onClose} className="text-muted hover:text-foreground cursor-pointer"><X className="w-4 h-4" /></button></div>
+        <div><label className="text-[10px] text-muted uppercase tracking-wide block mb-1">Brand Name *</label>
+          <input type="text" value={f.name} onChange={e => s("name", e.target.value)} autoFocus className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50" /></div>
+        <div><label className="text-[10px] text-muted uppercase tracking-wide block mb-1">Address</label>
+          <input type="text" value={f.address} onChange={e => s("address", e.target.value)} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50" /></div>
+        <div className="grid grid-cols-2 gap-3">
+          <div><label className="text-[10px] text-muted uppercase tracking-wide block mb-1">City</label>
+            <input type="text" value={f.city} onChange={e => s("city", e.target.value)} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50" /></div>
+          <div><label className="text-[10px] text-muted uppercase tracking-wide block mb-1">Country</label>
+            <input type="text" value={f.country} onChange={e => s("country", e.target.value)} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50" /></div>
+        </div>
+        <div>
+          <label className="text-[10px] text-muted uppercase tracking-wide block mb-1">Logo</label>
+          <div className="flex items-start gap-3">
+            {f.logoUrl ? (
+              <div className="relative shrink-0">
+                <img src={f.logoUrl} alt="preview" className="w-16 h-16 rounded-lg object-cover border border-border" />
+                <button onClick={() => s("logoUrl", "")} className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 text-white flex items-center justify-center cursor-pointer text-[10px]">×</button>
+              </div>
+            ) : (
+              <div className="w-16 h-16 rounded-lg border border-dashed border-border bg-surface-light/30 flex items-center justify-center shrink-0">
+                <Tag className="w-5 h-5 text-muted/40" />
+              </div>
+            )}
+            <div className="flex-1 space-y-2">
+              <label className={`flex items-center justify-center gap-2 w-full px-4 py-2.5 border border-dashed border-violet-500/40 text-violet-400 hover:bg-violet-500/5 rounded-lg cursor-pointer transition-colors text-sm ${uploading ? "opacity-50 cursor-not-allowed" : ""}`}>
+                {uploading ? "Uploading to Drive..." : "Upload Logo"}
+                <input type="file" accept="image/*" className="hidden" disabled={uploading}
+                  onChange={e => { const file = e.target.files?.[0]; if (file) handleLogoUpload(file); e.target.value = ""; }} />
+              </label>
+              <p className="text-[10px] text-muted">Uploads to Google Drive · JPG/PNG recommended</p>
+            </div>
+          </div>
+        </div>
+        <div className="flex gap-2 pt-2"><button onClick={onClose} className="flex-1 px-4 py-2 text-sm text-muted cursor-pointer">Cancel</button>
+          <button onClick={() => { if (!f.name.trim()) return; onSave(f); }} className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 bg-violet-500 hover:bg-violet-500/80 text-white text-sm font-semibold rounded-lg cursor-pointer"><Save className="w-3.5 h-3.5" /> Save</button></div>
       </div>
     </div>
   );

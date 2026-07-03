@@ -22,7 +22,10 @@ export function calcCost(recipe: CostRecipeItem[], materials: CostMaterial[], pr
   const sellingUSD  = r(cogUSD * (1 + product.grossProfitPct / 100));
   const sellingPerCarton = r(sellingUSD / quoteQty);
   const whtUSD      = r(sellingUSD * (settings.whtPct / 100));
-  const fobTotal    = r(sellingUSD + whtUSD + settings.serviceCharges + settings.eds + settings.courierCharges);
+  const serviceChargesAmt = r(sellingUSD * (settings.serviceCharges / 100));
+  const edsAmt            = r(sellingUSD * (settings.eds / 100));
+  const courierChargesAmt = r(sellingUSD * (settings.courierCharges / 100));
+  const fobTotal    = r(sellingUSD + whtUSD + serviceChargesAmt + edsAmt + courierChargesAmt);
   const fobPerCarton = r(fobTotal / quoteQty);
-  return { cogPerCarton, cogTotal, adminAmt, cogWithAdmin, cogUSD, sellingUSD, sellingPerCarton, whtUSD, fobTotal, fobPerCarton };
+  return { cogPerCarton, cogTotal, adminAmt, cogWithAdmin, cogUSD, sellingUSD, sellingPerCarton, whtUSD, serviceChargesAmt, edsAmt, courierChargesAmt, fobTotal, fobPerCarton };
 }

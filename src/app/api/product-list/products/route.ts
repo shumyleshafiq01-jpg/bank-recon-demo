@@ -1,7 +1,7 @@
 import { ensureSheet, readSheet, clearAndWrite, writeRows } from "@/lib/google-sheets";
 
 const SHEET = "PL_Products";
-const HEADERS = ["id","sku","name","productType","fclQty","grossProfitPct","imageUrl","notes","active","specs","packagingDesc"];
+const HEADERS = ["id","sku","name","productType","fclQty","grossProfitPct","imageUrl","notes","active","specs","packagingDesc","brandId"];
 
 async function init() { await ensureSheet(SHEET, HEADERS); }
 
@@ -13,6 +13,7 @@ function parseRow(r: string[]) {
     imageUrl: r[6] ?? "",
     notes: r[7] ?? "", active: r[8] !== "false",
     specs: r[9] ?? "", packagingDesc: r[10] ?? "",
+    brandId: r[11] ?? "",
   };
 }
 
@@ -22,6 +23,7 @@ function serializeRow(p: Record<string, unknown>): string[] {
     String(p.fclQty ?? 1500), String(p.grossProfitPct ?? 50),
     String(p.imageUrl ?? ""), String(p.notes ?? ""),
     String(p.active !== false), String(p.specs ?? ""), String(p.packagingDesc ?? ""),
+    String(p.brandId ?? ""),
   ];
 }
 

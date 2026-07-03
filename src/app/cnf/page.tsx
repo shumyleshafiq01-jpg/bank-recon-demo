@@ -606,8 +606,10 @@ export default function CNFPage() {
 
   // Filters
   const [search, setSearch] = useState("");
-  const [filterStatus, setFilterStatus] = useState<"all" | "active" | "archived">("active");
+  const [filterStatus, setFilterStatus] = useState<"all" | "active" | "expired" | "archived">("active");
   const [filterDest, setFilterDest] = useState("");
+  const [filterBrand, setFilterBrand] = useState<"" | "Kafi" | "Essence">("");
+  const [sortBy, setSortBy] = useState<"date-desc" | "date-asc" | "price-desc" | "price-asc">("date-desc");
   const [showFilters, setShowFilters] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -700,15 +702,26 @@ export default function CNFPage() {
 
   const isAdmin = user === "Admin" || user === "Accountant";
   const destinations = [...new Set(quotes.map(q => q.destination).filter(Boolean))];
+  const isExpired = (q: Quote) => !!q.validTill && new Date(q.validTill + "T23:59:59") < new Date();
+  const quoteTotal = (q: Quote) => q.productsSnapshot.reduce((s, p) => s + p.cnfPerCarton * p.qty, 0) - (q.discountAmount || 0);
 
   const filtered = quotes.filter(q => {
-    if (filterStatus !== "all" && q.status !== filterStatus) return false;
+    if (filterStatus === "archived" && q.status !== "archived") return false;
+    if (filterStatus === "active" && (q.status === "archived" || isExpired(q))) return false;
+    if (filterStatus === "expired" && !isExpired(q)) return false;
     if (filterDest && q.destination !== filterDest) return false;
+    if (filterBrand === "Kafi" && !q.brandKafi) return false;
+    if (filterBrand === "Essence" && !q.brandEssence) return false;
     if (search) {
       const s = search.toLowerCase();
       return q.clientName.toLowerCase().includes(s) || q.quoteNo.toLowerCase().includes(s) || q.destination.toLowerCase().includes(s) || q.country.toLowerCase().includes(s);
     }
     return true;
+  }).sort((a, b) => {
+    if (sortBy === "date-desc") return b.generatedAt.localeCompare(a.generatedAt);
+    if (sortBy === "date-asc") return a.generatedAt.localeCompare(b.generatedAt);
+    if (sortBy === "price-desc") return quoteTotal(b) - quoteTotal(a);
+    return quoteTotal(a) - quoteTotal(b);
   });
 
   return (
@@ -749,7 +762,7 @@ export default function CNFPage() {
             <div className="flex items-center gap-2">
               {/* Status tabs */}
               <div className="flex bg-gray-100 rounded-lg p-0.5 text-xs">
-                {(["active", "all", "archived"] as const).map(s => (
+                {(["active", "expired", "all", "archived"] as const).map(s => (
                   <button key={s} onClick={() => setFilterStatus(s)}
                     className={`px-3 py-1 rounded-md capitalize cursor-pointer transition-colors ${filterStatus === s ? "bg-white text-gray-900 shadow-sm font-medium" : "text-gray-500 hover:text-gray-700"}`}>
                     {s}
@@ -775,8 +788,21 @@ export default function CNFPage() {
                 <option value="">All Destinations</option>
                 {destinations.map(d => <option key={d} value={d}>{d}</option>)}
               </select>
-              {(search || filterDest) && (
-                <button onClick={() => { setSearch(""); setFilterDest(""); }} className="text-xs text-gray-400 hover:text-gray-600 cursor-pointer">Clear</button>
+              <select value={filterBrand} onChange={e => setFilterBrand(e.target.value as typeof filterBrand)}
+                className="border border-gray-200 rounded-lg px-3 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-blue-400 bg-white">
+                <option value="">All Brands</option>
+                <option value="Kafi">Kafi</option>
+                <option value="Essence">Essence</option>
+              </select>
+              <select value={sortBy} onChange={e => setSortBy(e.target.value as typeof sortBy)}
+                className="border border-gray-200 rounded-lg px-3 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-blue-400 bg-white">
+                <option value="date-desc">Date: Newest First</option>
+                <option value="date-asc">Date: Oldest First</option>
+                <option value="price-desc">Price: High to Low</option>
+                <option value="price-asc">Price: Low to High</option>
+              </select>
+              {(search || filterDest || filterBrand) && (
+                <button onClick={() => { setSearch(""); setFilterDest(""); setFilterBrand(""); }} className="text-xs text-gray-400 hover:text-gray-600 cursor-pointer">Clear</button>
               )}
             </div>
           )}
@@ -841,7 +867,7 @@ export default function CNFPage() {
                         </td>
                         <td className="px-4 py-3 text-xs text-gray-500">{fmtDate(q.generatedAt)}</td>
                         <td className="px-4 py-3">
-                          <span className={`text-xs ${new Date(q.validTill) < new Date() ? "text-red-500 font-medium" : "text-gray-500"}`}>
+                          <span className={`text-xs ${isExpired(q) ? "text-red-500 font-medium" : "text-gray-500"}`}>
                             {fmtDate(q.validTill + "T00:00:00")}
                           </span>
                         </td>
