@@ -109,17 +109,14 @@ export default async function CNFSharePage({ params }: { params: Promise<{ id: s
             ))}
           </div>
 
-          {/* Products table */}
+          {/* Products table — kept simple for clients/vendors: no cost breakdown, just what they need */}
           <div style={{ padding: "28px 40px" }}>
             <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 1.5, color: "#888", fontWeight: 700, marginBottom: 14 }}>Products &amp; Pricing</div>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ background: "#f8f9fb" }}>
-                  {(isFob
-                    ? ["#", "Product", "Qty (Cartons)", "FOB/Carton", "Total"]
-                    : ["#", "Product", "Qty (Cartons)", "FOB/Carton", "Freight/Carton", "CNF/Carton", "Total"]
-                  ).map((h, i) => (
-                    <th key={h} style={{ padding: "10px 12px", textAlign: i >= 2 ? "right" : "left", fontSize: 10, textTransform: "uppercase", letterSpacing: 1, color: "#888", fontWeight: 700, borderBottom: "2px solid #e8eaed" }}>{h}</th>
+                  {["#", "Product", "Product Packaging", "Total Amount"].map((h, i) => (
+                    <th key={h} style={{ padding: "10px 12px", textAlign: i === 3 ? "right" : "left", fontSize: 10, textTransform: "uppercase", letterSpacing: 1, color: "#888", fontWeight: 700, borderBottom: "2px solid #e8eaed" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -129,31 +126,24 @@ export default async function CNFSharePage({ params }: { params: Promise<{ id: s
                     <td style={{ padding: "12px 12px", color: "#aaa", fontSize: 12 }}>{i + 1}</td>
                     <td style={{ padding: "12px 12px", verticalAlign: "top" }}>
                       <div style={{ fontWeight: 600, color: "#1a1a2e", fontSize: 13 }}>{p.productName}</div>
-                      {(p.specs || p.packagingDesc || p.sku) && (
-                        <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>
-                          {[p.sku, p.specs, p.packagingDesc].filter(Boolean).join(" · ")}
-                        </div>
-                      )}
+                      {p.sku && <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>{p.sku}</div>}
                     </td>
-                    <td style={{ padding: "12px 12px", textAlign: "right", fontSize: 13 }}>{p.qty}</td>
-                    <td style={{ padding: "12px 12px", textAlign: "right", fontSize: 13, color: "#555" }}>{fmtUSD(p.fobPerCarton)}</td>
-                    {!isFob && <td style={{ padding: "12px 12px", textAlign: "right", fontSize: 13, color: "#555" }}>{fmtUSD(p.freightPerCarton)}</td>}
-                    {!isFob && <td style={{ padding: "12px 12px", textAlign: "right", fontSize: 13, fontWeight: 700, color: "#1e40af" }}>{fmtUSD(p.cnfPerCarton)}</td>}
+                    <td style={{ padding: "12px 12px", verticalAlign: "top", fontSize: 12, color: "#555" }}>{p.specs || p.packagingDesc || "—"}</td>
                     <td style={{ padding: "12px 12px", textAlign: "right", fontSize: 13, fontWeight: 700, color: "#1e40af" }}>{fmtUSD(p.cnfPerCarton * p.qty)}</td>
                   </tr>
                 ))}
                 <tr>
-                  <td colSpan={isFob ? 4 : 6} style={{ padding: "8px 12px", textAlign: "right", fontSize: 12, color: "#888", borderTop: "2px solid #e8eaed" }}>Subtotal</td>
+                  <td colSpan={3} style={{ padding: "8px 12px", textAlign: "right", fontSize: 12, color: "#888", borderTop: "2px solid #e8eaed" }}>Subtotal</td>
                   <td style={{ padding: "8px 12px", textAlign: "right", fontSize: 13, color: "#555", borderTop: "2px solid #e8eaed" }}>{fmtUSD(subtotal)}</td>
                 </tr>
                 {(quote.discountAmount || 0) > 0 && (
                   <tr>
-                    <td colSpan={isFob ? 4 : 6} style={{ padding: "8px 12px", textAlign: "right", fontSize: 12, color: "#dc2626" }}>Discount</td>
+                    <td colSpan={3} style={{ padding: "8px 12px", textAlign: "right", fontSize: 12, color: "#dc2626" }}>Discount</td>
                     <td style={{ padding: "8px 12px", textAlign: "right", fontSize: 13, color: "#dc2626" }}>−{fmtUSD(quote.discountAmount)}</td>
                   </tr>
                 )}
                 <tr style={{ background: "#eff6ff" }}>
-                  <td colSpan={isFob ? 4 : 6} style={{ padding: "14px 12px", textAlign: "right", fontSize: 12, fontWeight: 700, color: "#1e40af", borderTop: "2px solid #bfdbfe" }}>Grand Total</td>
+                  <td colSpan={3} style={{ padding: "14px 12px", textAlign: "right", fontSize: 12, fontWeight: 700, color: "#1e40af", borderTop: "2px solid #bfdbfe" }}>Grand Total</td>
                   <td style={{ padding: "14px 12px", textAlign: "right", fontSize: 14, fontWeight: 700, color: "#1e40af", borderTop: "2px solid #bfdbfe" }}>{fmtUSD(grandTotal)}</td>
                 </tr>
               </tbody>

@@ -452,8 +452,31 @@ export default function PettyCashPage() {
     return handedTotal + entryNet;
   }
 
-  function totalHandedOver(holder: "aa1" | "aa2"): number {
-    return handovers.filter(h => h.holder === holder).reduce((s, h) => s + h.amount, 0);
+  // Chronological running-balance timeline for a holder: each handover is its own event,
+  // same-day expenses are collapsed into one net line (full detail stays in the main ledger table).
+  type TimelineRow = { key: string; date: string; label: string; amount: number; balance: number; handoverId?: string };
+  function holderTimeline(holder: "aa1" | "aa2"): TimelineRow[] {
+    const hEvents = handovers.filter(h => h.holder === holder).map(h => ({
+      date: h.date,
+      sortKey: h.createdAt || `${h.date}T00:00:00`,
+      amount: h.amount,
+      label: h.notes || (h.amount < 0 ? "Returned to Hafeez" : "Cash given by Hafeez"),
+      handoverId: h.id as string | undefined,
+    }));
+    const expenseByDate = new Map<string, number>();
+    entries.filter(e => e.holder === holder).forEach(e => {
+      const net = (e.cashIn ?? 0) - (e.cashOut ?? 0);
+      expenseByDate.set(e.date, (expenseByDate.get(e.date) ?? 0) + net);
+    });
+    const eEvents = Array.from(expenseByDate.entries()).map(([date, net]) => ({
+      date, sortKey: `${date}T12:00:00`, amount: net, label: "Expenses (ledger)", handoverId: undefined as string | undefined,
+    }));
+    const all = [...hEvents, ...eEvents].sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+    let running = 0;
+    return all.map((e, i) => {
+      running += e.amount;
+      return { key: `${e.handoverId ?? "exp"}-${i}`, date: e.date, label: e.label, amount: e.amount, balance: running, handoverId: e.handoverId };
+    });
   }
 
   function lastDenomCount(holder: "aa1" | "aa2"): DenominationCount | null {
@@ -714,9 +737,10 @@ export default function PettyCashPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {(["aa1", "aa2"] as const).map((holder) => {
                 const inHand = cashInHand(holder);
-                const handedTotal = totalHandedOver(holder);
                 const lastCount = lastDenomCount(holder);
                 const variance = lastCount ? lastCount.total - inHand : null;
+                const timeline = holderTimeline(holder);
+                const lastActivity = timeline[timeline.length - 1];
                 return (
                   <div key={holder} className="p-3 rounded-xl border border-border bg-background">
                     <div className="flex items-center justify-between mb-2">
@@ -725,15 +749,10 @@ export default function PettyCashPage() {
                         <Calculator className="w-2.5 h-2.5" /> Count Cash
                       </button>
                     </div>
-                    <div className="grid grid-cols-2 gap-2 text-[10px] mb-2">
-                      <div>
-                        <p className="text-muted">Total Handed Over</p>
-                        <p className="font-mono font-semibold text-foreground">{handedTotal > 0 ? handedTotal.toLocaleString("en-PK") : "—"}</p>
-                      </div>
-                      <div>
-                        <p className="text-muted">Cash In Hand</p>
-                        <p className="font-mono font-bold text-orange-400">{fmtBal(inHand)}</p>
-                      </div>
+                    <div className="mb-2">
+                      <p className="text-[10px] text-muted">Cash In Hand</p>
+                      <p className="font-mono font-bold text-orange-400 text-xl">{fmtBal(inHand)}</p>
+                      {lastActivity && <p className="text-[9px] text-muted mt-0.5">as of {lastActivity.date}</p>}
                     </div>
                     {lastCount ? (
                       <div className={`flex items-center gap-1.5 text-[9px] px-2 py-1.5 rounded-lg ${variance === 0 ? "bg-emerald-500/10 text-emerald-400" : "bg-red-500/10 text-red-400"}`}>
@@ -747,7 +766,7 @@ export default function PettyCashPage() {
                     )}
                     <div className="flex items-center justify-between mt-2">
                       <button onClick={() => setShowHandoverHistory(showHandoverHistory === holder ? null : holder)} className="text-[9px] text-muted hover:text-orange-400 cursor-pointer transition-colors">
-                        {showHandoverHistory === holder ? "Hide history" : "Show handover history"}
+                        {showHandoverHistory === holder ? "Hide timeline" : "Show timeline"}
                       </button>
                       {session?.role === "accountant" && (
                         <button onClick={() => setShowCashReturnModal(holder)} disabled={inHand <= 0}
@@ -757,22 +776,25 @@ export default function PettyCashPage() {
                       )}
                     </div>
                     {showHandoverHistory === holder && (
-                      <div className="mt-2 pt-2 border-t border-border space-y-1 max-h-40 overflow-y-auto">
-                        {handovers.filter(h => h.holder === holder).sort((a, b) => b.date.localeCompare(a.date)).map(h => (
-                          <div key={h.id} className="flex items-center justify-between text-[9px]">
-                            <span className="text-muted">{h.date} — {h.notes || (h.amount < 0 ? "Cash Return" : "Handover")}</span>
+                      <div className="mt-2 pt-2 border-t border-border space-y-1 max-h-48 overflow-y-auto">
+                        {[...timeline].reverse().map(row => (
+                          <div key={row.key} className="flex items-center justify-between text-[9px]">
+                            <div>
+                              <span className="text-muted">{row.date} — {row.label}</span>
+                            </div>
                             <div className="flex items-center gap-1.5">
-                              <span className={`font-mono font-semibold ${h.amount < 0 ? "text-red-400" : "text-emerald-400"}`}>
-                                {h.amount >= 0 ? "+" : ""}{h.amount.toLocaleString("en-PK")}
+                              <span className={`font-mono font-semibold ${row.amount < 0 ? "text-red-400" : "text-emerald-400"}`}>
+                                {row.amount >= 0 ? "+" : ""}{row.amount.toLocaleString("en-PK")}
                               </span>
-                              {session?.role === "accountant" && (
-                                <button onClick={() => deleteHandover(h.id)} className="text-muted hover:text-red-400 cursor-pointer"><Trash2 className="w-2.5 h-2.5" /></button>
+                              <span className="font-mono text-muted w-14 text-right">= {row.balance.toLocaleString("en-PK")}</span>
+                              {session?.role === "accountant" && row.handoverId && (
+                                <button onClick={() => deleteHandover(row.handoverId!)} className="text-muted hover:text-red-400 cursor-pointer"><Trash2 className="w-2.5 h-2.5" /></button>
                               )}
                             </div>
                           </div>
                         ))}
-                        {handovers.filter(h => h.holder === holder).length === 0 && (
-                          <p className="text-[9px] text-muted italic">No handovers recorded yet.</p>
+                        {timeline.length === 0 && (
+                          <p className="text-[9px] text-muted italic">No activity recorded yet.</p>
                         )}
                       </div>
                     )}
