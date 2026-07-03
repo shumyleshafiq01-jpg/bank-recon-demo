@@ -2,9 +2,8 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState, useEffect, useRef, useCallback, Suspense } from "react";
-import { Landmark, Shield, User, FlaskConical, ArrowRight, Lock, X, AlertTriangle, ChevronLeft } from "lucide-react";
+import { Landmark, Shield, User, FlaskConical, ArrowRight, AlertTriangle, ChevronLeft } from "lucide-react";
 
-const USER_CODE = "07860";
 const TESTING_DEADLINE = new Date("2026-06-20T12:00:00Z").getTime();
 
 type Node = { x: number; y: number; vx: number; vy: number; radius: number };
@@ -137,23 +136,10 @@ function LoginContent() {
   const searchParams = useSearchParams();
   const expired = searchParams.get("expired") === "1";
   const testingAvailable = Date.now() < TESTING_DEADLINE;
-  const [showCodePrompt, setShowCodePrompt] = useState(false);
-  const [code, setCode] = useState("");
-  const [codeError, setCodeError] = useState("");
 
   function handleUser() {
-    setShowCodePrompt(true);
-    setCode("");
-    setCodeError("");
-  }
-
-  function submitCode() {
-    if (code === USER_CODE) {
-      localStorage.setItem("session", JSON.stringify({ type: "user", ts: Date.now() }));
-      router.push("/dashboard");
-    } else {
-      setCodeError("Invalid code. Please try again.");
-    }
+    localStorage.setItem("session", JSON.stringify({ type: "user", ts: Date.now() }));
+    router.push("/dashboard");
   }
 
   function handleTesting() {
@@ -216,9 +202,9 @@ function LoginContent() {
             </div>
             <div className="flex-1">
               <h3 className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">User</h3>
-              <p className="text-xs text-gray-400 mt-0.5">Team access with code</p>
+              <p className="text-xs text-gray-400 mt-0.5">Team access</p>
             </div>
-            <Lock className="w-4 h-4 text-gray-300 group-hover:text-blue-500 transition-colors" />
+            <ArrowRight className="w-4 h-4 text-gray-300 group-hover:text-blue-500 transition-colors" />
           </button>
 
           {/* Testing Account */}
@@ -244,46 +230,6 @@ function LoginContent() {
         </p>
       </div>
 
-      {/* Code Prompt Modal */}
-      {showCodePrompt && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-white border border-gray-200 rounded-2xl p-6 w-full max-w-sm space-y-4 animate-fade-in shadow-2xl">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg bg-blue-100 flex items-center justify-center">
-                  <Lock className="w-4 h-4 text-blue-600" />
-                </div>
-                <h3 className="font-semibold text-gray-900">Enter Access Code</h3>
-              </div>
-              <button onClick={() => setShowCodePrompt(false)} className="text-gray-400 hover:text-gray-600 transition-colors cursor-pointer">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <input
-              type="password"
-              value={code}
-              onChange={(e) => { setCode(e.target.value); setCodeError(""); }}
-              onKeyDown={(e) => e.key === "Enter" && submitCode()}
-              placeholder="Enter code"
-              autoFocus
-              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 text-center text-lg tracking-widest"
-            />
-
-            {codeError && (
-              <p className="text-sm text-red-500 text-center">{codeError}</p>
-            )}
-
-            <button
-              onClick={submitCode}
-              className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl transition-all cursor-pointer shadow-md shadow-blue-600/20"
-            >
-              Unlock
-              <ArrowRight className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

@@ -127,7 +127,7 @@ function PinModal({ allowedRoles, onSuccess, onClose }: {
   const roleLabel = allowedRoles.map(r => r === "accountant" ? "Accountant" : r === "aa1" ? "AA1" : "AA2").join(" / ");
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-surface rounded-2xl border border-border w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
         <div className="flex items-center gap-2 mb-4">
           <Lock className="w-4 h-4 text-indigo-400" />
@@ -1050,7 +1050,7 @@ export default function FundEstimatorPage() {
 
       {/* Description full-text modal */}
       {descModal !== null && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setDescModal(null)}>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-surface rounded-2xl border border-border max-w-lg w-full p-6" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold text-foreground">Description</h3>
@@ -1115,7 +1115,7 @@ function BankModal({ bank, isEdit, onSave, onClose }: { bank: BankAccount; isEdi
   }
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-surface rounded-2xl border border-border max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <h3 className="text-sm font-semibold text-foreground">{isEdit ? "Edit" : "Add"} Bank Account</h3>

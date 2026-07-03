@@ -45,7 +45,7 @@ function PinModal({ onSuccess, onClose }: { onSuccess: (s: PLSession) => void; o
   const [pin, setPin] = useState(""); const [err, setErr] = useState("");
   function submit() { const s = PL_PINS[pin.trim()]; if (!s) { setErr("Incorrect PIN."); return; } onSuccess(s); }
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-surface rounded-2xl border border-border w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
         <div className="flex items-center gap-2 mb-4"><Lock className="w-4 h-4 text-green-400" /><h3 className="text-sm font-semibold text-foreground">Enter PIN</h3><span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 ml-auto">Product List</span></div>
         <input type="password" value={pin} onChange={e => { setPin(e.target.value); setErr(""); }} onKeyDown={e => e.key === "Enter" && submit()} placeholder="Enter your PIN" autoFocus className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-sm text-foreground focus:outline-none focus:border-green-500/50 mb-3" />
@@ -767,7 +767,7 @@ export default function ProductListPage() {
 
       {/* ── SETTINGS MODAL ── */}
       {editSettings && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setEditSettings(false)}>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-surface rounded-2xl border border-border w-full max-w-sm p-6 space-y-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <h3 className="text-sm font-semibold text-foreground">Global Settings</h3>
             {[["FC Rate (PKR per USD)", "fcRate", "number"], ["Base Currency", "currency", "text"], ["Target Currency", "targetCurrency", "text"]].map(([l, k, t]) => (
@@ -902,7 +902,7 @@ function ProductForm({ item, products, onSave, onClose }: { item: Product | null
     } catch { setUploading(false); }
   }
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-surface rounded-2xl border border-border max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-border"><h3 className="text-sm font-semibold text-foreground">{item ? "Edit" : "Add"} Product</h3><button onClick={onClose} className="text-muted hover:text-foreground cursor-pointer"><X className="w-4 h-4" /></button></div>
         <div className="overflow-auto p-5 flex-1">
@@ -1055,7 +1055,7 @@ function CartonImportModal({ products, onApply, onClose }: { products: Product[]
   }
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-surface rounded-2xl border border-border max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <div>
@@ -1132,7 +1132,7 @@ function MaterialForm({ item, onSave, onClose }: { item: Material | null; onSave
   const [f, setF] = useState<Material>(item ?? empty);
   const UNITS = ["PCS", "KG", "GRAM", "LITRE", "METER", "CARTON", "BOTTLE", "POUCH", "CONTAINER"];
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-surface rounded-2xl border border-border max-w-md w-full p-6 space-y-4" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between"><h3 className="text-sm font-semibold text-foreground">{item ? "Edit" : "Add"} Material</h3><button onClick={onClose} className="text-muted hover:text-foreground cursor-pointer"><X className="w-4 h-4" /></button></div>
         <div><label className="text-[10px] text-muted uppercase tracking-wide block mb-1">Material Name *</label><input type="text" value={f.name} onChange={e => setF(p => ({ ...p, name: e.target.value }))} autoFocus className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50" /></div>

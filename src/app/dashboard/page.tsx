@@ -574,7 +574,7 @@ export default function DashboardPage() {
 
       {/* Admin PIN modal */}
       {showAdminPin && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { setShowAdminPin(false); setAdminPin(""); setAdminPinError(""); }}>
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl border border-gray-200 w-full max-w-xs p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center gap-2 mb-4">
               <Settings className="w-4 h-4 text-gray-500" />

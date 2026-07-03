@@ -537,7 +537,7 @@ export default function MultiBankPage() {
 
               {/* Total Head Preview Modal */}
               {showHeadPreview && (
-                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowHeadPreview(false)}>
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
                   <div className="bg-surface rounded-2xl border border-border max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center justify-between px-5 py-4 border-b border-border">
                       <h3 className="text-sm font-semibold text-foreground">TOTAL HEAD — Bank Entries by Particulars</h3>

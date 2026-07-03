@@ -64,7 +64,7 @@ function VPinModal({ onSuccess, onClose }: { onSuccess: (s: VSession) => void; o
   const [pin, setPin] = useState(""); const [err, setErr] = useState("");
   function submit() { const s = V_PINS[pin.trim()]; if (!s) { setErr("Incorrect PIN."); return; } onSuccess(s); }
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-surface rounded-2xl border border-border w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
         <div className="flex items-center gap-2 mb-4">
           <Lock className="w-4 h-4 text-blue-400" />
@@ -118,7 +118,7 @@ function SupplierForm({ item, existingSuppliers, catOptions, onSave, onClose }: 
   }
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-surface rounded-2xl border border-border max-w-xl w-full max-h-[88vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <h3 className="text-sm font-semibold text-foreground">{item.companyName || item.contactPerson ? "Edit" : "Add"} Supplier Contact</h3>
@@ -244,7 +244,7 @@ function BankForm({ item, existingVendors, bankOptions, onSave, onClose }: {
   if (acNoMatch.length > 0) errors.push(`Account number already exists: ${acNoMatch[0].vendorName}`);
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-surface rounded-2xl border border-border max-w-xl w-full max-h-[88vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <h3 className="text-sm font-semibold text-foreground">{item.vendorName ? "Edit" : "Add"} Vendor Bank Detail</h3>
@@ -363,7 +363,7 @@ function CategoryModal({ title, items, saving, onSave, onClose }: {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-surface rounded-2xl border border-border max-w-md w-full max-h-[80vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <h3 className="text-sm font-semibold text-foreground">Manage {title}</h3>
@@ -1178,7 +1178,7 @@ export default function VendorsPage() {
 
       {/* Bank Contact Form Modal */}
       {showBankContactForm && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { setShowBankContactForm(false); setEditingBankContact(null); }}>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-surface rounded-2xl border border-border max-w-lg w-full p-6 space-y-4" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-foreground">{editingBankContact ? "Edit" : "Add"} Bank Contact</h3>
@@ -1191,7 +1191,7 @@ export default function VendorsPage() {
 
       {/* Employee Form Modal */}
       {showEmpForm && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { setShowEmpForm(false); setEditEmployee(null); }}>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-surface rounded-2xl border border-border max-w-xl w-full max-h-[88vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <h3 className="text-sm font-semibold text-foreground">{editEmployee ? "Edit" : "Add"} Employee / Director</h3>
