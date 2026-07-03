@@ -5,6 +5,7 @@ const HEADERS = [
   "id", "quoteNo", "clientName", "clientContact", "destination", "country",
   "generatedAt", "validTill", "status", "createdBy", "brandKafi", "brandEssence",
   "notes", "productsSnapshot",
+  "quoteType", "discountType", "discountScope", "discountValue", "discountAmount", "discountProductIds",
 ];
 
 async function init() { await ensureSheet(SHEET, HEADERS); }
@@ -12,12 +13,20 @@ async function init() { await ensureSheet(SHEET, HEADERS); }
 function parseRow(r: string[]) {
   let products = [];
   try { products = JSON.parse(r[13] ?? "[]"); } catch { products = []; }
+  let discountProductIds: string[] = [];
+  try { discountProductIds = JSON.parse(r[19] ?? "[]"); } catch { discountProductIds = []; }
   return {
     id: r[0] ?? "", quoteNo: r[1] ?? "", clientName: r[2] ?? "",
     clientContact: r[3] ?? "", destination: r[4] ?? "", country: r[5] ?? "",
     generatedAt: r[6] ?? "", validTill: r[7] ?? "", status: r[8] ?? "active",
     createdBy: r[9] ?? "", brandKafi: r[10] !== "false", brandEssence: r[11] === "true",
     notes: r[12] ?? "", productsSnapshot: products,
+    quoteType: (r[14] || "CNF") as "CNF" | "FOB",
+    discountType: (r[15] || "none") as "none" | "percent" | "amount",
+    discountScope: (r[16] || "all") as "all" | "specific",
+    discountValue: parseFloat(r[17]) || 0,
+    discountAmount: parseFloat(r[18]) || 0,
+    discountProductIds,
   };
 }
 
@@ -63,6 +72,8 @@ export async function POST(request: Request) {
         now, String(q.validTill ?? ""), "active", String(q.createdBy ?? ""),
         String(q.brandKafi !== false), String(q.brandEssence === true),
         String(q.notes ?? ""), JSON.stringify(q.productsSnapshot ?? []),
+        String(q.quoteType ?? "CNF"), String(q.discountType ?? "none"), String(q.discountScope ?? "all"),
+        String(q.discountValue ?? 0), String(q.discountAmount ?? 0), JSON.stringify(q.discountProductIds ?? []),
       ];
       rows.push(row);
       await clearAndWrite(SHEET, rows);

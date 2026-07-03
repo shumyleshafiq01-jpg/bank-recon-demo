@@ -907,10 +907,10 @@ function ProductForm({ item, products, onSave, onClose }: { item: Product | null
         <div className="flex items-center justify-between px-5 py-4 border-b border-border"><h3 className="text-sm font-semibold text-foreground">{item ? "Edit" : "Add"} Product</h3><button onClick={onClose} className="text-muted hover:text-foreground cursor-pointer"><X className="w-4 h-4" /></button></div>
         <div className="overflow-auto p-5 flex-1">
           <div className="grid grid-cols-2 gap-3">
-            {([["sku","SKU *","text"],["name","Product Name *","text"],["specs","Specs / Description (for CNF quotes)","text"],["packagingDesc","Packaging (for CNF quotes)","text"],["notes","Product Packaging","text"]] as [keyof Product, string, string][]).map(([k, l, t]) => (
-              <div key={k} className={k === "name" || k === "notes" || k === "specs" || k === "packagingDesc" ? "col-span-2" : ""}>
+            {([["sku","SKU *","text"],["name","Product Name *","text"],["notes","Product Packaging","text"]] as [keyof Product, string, string][]).map(([k, l, t]) => (
+              <div key={k} className={k === "name" || k === "notes" ? "col-span-2" : ""}>
                 <label className="text-[10px] text-muted uppercase tracking-wide block mb-1">{l}</label>
-                <input type={t} value={String(f[k] ?? "")} onChange={e => { s(k, e.target.value as never); if (k === "sku") setSkuTouched(true); }} placeholder={k === "specs" ? "e.g. 24 PCS × 1kg" : k === "packagingDesc" ? "e.g. 24 × 1 CTN, 45x30x20cm" : ""} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50" />
+                <input type={t} value={String(f[k] ?? "")} onChange={e => { s(k, e.target.value as never); if (k === "sku") setSkuTouched(true); }} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50" />
               </div>
             ))}
             {/* Image upload */}

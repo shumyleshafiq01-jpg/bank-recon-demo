@@ -19,12 +19,33 @@ type QuoteProduct = {
   qty: number; fobPerCarton: number; freightPerCarton: number; cnfPerCarton: number;
 };
 
+type QuoteType = "CNF" | "FOB";
+type DiscountType = "none" | "percent" | "amount";
+type DiscountScope = "all" | "specific";
+
 type Quote = {
   id: string; quoteNo: string; clientName: string; clientContact: string;
   destination: string; country: string; generatedAt: string; validTill: string;
   status: string; createdBy: string; brandKafi: boolean; brandEssence: boolean;
   notes: string; productsSnapshot: QuoteProduct[];
+  quoteType: QuoteType;
+  discountType: DiscountType; discountScope: DiscountScope; discountValue: number;
+  discountAmount: number; discountProductIds: string[];
 };
+
+// Discount is computed on the (already CNF/FOB-appropriate) line totals —
+// scoped to either every product or just the ones the quote-maker picked.
+function computeDiscount(
+  products: QuoteProduct[], discountType: DiscountType, discountScope: DiscountScope,
+  discountValue: number, discountProductIds: string[],
+): number {
+  if (discountType === "none" || discountValue <= 0) return 0;
+  const scoped = discountScope === "all" ? products : products.filter(p => discountProductIds.includes(p.productId));
+  const scopedSubtotal = scoped.reduce((s, p) => s + p.cnfPerCarton * p.qty, 0);
+  if (scopedSubtotal <= 0) return 0;
+  const raw = discountType === "percent" ? scopedSubtotal * (discountValue / 100) : discountValue;
+  return Math.round(Math.min(raw, scopedSubtotal) * 100) / 100;
+}
 
 const PIN_MAP: Record<string, string> = {
   "1122": "Accountant", "5678": "Moiz", "4444": "Hamza", "786786": "Admin",
@@ -60,7 +81,6 @@ type NewQuoteModalProps = {
 };
 
 function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalogRecipes, catalogSettings, createdBy, onClose, onCreated }: NewQuoteModalProps) {
-  const [step, setStep] = useState(1);
   const [clientName, setClientName] = useState("");
   const [clientContact, setClientContact] = useState("");
   const [destination, setDestination] = useState("");
@@ -68,13 +88,22 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
   const [freightPerCarton, setFreightPerCarton] = useState(0);
   const [validTill, setValidTill] = useState(defaultValidTill());
   const [notes, setNotes] = useState("");
-  const [brandKafi, setBrandKafi] = useState(true);
-  const [brandEssence, setBrandEssence] = useState(false);
+  // Brand is always Kafi Commodities on the quote — no toggle shown to the quote-maker.
+  const brandKafi = true;
+  const brandEssence = false;
+  const [quoteType, setQuoteType] = useState<QuoteType>("CNF");
   const [products, setProducts] = useState<QuoteProduct[]>([
     { productId: "", productName: "", sku: "", specs: "", packagingDesc: "", qty: 1, fobPerCarton: 0, freightPerCarton: 0, cnfPerCarton: 0 },
   ]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  // Discount
+  const [discountEnabled, setDiscountEnabled] = useState(false);
+  const [discountType, setDiscountType] = useState<DiscountType>("percent");
+  const [discountScope, setDiscountScope] = useState<DiscountScope>("all");
+  const [discountValue, setDiscountValue] = useState(0);
+  const [discountProductIds, setDiscountProductIds] = useState<string[]>([]);
 
   const sortedProducts = [...catalogProducts].sort((a, b) => a.name.localeCompare(b.name));
 
@@ -99,9 +128,19 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
     setDestination(card.destination);
     setCountry(card.country);
     setFreightPerCarton(card.freightPerCarton);
-    // Recompute each product's own per-carton freight using its own FCL Container Qty
+    // Recompute each product's own per-carton freight using its own FCL Container Qty.
+    // In FOB mode the freight card is frozen — it's kept selected for record-keeping
+    // but never actually added to the quote.
     setProducts(prev => prev.map(p => {
-      const freight = p.productId ? freightFor(p.productId, card.freightPerCarton) : 0;
+      const freight = (quoteType === "CNF" && p.productId) ? freightFor(p.productId, card.freightPerCarton) : 0;
+      return { ...p, freightPerCarton: freight, cnfPerCarton: p.fobPerCarton + freight };
+    }));
+  }
+
+  function changeQuoteType(next: QuoteType) {
+    setQuoteType(next);
+    setProducts(prev => prev.map(p => {
+      const freight = (next === "CNF" && p.productId) ? freightFor(p.productId, freightPerCarton) : 0;
       return { ...p, freightPerCarton: freight, cnfPerCarton: p.fobPerCarton + freight };
     }));
   }
@@ -114,10 +153,12 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
         const product = catalogProducts.find(cp => cp.id === value);
         p.productName = product?.name ?? "";
         p.sku = product?.sku ?? "";
-        p.specs = product?.specs ?? "";
+        // Specs/Packaging are no longer collected as separate fields in Product List —
+        // "Product Packaging" (notes) now carries this combined description.
+        p.specs = product?.specs || product?.notes || "";
         p.packagingDesc = product?.packagingDesc ?? "";
         p.fobPerCarton = fobFor(String(value), p.qty);
-        p.freightPerCarton = freightFor(String(value), freightPerCarton);
+        p.freightPerCarton = (quoteType === "CNF") ? freightFor(String(value), freightPerCarton) : 0;
         p.cnfPerCarton = p.fobPerCarton + p.freightPerCarton;
       } else if (field === "qty") {
         const qty = Number(value) || 1;
@@ -147,15 +188,21 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
     setSaving(true);
     setError("");
     try {
+      const finalProducts = products.filter(p => p.productName.trim());
+      const finalDiscountType = discountEnabled ? discountType : "none";
+      const discountAmount = computeDiscount(finalProducts, finalDiscountType, discountScope, discountValue, discountProductIds);
       const res = await fetch("/api/cnf/quotes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "create",
           quote: {
-            clientName, clientContact, destination, country, validTill, notes,
-            brandKafi, brandEssence, createdBy,
-            productsSnapshot: products.filter(p => p.productName.trim()),
+            clientName, clientContact, destination, country,
+            validTill, notes, brandKafi, brandEssence, createdBy,
+            quoteType,
+            discountType: finalDiscountType, discountScope, discountValue,
+            discountAmount, discountProductIds: finalDiscountType === "none" ? [] : discountProductIds,
+            productsSnapshot: finalProducts,
           },
         }),
       });
@@ -168,124 +215,107 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
     setSaving(false);
   }
 
-  const totalCNF = products.reduce((s, p) => s + p.cnfPerCarton * p.qty, 0);
-  const validProducts = products.filter(p => p.productName.trim()).length;
+  const validProductsList = products.filter(p => p.productName.trim());
+  const validProducts = validProductsList.length;
+  const subtotal = validProductsList.reduce((s, p) => s + p.cnfPerCarton * p.qty, 0);
+  const activeDiscountType: DiscountType = discountEnabled ? discountType : "none";
+  const discountAmount = computeDiscount(validProductsList, activeDiscountType, discountScope, discountValue, discountProductIds);
+  const grandTotal = subtotal - discountAmount;
+
+  function toggleDiscountProduct(productId: string) {
+    setDiscountProductIds(prev => prev.includes(productId) ? prev.filter(id => id !== productId) : [...prev, productId]);
+  }
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92vh] flex flex-col" onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div className="flex items-center justify-between px-8 py-5 border-b border-gray-100">
-          <div>
-            <h2 className="text-xl font-semibold text-gray-900">New CNF Quotation</h2>
-            <p className="text-sm text-gray-400 mt-0.5">Step {step} of 3</p>
-          </div>
+          <h2 className="text-xl font-semibold text-gray-900">New CNF Quotation</h2>
           <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 cursor-pointer"><X className="w-5 h-5" /></button>
         </div>
 
-        {/* Steps indicator */}
-        <div className="flex px-8 pt-5 pb-3 gap-3">
-          {["Client & Destination", "Products", "Review & Generate"].map((label, i) => (
-            <div key={i} className="flex-1 flex flex-col items-center gap-1.5">
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-colors ${step > i + 1 ? "bg-green-500 text-white" : step === i + 1 ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-400"}`}>
-                {step > i + 1 ? <Check className="w-4 h-4" /> : i + 1}
-              </div>
-              <span className={`text-xs text-center leading-tight ${step === i + 1 ? "text-blue-600 font-medium" : "text-gray-400"}`}>{label}</span>
+        {/* Body — single page */}
+        <div className="flex-1 overflow-y-auto px-8 py-5 text-base space-y-6">
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-600 mb-1.5">Client Name *</label>
+              <input value={clientName} onChange={e => setClientName(e.target.value)} placeholder="e.g. Al Futtaim Group"
+                className="w-full border border-gray-200 rounded-lg px-3.5 py-2.5 text-base text-gray-900 focus:outline-none focus:border-blue-400" />
             </div>
-          ))}
-        </div>
-
-        {/* Body */}
-        <div className="flex-1 overflow-y-auto px-8 py-5 text-base">
-
-          {/* Step 1 */}
-          {step === 1 && (
-            <div className="space-y-5">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-600 mb-1.5">Client Name *</label>
-                  <input value={clientName} onChange={e => setClientName(e.target.value)} placeholder="e.g. Al Futtaim Group"
-                    className="w-full border border-gray-200 rounded-lg px-3.5 py-2.5 text-base text-gray-900 focus:outline-none focus:border-blue-400" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-600 mb-1.5">Contact (optional)</label>
-                  <input value={clientContact} onChange={e => setClientContact(e.target.value)} placeholder="Phone / email"
-                    className="w-full border border-gray-200 rounded-lg px-3.5 py-2.5 text-base text-gray-900 focus:outline-none focus:border-blue-400" />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-600 mb-2.5">Destination (from Master Freight Card)</label>
-                {freightCards.length === 0 ? (
-                  <p className="text-sm text-gray-400 italic">No freight cards yet — add them in the Master Freight section below, or enter manually.</p>
-                ) : (
-                  <select
-                    value={freightCards.find(c => c.destination === destination)?.id ?? ""}
-                    onChange={e => { const card = freightCards.find(c => c.id === e.target.value); if (card) pickDestination(card); }}
-                    className="w-full border border-gray-200 rounded-lg px-3.5 py-2.5 text-base text-gray-900 focus:outline-none focus:border-blue-400 bg-white cursor-pointer">
-                    <option value="">— Choose a destination —</option>
-                    {freightCards.map(c => (
-                      <option key={c.id} value={c.id}>{c.destination}, {c.country} — ${c.freightPerCarton}/container</option>
-                    ))}
-                  </select>
-                )}
-                <div className="mt-4 grid grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">Port / Destination</label>
-                    <input value={destination} onChange={e => setDestination(e.target.value)} placeholder="e.g. JEBEL ALI PORT"
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-400" />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">Country</label>
-                    <input value={country} onChange={e => setCountry(e.target.value)} placeholder="UAE"
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-400" />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">Freight/Container (USD)</label>
-                    <input type="number" min={0} value={freightPerCarton} onChange={e => {
-                      const v = Math.max(0, parseFloat(e.target.value) || 0);
-                      setFreightPerCarton(v);
-                      setProducts(prev => prev.map(p => {
-                        const freight = p.productId ? freightFor(p.productId, v) : 0;
-                        return { ...p, freightPerCarton: freight, cnfPerCarton: p.fobPerCarton + freight };
-                      }));
-                    }}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-400" />
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-600 mb-1.5">Valid Until</label>
-                  <input type="date" value={validTill} onChange={e => setValidTill(e.target.value)}
-                    className="w-full border border-gray-200 rounded-lg px-3.5 py-2.5 text-base text-gray-900 focus:outline-none focus:border-blue-400" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-600 mb-1.5">Notes (optional)</label>
-                  <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="e.g. Subject to LC confirmation"
-                    className="w-full border border-gray-200 rounded-lg px-3.5 py-2.5 text-base text-gray-900 focus:outline-none focus:border-blue-400" />
-                </div>
-              </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-600 mb-1.5">Contact (optional)</label>
+              <input value={clientContact} onChange={e => setClientContact(e.target.value)} placeholder="Phone / email"
+                className="w-full border border-gray-200 rounded-lg px-3.5 py-2.5 text-base text-gray-900 focus:outline-none focus:border-blue-400" />
             </div>
-          )}
+          </div>
 
-          {/* Step 2 */}
-          {step === 2 && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-gray-500">Freight: <span className="font-semibold text-gray-800">${freightPerCarton}/container</span> to <span className="font-semibold text-gray-800">{destination || "—"}</span> — per-carton freight is calculated automatically per product below</p>
-                <button onClick={addProduct} className="flex items-center gap-1.5 text-sm bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 cursor-pointer transition-colors">
-                  <Plus className="w-4 h-4" /> Add Product
+          <div>
+            <label className="block text-sm font-medium text-gray-600 mb-2.5">Quote Type</label>
+            <div className="flex gap-3">
+              {(["CNF", "FOB"] as const).map(t => (
+                <button key={t} onClick={() => changeQuoteType(t)}
+                  className={`flex-1 border rounded-xl px-5 py-3 text-base font-medium cursor-pointer transition-all ${quoteType === t ? "border-blue-500 bg-blue-50 text-blue-700" : "border-gray-200 text-gray-500 hover:border-gray-300"}`}>
+                  {t === "CNF" ? "CNF (with freight)" : "FOB (no freight)"}
                 </button>
-              </div>
+              ))}
+            </div>
+            <p className="text-xs text-gray-400 mt-1.5">
+              {quoteType === "CNF" ? "Freight is added automatically per product below." : "Freight is frozen — the destination can still be selected for reference, but its cost is not added to this quote."}
+            </p>
+          </div>
 
-              {sortedProducts.length === 0 && (
-                <p className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
-                  No products found in the Product List. Add products (with recipes) there first — CNF quotes pull FOB pricing directly from the Product List.
-                </p>
-              )}
+          <div>
+            <label className="block text-sm font-medium text-gray-600 mb-2.5">
+              Destination {quoteType === "FOB" && <span className="text-xs font-normal text-amber-600">(frozen — not applied to price)</span>}
+            </label>
+            {freightCards.length === 0 ? (
+              <p className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+                No freight destinations set up yet — add one in the Master Freight Card section below first.
+              </p>
+            ) : (
+              <select
+                value={freightCards.find(c => c.destination === destination)?.id ?? ""}
+                disabled={quoteType === "FOB"}
+                onChange={e => { const card = freightCards.find(c => c.id === e.target.value); if (card) pickDestination(card); }}
+                className="w-full border border-gray-200 rounded-lg px-3.5 py-2.5 text-base text-gray-900 focus:outline-none focus:border-blue-400 bg-white cursor-pointer disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed">
+                <option value="">— Choose a destination —</option>
+                {freightCards.map(c => (
+                  <option key={c.id} value={c.id}>{c.destination}, {c.country}</option>
+                ))}
+              </select>
+            )}
+          </div>
 
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-600 mb-1.5">Valid Until</label>
+              <input type="date" value={validTill} onChange={e => setValidTill(e.target.value)}
+                className="w-full border border-gray-200 rounded-lg px-3.5 py-2.5 text-base text-gray-900 focus:outline-none focus:border-blue-400" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-600 mb-1.5">Notes (optional)</label>
+              <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="e.g. Subject to LC confirmation"
+                className="w-full border border-gray-200 rounded-lg px-3.5 py-2.5 text-base text-gray-900 focus:outline-none focus:border-blue-400" />
+            </div>
+          </div>
+
+          <div className="border-t border-gray-100 pt-5">
+            <div className="flex items-center justify-between mb-3">
+              <label className="block text-sm font-medium text-gray-600">Products</label>
+              <button onClick={addProduct} className="flex items-center gap-1.5 text-sm bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 cursor-pointer transition-colors">
+                <Plus className="w-4 h-4" /> Add Product
+              </button>
+            </div>
+
+            {sortedProducts.length === 0 && (
+              <p className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-3">
+                No products found in the Product List. Add products (with recipes) there first — CNF quotes pull FOB pricing directly from the Product List.
+              </p>
+            )}
+
+            <div className="space-y-3">
               {products.map((p, i) => (
                 <div key={i} className="border border-gray-200 rounded-xl p-4 space-y-3 bg-gray-50/50">
                   <div className="flex items-center justify-between">
@@ -304,19 +334,7 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
                       ))}
                     </select>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">Specs / Description <span className="text-gray-400">(auto-filled from Product List, editable)</span></label>
-                      <input value={p.specs} onChange={e => updateProduct(i, "specs", e.target.value)} placeholder="e.g. 24 PCS × 1kg — add manually if not on file"
-                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-400 bg-white" />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">Packaging <span className="text-gray-400">(auto-filled from Product List, editable)</span></label>
-                      <input value={p.packagingDesc} onChange={e => updateProduct(i, "packagingDesc", e.target.value)} placeholder="e.g. 24 pcs × 1 Carton — add manually if not on file"
-                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-400 bg-white" />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-4 gap-3">
+                  <div className={`grid ${quoteType === "CNF" ? "grid-cols-4" : "grid-cols-3"} gap-3`}>
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Qty (Cartons)</label>
                       <div className="w-full border border-gray-200 bg-gray-100 rounded-lg px-3 py-2 text-sm font-medium text-gray-700 text-right">
@@ -329,102 +347,116 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
                         {p.productId ? fmtUSD(p.fobPerCarton) : "—"}
                       </div>
                     </div>
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">Freight/Carton ($) — auto</label>
-                      <div className="w-full border border-gray-200 bg-gray-100 rounded-lg px-3 py-2 text-sm font-medium text-gray-700 text-right">
-                        {fmtUSD(p.freightPerCarton)}
+                    {quoteType === "CNF" && (
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Freight/Carton ($) — auto</label>
+                        <div className="w-full border border-gray-200 bg-gray-100 rounded-lg px-3 py-2 text-sm font-medium text-gray-700 text-right">
+                          {fmtUSD(p.freightPerCarton)}
+                        </div>
                       </div>
-                    </div>
+                    )}
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">CNF/Carton ($)</label>
+                      <label className="block text-xs text-gray-500 mb-1">{quoteType === "CNF" ? "CNF/Carton ($)" : "Price/Carton ($)"}</label>
                       <div className="w-full border border-blue-200 bg-blue-50 rounded-lg px-3 py-2 text-sm font-semibold text-blue-700 text-right">
                         {fmtUSD(p.cnfPerCarton)}
                       </div>
                     </div>
                   </div>
-                  <div className="flex justify-end text-xs text-gray-500">
-                    Total: <span className="ml-1 font-semibold text-gray-800">{fmtUSD(p.cnfPerCarton * p.qty)}</span>
-                  </div>
+                  {discountEnabled && discountScope === "specific" && p.productId && (
+                    <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer pt-1">
+                      <input type="checkbox" checked={discountProductIds.includes(p.productId)} onChange={() => toggleDiscountProduct(p.productId)}
+                        className="cursor-pointer accent-blue-600" />
+                      Apply discount to this item
+                    </label>
+                  )}
                 </div>
               ))}
+            </div>
+          </div>
 
-              {products.length > 0 && (
-                <div className="flex justify-end border-t border-gray-200 pt-4">
-                  <div className="text-base text-gray-600">Grand Total CNF: <span className="font-bold text-blue-700 text-xl ml-2">{fmtUSD(totalCNF)}</span></div>
+          {/* Discount */}
+          <div className="border-t border-gray-100 pt-5">
+            <label className="flex items-center gap-2.5 text-sm font-medium text-gray-600 cursor-pointer mb-3">
+              <input type="checkbox" checked={discountEnabled} onChange={e => setDiscountEnabled(e.target.checked)} className="cursor-pointer accent-blue-600 w-4 h-4" />
+              Add Discount
+            </label>
+            {discountEnabled && (
+              <div className="grid grid-cols-3 gap-3 bg-gray-50 border border-gray-200 rounded-xl p-4">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Discount Type</label>
+                  <div className="flex gap-2">
+                    {(["percent", "amount"] as const).map(t => (
+                      <button key={t} onClick={() => setDiscountType(t)}
+                        className={`flex-1 border rounded-lg px-3 py-2 text-sm cursor-pointer transition-all ${discountType === t ? "border-blue-500 bg-blue-50 text-blue-700" : "border-gray-200 text-gray-500"}`}>
+                        {t === "percent" ? "%" : "$ Amount"}
+                      </button>
+                    ))}
+                  </div>
                 </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Applies To</label>
+                  <div className="flex gap-2">
+                    {(["all", "specific"] as const).map(s => (
+                      <button key={s} onClick={() => setDiscountScope(s)}
+                        className={`flex-1 border rounded-lg px-3 py-2 text-sm cursor-pointer transition-all ${discountScope === s ? "border-blue-500 bg-blue-50 text-blue-700" : "border-gray-200 text-gray-500"}`}>
+                        {s === "all" ? "All Items" : "Specific Items"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">{discountType === "percent" ? "Discount %" : "Discount Amount ($)"}</label>
+                  <input type="number" min={0} value={discountValue || ""} onChange={e => setDiscountValue(Math.max(0, parseFloat(e.target.value) || 0))}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-400 bg-white" />
+                </div>
+                {discountScope === "specific" && (
+                  <p className="col-span-3 text-xs text-gray-500">Check &quot;Apply discount to this item&quot; under each product above to choose which ones it applies to.</p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Quote Summary — always visible, updates live */}
+          <div className="border border-gray-200 rounded-xl p-5 bg-gray-50 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Quote Summary</span>
+              <span className="text-sm text-gray-400">Auto-numbered on save</span>
+            </div>
+            <div className="grid grid-cols-2 gap-y-2.5 text-base">
+              <span className="text-gray-500">Client</span><span className="font-medium text-gray-900">{clientName || "—"}</span>
+              <span className="text-gray-500">Quote Type</span><span className="font-medium text-gray-900">{quoteType}</span>
+              <span className="text-gray-500">Destination</span><span className="font-medium text-gray-900">{destination || "—"}{country ? `, ${country}` : ""}</span>
+              <span className="text-gray-500">Valid Until</span><span className="font-medium text-gray-900">{validTill ? fmtDate(validTill + "T00:00:00") : "—"}</span>
+              <span className="text-gray-500">Products</span><span className="font-medium text-gray-900">{validProducts} item{validProducts !== 1 ? "s" : ""}</span>
+              <span className="text-gray-500">Subtotal</span><span className="font-medium text-gray-900">{fmtUSD(subtotal)}</span>
+              {discountAmount > 0 && (
+                <>
+                  <span className="text-gray-500">Discount</span><span className="font-medium text-red-500">−{fmtUSD(discountAmount)}</span>
+                </>
               )}
+              <span className="text-gray-500">Grand Total</span><span className="font-bold text-blue-700 text-lg">{fmtUSD(grandTotal)}</span>
             </div>
-          )}
+            {notes && <p className="text-sm text-gray-500 italic border-t border-gray-200 pt-2.5">{notes}</p>}
+          </div>
 
-          {/* Step 3 */}
-          {step === 3 && (
-            <div className="space-y-5">
-              <div>
-                <label className="block text-sm font-medium text-gray-600 mb-2.5">Brand on Quote</label>
-                <div className="flex gap-3">
-                  {[{ key: "brandKafi", label: "Kafi Commodities", val: brandKafi, set: setBrandKafi },
-                    { key: "brandEssence", label: "Essence", val: brandEssence, set: setBrandEssence }].map(b => (
-                    <button key={b.key} onClick={() => b.set(!b.val)}
-                      className={`flex items-center gap-2 border rounded-xl px-5 py-3 text-base cursor-pointer transition-all ${b.val ? "border-blue-500 bg-blue-50 text-blue-700 font-medium" : "border-gray-200 text-gray-500 hover:border-gray-300"}`}>
-                      <div className={`w-5 h-5 rounded border-2 flex items-center justify-center ${b.val ? "border-blue-500 bg-blue-500" : "border-gray-300"}`}>
-                        {b.val && <Check className="w-3 h-3 text-white" />}
-                      </div>
-                      {b.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-3.5">
+            <p className="text-sm text-amber-700 font-medium">Once generated, this quote is immutable and cannot be edited.</p>
+            <p className="text-xs text-amber-600 mt-1">A unique quote number will be assigned automatically.</p>
+          </div>
 
-              {/* Preview summary */}
-              <div className="border border-gray-200 rounded-xl p-5 bg-gray-50 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Quote Summary</span>
-                  <span className="text-sm text-gray-400">Auto-numbered on save</span>
-                </div>
-                <div className="grid grid-cols-2 gap-y-2.5 text-base">
-                  <span className="text-gray-500">Client</span><span className="font-medium text-gray-900">{clientName || "—"}</span>
-                  <span className="text-gray-500">Destination</span><span className="font-medium text-gray-900">{destination || "—"}{country ? `, ${country}` : ""}</span>
-                  <span className="text-gray-500">Freight/Container</span><span className="font-medium text-gray-900">${freightPerCarton}</span>
-                  <span className="text-gray-500">Valid Until</span><span className="font-medium text-gray-900">{validTill ? fmtDate(validTill + "T00:00:00") : "—"}</span>
-                  <span className="text-gray-500">Products</span><span className="font-medium text-gray-900">{validProducts} item{validProducts !== 1 ? "s" : ""}</span>
-                  <span className="text-gray-500">Grand Total CNF</span><span className="font-bold text-blue-700 text-lg">{fmtUSD(totalCNF)}</span>
-                </div>
-                {notes && <p className="text-sm text-gray-500 italic border-t border-gray-200 pt-2.5">{notes}</p>}
-              </div>
-
-              <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-3.5">
-                <p className="text-sm text-amber-700 font-medium">Once generated, this quote is immutable and cannot be edited.</p>
-                <p className="text-xs text-amber-600 mt-1">A unique quote number will be assigned automatically.</p>
-              </div>
-
-              {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-2.5">{error}</p>}
-            </div>
-          )}
+          {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-2.5">{error}</p>}
         </div>
 
         {/* Footer */}
         <div className="flex items-center justify-between px-8 py-5 border-t border-gray-100">
-          <button onClick={() => step > 1 ? setStep(s => s - 1) : onClose()}
-            className="px-4 py-2.5 text-base text-gray-500 hover:text-gray-700 cursor-pointer transition-colors">
-            {step === 1 ? "Cancel" : "← Back"}
+          <button onClick={onClose} className="px-4 py-2.5 text-base text-gray-500 hover:text-gray-700 cursor-pointer transition-colors">
+            Cancel
           </button>
-          <div className="flex gap-2">
-            {step < 3 && (
-              <button
-                onClick={() => setStep(s => s + 1)}
-                disabled={step === 1 && !clientName.trim()}
-                className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400 text-white text-base font-medium rounded-lg cursor-pointer disabled:cursor-not-allowed transition-colors">
-                Next →
-              </button>
-            )}
-            {step === 3 && (
-              <button onClick={generate} disabled={saving || validProducts === 0}
-                className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400 text-white text-base font-semibold rounded-lg cursor-pointer disabled:cursor-not-allowed transition-colors">
-                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Ship className="w-4 h-4" />}
-                Generate Quote
-              </button>
-            )}
-          </div>
+          <button onClick={generate} disabled={saving || validProducts === 0 || !clientName.trim()}
+            className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400 text-white text-base font-semibold rounded-lg cursor-pointer disabled:cursor-not-allowed transition-colors">
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Ship className="w-4 h-4" />}
+            Generate Quote
+          </button>
         </div>
       </div>
     </div>
@@ -763,10 +795,11 @@ export default function CNFPage() {
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-100">
                     <th className="text-left px-4 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Quote #</th>
+                    <th className="text-center px-4 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Type</th>
                     <th className="text-left px-4 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Client</th>
                     <th className="text-left px-4 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Destination</th>
                     <th className="text-left px-4 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Products</th>
-                    <th className="text-right px-4 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Total CNF</th>
+                    <th className="text-right px-4 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Total</th>
                     <th className="text-left px-4 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Generated</th>
                     <th className="text-left px-4 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Valid Till</th>
                     <th className="px-4 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wide text-center">Brand</th>
@@ -775,12 +808,18 @@ export default function CNFPage() {
                 </thead>
                 <tbody>
                   {filtered.map(q => {
-                    const totalCNF = q.productsSnapshot.reduce((s, p) => s + p.cnfPerCarton * p.qty, 0);
+                    const subtotal = q.productsSnapshot.reduce((s, p) => s + p.cnfPerCarton * p.qty, 0);
+                    const total = subtotal - (q.discountAmount || 0);
                     const isArchived = q.status === "archived";
                     return (
                       <tr key={q.id} className={`border-b border-gray-50 hover:bg-gray-50/50 transition-colors ${isArchived ? "opacity-60" : ""}`}>
                         <td className="px-4 py-3">
                           <span className="font-mono text-xs font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">{q.quoteNo}</span>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${q.quoteType === "FOB" ? "bg-purple-50 text-purple-600" : "bg-blue-50 text-blue-600"}`}>
+                            {q.quoteType || "CNF"}
+                          </span>
                         </td>
                         <td className="px-4 py-3">
                           <p className="font-medium text-gray-900 text-xs">{q.clientName}</p>
@@ -797,7 +836,8 @@ export default function CNFPage() {
                           )}
                         </td>
                         <td className="px-4 py-3 text-right">
-                          <span className="font-semibold text-blue-700 text-xs">{fmtUSD(totalCNF)}</span>
+                          <span className="font-semibold text-blue-700 text-xs">{fmtUSD(total)}</span>
+                          {(q.discountAmount ?? 0) > 0 && <p className="text-[9px] text-red-400">−{fmtUSD(q.discountAmount)} disc.</p>}
                         </td>
                         <td className="px-4 py-3 text-xs text-gray-500">{fmtDate(q.generatedAt)}</td>
                         <td className="px-4 py-3">

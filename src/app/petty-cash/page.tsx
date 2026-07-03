@@ -303,6 +303,7 @@ export default function PettyCashPage() {
   const [showHandoverForm, setShowHandoverForm] = useState(false);
   const [showDenomModal, setShowDenomModal] = useState<"aa1" | "aa2" | null>(null);
   const [showHandoverHistory, setShowHandoverHistory] = useState<"aa1" | "aa2" | null>(null);
+  const [showCashReturnModal, setShowCashReturnModal] = useState<"aa1" | "aa2" | null>(null);
 
   useEffect(() => {
     try {
@@ -744,16 +745,26 @@ export default function PettyCashPage() {
                     ) : (
                       <p className="text-[9px] text-muted italic">No physical count recorded yet.</p>
                     )}
-                    <button onClick={() => setShowHandoverHistory(showHandoverHistory === holder ? null : holder)} className="text-[9px] text-muted hover:text-orange-400 cursor-pointer mt-2 transition-colors">
-                      {showHandoverHistory === holder ? "Hide history" : "Show handover history"}
-                    </button>
+                    <div className="flex items-center justify-between mt-2">
+                      <button onClick={() => setShowHandoverHistory(showHandoverHistory === holder ? null : holder)} className="text-[9px] text-muted hover:text-orange-400 cursor-pointer transition-colors">
+                        {showHandoverHistory === holder ? "Hide history" : "Show handover history"}
+                      </button>
+                      {session?.role === "accountant" && (
+                        <button onClick={() => setShowCashReturnModal(holder)} disabled={inHand <= 0}
+                          className="text-[9px] px-2 py-1 rounded-lg font-semibold border border-red-200 text-red-500 hover:bg-red-50 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors">
+                          Cash Return
+                        </button>
+                      )}
+                    </div>
                     {showHandoverHistory === holder && (
                       <div className="mt-2 pt-2 border-t border-border space-y-1 max-h-40 overflow-y-auto">
                         {handovers.filter(h => h.holder === holder).sort((a, b) => b.date.localeCompare(a.date)).map(h => (
                           <div key={h.id} className="flex items-center justify-between text-[9px]">
-                            <span className="text-muted">{h.date} — {h.notes || "Handover"}</span>
+                            <span className="text-muted">{h.date} — {h.notes || (h.amount < 0 ? "Cash Return" : "Handover")}</span>
                             <div className="flex items-center gap-1.5">
-                              <span className="font-mono font-semibold text-emerald-400">+{h.amount.toLocaleString("en-PK")}</span>
+                              <span className={`font-mono font-semibold ${h.amount < 0 ? "text-red-400" : "text-emerald-400"}`}>
+                                {h.amount >= 0 ? "+" : ""}{h.amount.toLocaleString("en-PK")}
+                              </span>
                               {session?.role === "accountant" && (
                                 <button onClick={() => deleteHandover(h.id)} className="text-muted hover:text-red-400 cursor-pointer"><Trash2 className="w-2.5 h-2.5" /></button>
                               )}
@@ -1147,6 +1158,25 @@ export default function PettyCashPage() {
           onClose={() => setShowDenomModal(null)}
         />
       )}
+
+      {/* Cash Return Modal */}
+      {showCashReturnModal && (
+        <CashReturnModal
+          holder={showCashReturnModal}
+          cashInHandAmount={cashInHand(showCashReturnModal)}
+          onConfirm={async (givenBy) => {
+            await createHandover({
+              date: new Date().toISOString().slice(0, 10),
+              holder: showCashReturnModal,
+              amount: -cashInHand(showCashReturnModal),
+              notes: "Cash returned to Hafeez",
+              givenBy,
+            });
+            setShowCashReturnModal(null);
+          }}
+          onClose={() => setShowCashReturnModal(null)}
+        />
+      )}
     </div>
   );
 }
@@ -1301,6 +1331,62 @@ function DenominationModal({ holder, currentCashInHand, countedBy, onSave, onClo
           <button onClick={submit} disabled={saving}
             className="flex-1 px-4 py-2 bg-orange-500 hover:bg-orange-500/80 disabled:opacity-40 text-white text-sm font-semibold rounded-lg cursor-pointer transition-colors">
             {saving ? "Saving..." : "Save Count"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CashReturnModal({ holder, cashInHandAmount, onConfirm, onClose }: {
+  holder: "aa1" | "aa2";
+  cashInHandAmount: number;
+  onConfirm: (givenBy: string) => void | Promise<void>;
+  onClose: () => void;
+}) {
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function submit() {
+    const s = PC_PINS[pin.trim()];
+    if (!s || s.role !== "accountant") { setError("Only the Accountant's PIN can confirm a cash return."); return; }
+    setSaving(true);
+    await onConfirm(s.name);
+    setSaving(false);
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-surface rounded-2xl border border-border w-full max-w-sm p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <HandCoins className="w-4 h-4 text-red-400" />
+            <h3 className="text-sm font-semibold text-foreground">Cash Return — {HOLDER_LABELS[holder]}</h3>
+          </div>
+          <button onClick={onClose} className="text-muted hover:text-foreground cursor-pointer"><X className="w-4 h-4" /></button>
+        </div>
+
+        <div className="rounded-xl border border-border bg-background p-4 mb-4 text-center">
+          <p className="text-[10px] text-muted uppercase tracking-wide">Cash In Hand Being Returned</p>
+          <p className="text-2xl font-bold text-red-400 mt-1">{fmtBal(cashInHandAmount)}</p>
+        </div>
+
+        <p className="text-xs text-muted mb-3">Confirm that this cash has been physically collected back by the Accountant. This will bring {HOLDER_LABELS[holder]}&apos;s cash-in-hand balance to zero.</p>
+
+        <div className="mb-3">
+          <label className="text-[10px] text-muted uppercase tracking-wide block mb-1">Accountant PIN</label>
+          <input type="password" value={pin} onChange={(e) => { setPin(e.target.value); setError(""); }}
+            onKeyDown={(e) => e.key === "Enter" && submit()} placeholder="Enter your PIN" autoFocus
+            className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-red-500/50" />
+        </div>
+        {error && <p className="text-xs text-red-400 mb-3">{error}</p>}
+
+        <div className="flex gap-2">
+          <button onClick={onClose} className="flex-1 px-4 py-2 text-sm text-muted hover:text-foreground cursor-pointer transition-colors">Cancel</button>
+          <button onClick={submit} disabled={saving || !pin.trim()}
+            className="flex-1 px-4 py-2 bg-red-500 hover:bg-red-500/80 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg cursor-pointer transition-colors">
+            {saving ? "Confirming..." : "Confirm Cash Return"}
           </button>
         </div>
       </div>

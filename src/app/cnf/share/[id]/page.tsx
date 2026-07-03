@@ -4,7 +4,10 @@ import type { Metadata } from "next";
 import PrintButton from "../PrintButton";
 
 const SHEET = "CNF_Quotes";
-const HEADERS = ["id","quoteNo","clientName","clientContact","destination","country","generatedAt","validTill","status","createdBy","brandKafi","brandEssence","notes","productsSnapshot"];
+const HEADERS = [
+  "id","quoteNo","clientName","clientContact","destination","country","generatedAt","validTill","status","createdBy","brandKafi","brandEssence","notes","productsSnapshot",
+  "quoteType","discountType","discountScope","discountValue","discountAmount","discountProductIds",
+];
 
 type QuoteProduct = {
   productName: string; sku: string; specs: string; packagingDesc: string;
@@ -24,6 +27,8 @@ async function getQuote(id: string) {
       destination: row[4], country: row[5], generatedAt: row[6], validTill: row[7],
       status: row[8], createdBy: row[9], brandKafi: row[10] !== "false", brandEssence: row[11] === "true",
       notes: row[12], products,
+      quoteType: (row[14] || "CNF") as "CNF" | "FOB",
+      discountAmount: parseFloat(row[18]) || 0,
     };
   } catch {
     return null;
@@ -49,7 +54,9 @@ export default async function CNFSharePage({ params }: { params: Promise<{ id: s
   const quote = await getQuote(id);
   if (!quote) notFound();
 
-  const totalCNF = quote.products.reduce((s, p) => s + p.cnfPerCarton * p.qty, 0);
+  const isFob = quote.quoteType === "FOB";
+  const subtotal = quote.products.reduce((s, p) => s + p.cnfPerCarton * p.qty, 0);
+  const grandTotal = subtotal - (quote.discountAmount || 0);
   const isExpired = quote.validTill && new Date(quote.validTill + "T23:59:59") < new Date();
 
   const brandName = quote.brandKafi && quote.brandEssence
@@ -73,7 +80,7 @@ export default async function CNFSharePage({ params }: { params: Promise<{ id: s
           <div style={{ background: "linear-gradient(135deg, #1e3a5f 0%, #0f2540 100%)", padding: "36px 40px 28px", color: "#fff" }}>
             <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.5, color: "#fff" }}>{brandName}</div>
             <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", marginTop: 2, textTransform: "uppercase", letterSpacing: 1.5 }}>International Trade</div>
-            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", textTransform: "uppercase", letterSpacing: 1.5, marginTop: 20 }}>Price Quotation</div>
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", textTransform: "uppercase", letterSpacing: 1.5, marginTop: 20 }}>{isFob ? "FOB Price Quotation" : "CNF Price Quotation"}</div>
             <div style={{ fontSize: 28, fontWeight: 800, color: "#fff", marginTop: 4, fontFamily: "monospace" }}>{quote.quoteNo}</div>
           </div>
 
@@ -108,7 +115,10 @@ export default async function CNFSharePage({ params }: { params: Promise<{ id: s
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ background: "#f8f9fb" }}>
-                  {["#", "Product", "Qty (Cartons)", "FOB/Carton", "Freight/Carton", "CNF/Carton", "Total CNF"].map((h, i) => (
+                  {(isFob
+                    ? ["#", "Product", "Qty (Cartons)", "FOB/Carton", "Total"]
+                    : ["#", "Product", "Qty (Cartons)", "FOB/Carton", "Freight/Carton", "CNF/Carton", "Total"]
+                  ).map((h, i) => (
                     <th key={h} style={{ padding: "10px 12px", textAlign: i >= 2 ? "right" : "left", fontSize: 10, textTransform: "uppercase", letterSpacing: 1, color: "#888", fontWeight: 700, borderBottom: "2px solid #e8eaed" }}>{h}</th>
                   ))}
                 </tr>
@@ -127,14 +137,24 @@ export default async function CNFSharePage({ params }: { params: Promise<{ id: s
                     </td>
                     <td style={{ padding: "12px 12px", textAlign: "right", fontSize: 13 }}>{p.qty}</td>
                     <td style={{ padding: "12px 12px", textAlign: "right", fontSize: 13, color: "#555" }}>{fmtUSD(p.fobPerCarton)}</td>
-                    <td style={{ padding: "12px 12px", textAlign: "right", fontSize: 13, color: "#555" }}>{fmtUSD(p.freightPerCarton)}</td>
-                    <td style={{ padding: "12px 12px", textAlign: "right", fontSize: 13, fontWeight: 700, color: "#1e40af" }}>{fmtUSD(p.cnfPerCarton)}</td>
+                    {!isFob && <td style={{ padding: "12px 12px", textAlign: "right", fontSize: 13, color: "#555" }}>{fmtUSD(p.freightPerCarton)}</td>}
+                    {!isFob && <td style={{ padding: "12px 12px", textAlign: "right", fontSize: 13, fontWeight: 700, color: "#1e40af" }}>{fmtUSD(p.cnfPerCarton)}</td>}
                     <td style={{ padding: "12px 12px", textAlign: "right", fontSize: 13, fontWeight: 700, color: "#1e40af" }}>{fmtUSD(p.cnfPerCarton * p.qty)}</td>
                   </tr>
                 ))}
+                <tr>
+                  <td colSpan={isFob ? 4 : 6} style={{ padding: "8px 12px", textAlign: "right", fontSize: 12, color: "#888", borderTop: "2px solid #e8eaed" }}>Subtotal</td>
+                  <td style={{ padding: "8px 12px", textAlign: "right", fontSize: 13, color: "#555", borderTop: "2px solid #e8eaed" }}>{fmtUSD(subtotal)}</td>
+                </tr>
+                {(quote.discountAmount || 0) > 0 && (
+                  <tr>
+                    <td colSpan={isFob ? 4 : 6} style={{ padding: "8px 12px", textAlign: "right", fontSize: 12, color: "#dc2626" }}>Discount</td>
+                    <td style={{ padding: "8px 12px", textAlign: "right", fontSize: 13, color: "#dc2626" }}>−{fmtUSD(quote.discountAmount)}</td>
+                  </tr>
+                )}
                 <tr style={{ background: "#eff6ff" }}>
-                  <td colSpan={6} style={{ padding: "14px 12px", textAlign: "right", fontSize: 12, fontWeight: 700, color: "#1e40af", borderTop: "2px solid #bfdbfe" }}>Grand Total CNF</td>
-                  <td style={{ padding: "14px 12px", textAlign: "right", fontSize: 14, fontWeight: 700, color: "#1e40af", borderTop: "2px solid #bfdbfe" }}>{fmtUSD(totalCNF)}</td>
+                  <td colSpan={isFob ? 4 : 6} style={{ padding: "14px 12px", textAlign: "right", fontSize: 12, fontWeight: 700, color: "#1e40af", borderTop: "2px solid #bfdbfe" }}>Grand Total</td>
+                  <td style={{ padding: "14px 12px", textAlign: "right", fontSize: 14, fontWeight: 700, color: "#1e40af", borderTop: "2px solid #bfdbfe" }}>{fmtUSD(grandTotal)}</td>
                 </tr>
               </tbody>
             </table>

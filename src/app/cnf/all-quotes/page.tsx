@@ -2,11 +2,15 @@ import { readSheet, ensureSheet } from "@/lib/google-sheets";
 import Link from "next/link";
 
 const SHEET = "CNF_Quotes";
-const HEADERS = ["id","quoteNo","clientName","clientContact","destination","country","generatedAt","validTill","status","createdBy","brandKafi","brandEssence","notes","productsSnapshot"];
+const HEADERS = [
+  "id","quoteNo","clientName","clientContact","destination","country","generatedAt","validTill","status","createdBy","brandKafi","brandEssence","notes","productsSnapshot",
+  "quoteType","discountType","discountScope","discountValue","discountAmount","discountProductIds",
+];
 
 type QuoteRow = {
   id: string; quoteNo: string; clientName: string; destination: string; country: string;
-  generatedAt: string; validTill: string; status: string; productCount: number; totalCNF: number;
+  generatedAt: string; validTill: string; status: string; productCount: number; total: number;
+  quoteType: "CNF" | "FOB";
 };
 
 async function getQuotes(): Promise<QuoteRow[]> {
@@ -16,11 +20,13 @@ async function getQuotes(): Promise<QuoteRow[]> {
     return rows.slice(1).filter(r => r[0]).map(r => {
       let products: { qty: number; cnfPerCarton: number }[] = [];
       try { products = JSON.parse(r[13] ?? "[]"); } catch { products = []; }
-      const totalCNF = products.reduce((s, p) => s + (p.cnfPerCarton ?? 0) * (p.qty ?? 0), 0);
+      const subtotal = products.reduce((s, p) => s + (p.cnfPerCarton ?? 0) * (p.qty ?? 0), 0);
+      const discountAmount = parseFloat(r[18]) || 0;
       return {
         id: r[0], quoteNo: r[1] ?? "", clientName: r[2] ?? "", destination: r[4] ?? "",
         country: r[5] ?? "", generatedAt: r[6] ?? "", validTill: r[7] ?? "", status: r[8] ?? "active",
-        productCount: products.length, totalCNF,
+        productCount: products.length, total: subtotal - discountAmount,
+        quoteType: (r[14] || "CNF") as "CNF" | "FOB",
       };
     }).filter(q => q.status === "active");
   } catch {
@@ -56,7 +62,7 @@ export default async function AllQuotesPage() {
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ background: "#f8f9fb" }}>
-                  {["Quote #", "Client", "Destination", "Products", "Total CNF", "Issued", "Valid Until", ""].map(h => (
+                  {["Quote #", "Type", "Client", "Destination", "Products", "Total", "Issued", "Valid Until", ""].map(h => (
                     <th key={h} style={{ padding: "12px 16px", textAlign: "left", fontSize: 10, textTransform: "uppercase", letterSpacing: 1, color: "#888", fontWeight: 700, borderBottom: "2px solid #e8eaed" }}>{h}</th>
                   ))}
                 </tr>
@@ -67,10 +73,13 @@ export default async function AllQuotesPage() {
                   return (
                     <tr key={q.id} style={{ borderBottom: "1px solid #f0f2f5" }}>
                       <td style={{ padding: "14px 16px", fontFamily: "monospace", fontSize: 12, fontWeight: 700, color: "#1e40af" }}>{q.quoteNo}</td>
+                      <td style={{ padding: "14px 16px" }}>
+                        <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: q.quoteType === "FOB" ? "#f5f3ff" : "#eff6ff", color: q.quoteType === "FOB" ? "#7c3aed" : "#1e40af" }}>{q.quoteType}</span>
+                      </td>
                       <td style={{ padding: "14px 16px", fontSize: 13, fontWeight: 600, color: "#1a1a2e" }}>{q.clientName}</td>
                       <td style={{ padding: "14px 16px", fontSize: 13, color: "#555" }}>{q.destination}{q.country ? `, ${q.country}` : ""}</td>
                       <td style={{ padding: "14px 16px", fontSize: 13, color: "#555" }}>{q.productCount} item{q.productCount !== 1 ? "s" : ""}</td>
-                      <td style={{ padding: "14px 16px", fontSize: 13, fontWeight: 700, color: "#1e40af" }}>{fmtUSD(q.totalCNF)}</td>
+                      <td style={{ padding: "14px 16px", fontSize: 13, fontWeight: 700, color: "#1e40af" }}>{fmtUSD(q.total)}</td>
                       <td style={{ padding: "14px 16px", fontSize: 12, color: "#888" }}>{fmtDate(q.generatedAt)}</td>
                       <td style={{ padding: "14px 16px", fontSize: 12, color: expired ? "#dc2626" : "#888", fontWeight: expired ? 700 : 400 }}>
                         {expired ? "EXPIRED" : fmtDate(q.validTill + "T00:00:00")}
