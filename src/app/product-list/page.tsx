@@ -588,9 +588,9 @@ export default function ProductListPage() {
                   <span className="font-semibold">{tab === "products" ? "Products" : tab === "master" ? "Master Prices" : "Price List"}</span>
                 </button>
                 <div className="flex items-center gap-2">
-                  {tab === "master" && (
+                  {(tab === "master" || tab === "pricelist") && (
                     <button onClick={() => { setSettingsDraft(settings); setEditSettings(true); }} className="flex items-center gap-1.5 text-xs px-3 py-1.5 border border-border text-muted hover:text-foreground hover:border-green-500/40 rounded-lg cursor-pointer">
-                      <Settings2 className="w-3 h-3" /> Global Cost Settings (FC Rate: {settings.fcRate})
+                      <Settings2 className="w-3 h-3" /> Global Cost Settings (Admin {settings.adminPct}%)
                     </button>
                   )}
                   {tab === "products" && (
