@@ -72,6 +72,18 @@ function emptyEntry(monthKey?: string): PettyCashEntry {
   };
 }
 
+// A stable fingerprint of an entry's saved fields — used to detect which rows
+// actually changed so we only push those to the sheet.
+function entrySignature(e: PettyCashEntry): string {
+  return JSON.stringify([e.date, e.acHead, e.txnNo, e.purpose, e.approvedBy, e.cashOut, e.cashIn, e.holder]);
+}
+
+// A row with no meaningful content yet (just an auto date/holder) — we never
+// write these to the sheet, which is what left stray blank rows behind before.
+function entryIsBlank(e: PettyCashEntry): boolean {
+  return !e.acHead?.trim() && !e.purpose?.trim() && !e.txnNo?.trim() && e.cashOut == null && e.cashIn == null;
+}
+
 /* ═══════════════════════════════════════════
    PIN / SESSION
    ═══════════════════════════════════════════ */
@@ -289,6 +301,11 @@ export default function PettyCashPage() {
   const [lastSync, setLastSync] = useState("");
   const [syncError, setSyncError] = useState("");
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const configTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Signature of each entry as last written to the sheet, keyed by id. Lets us
+  // sync only the rows that actually changed (per-row), instead of overwriting
+  // the whole sheet — which is what allowed concurrent tabs to wipe each other.
+  const lastSyncedRef = useRef<Map<string, string>>(new Map());
 
   const [undoState, setUndoState] = useState<{ entry: PettyCashEntry; index: number } | null>(null);
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -364,7 +381,13 @@ export default function PettyCashPage() {
         if (res.ok) {
           const data = await res.json();
           if (data.entries !== undefined) {
-            setEntries(data.entries as PettyCashEntry[]);
+            const loadedEntries = data.entries as PettyCashEntry[];
+            setEntries(loadedEntries);
+            // Seed the synced-signatures map so we don't re-push rows that are
+            // already in the sheet — only genuinely new/edited rows will sync.
+            const seed = new Map<string, string>();
+            for (const e of loadedEntries) seed.set(e.id, entrySignature(e));
+            lastSyncedRef.current = seed;
             setOpeningBalance(data.openingBalance ?? 0);
             setOpeningDate(data.openingDate ?? "");
             setLastSync(new Date().toLocaleTimeString()); try { localStorage.setItem("pc_sync", new Date().toLocaleTimeString()); } catch {};
@@ -400,35 +423,69 @@ export default function PettyCashPage() {
     localStorage.setItem(STORAGE_KEY_CONFIG, JSON.stringify({ openingBalance, openingDate }));
   }, [openingBalance, openingDate, loaded]);
 
-  // Debounced sync to Google Sheets
+  // Debounced PER-ROW sync to Google Sheets. Instead of overwriting the whole
+  // sheet (which let concurrent tabs wipe each other), we diff against what was
+  // last written and push only the changed rows — upserting edited/new rows and
+  // deleting removed ones, each as a targeted single-row operation.
   const syncToSheets = useCallback(() => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
+      const synced = lastSyncedRef.current;
+      const currentIds = new Set(entries.map((e) => e.id));
+
+      // Rows that are new or changed (skip never-saved blank rows).
+      const toUpsert = entries.filter((e) => {
+        if (entryIsBlank(e) && !synced.has(e.id)) return false;
+        return synced.get(e.id) !== entrySignature(e);
+      });
+      // Rows previously written but no longer present locally → delete.
+      const toDelete = [...synced.keys()].filter((id) => !currentIds.has(id));
+
+      if (toUpsert.length === 0 && toDelete.length === 0) return;
+
       setSyncing(true);
       try {
-        const res = await fetch("/api/petty-cash", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ entries, openingBalance, openingDate }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (res.ok && data.saved) {
-          setLastSync(new Date().toLocaleTimeString()); try { localStorage.setItem("pc_sync", new Date().toLocaleTimeString()); } catch {};
-          setSyncError("");
-        } else {
-          setSyncError(data.error || "Sync failed");
+        for (const e of toUpsert) {
+          const res = await fetch("/api/petty-cash", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "upsert-entry", entry: e }),
+          });
+          if (!res.ok) throw new Error("upsert failed");
+          synced.set(e.id, entrySignature(e));
         }
+        for (const id of toDelete) {
+          const res = await fetch("/api/petty-cash", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "delete-entry", id }),
+          });
+          if (!res.ok) throw new Error("delete failed");
+          synced.delete(id);
+        }
+        setLastSync(new Date().toLocaleTimeString()); try { localStorage.setItem("pc_sync", new Date().toLocaleTimeString()); } catch {};
+        setSyncError("");
       } catch {
         setSyncError("Network error");
       }
       setSyncing(false);
-    }, 1500);
-  }, [entries, openingBalance, openingDate]);
+    }, 1200);
+  }, [entries]);
 
   useEffect(() => {
     if (!loaded) return;
     syncToSheets();
-  }, [entries, openingBalance, openingDate, loaded, syncToSheets]);
+  }, [entries, loaded, syncToSheets]);
+
+  // Opening balance / date live in a tiny fixed config sheet — safe to rewrite.
+  useEffect(() => {
+    if (!loaded) return;
+    if (configTimer.current) clearTimeout(configTimer.current);
+    configTimer.current = setTimeout(() => {
+      fetch("/api/petty-cash", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "save-config", openingBalance, openingDate }),
+      }).catch(() => {});
+    }, 1200);
+  }, [openingBalance, openingDate, loaded]);
 
   // Derived data
   const balanceMap = useCallback(
