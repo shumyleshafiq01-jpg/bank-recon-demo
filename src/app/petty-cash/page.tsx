@@ -513,12 +513,20 @@ export default function PettyCashPage() {
   }
 
   function updateEntry(id: string, field: keyof PettyCashEntry, value: string | number | null) {
+    if (field === "date" && session?.role !== "accountant" && typeof value === "string" && value < new Date().toISOString().slice(0, 10)) {
+      alert("Only the Accountant can backdate entries.");
+      return;
+    }
     setEntries((prev) => prev.map((e) => e.id === id ? { ...e, [field]: value } : e));
   }
 
   function addEntry() {
     if (!selectedMonth) return;
-    setEntries((prev) => [...prev, emptyEntry(selectedMonth)]);
+    const entry = emptyEntry(selectedMonth);
+    // If a single-date filter is active, default the new row to that date so it's visible in the current view
+    if (filterMode === "single" && filterSingle) entry.date = filterSingle;
+    else if (filterMode === "range" && filterFrom) entry.date = filterFrom;
+    setEntries((prev) => [...prev, entry]);
   }
 
   function deleteEntry(id: string) {
@@ -1003,6 +1011,8 @@ export default function PettyCashPage() {
                                       <input type="date" value={entry.date}
                                         onChange={(e) => updateEntry(entry.id, "date", e.target.value)}
                                         disabled={!editMode}
+                                        min={session?.role === "accountant" ? undefined : new Date().toISOString().slice(0, 10)}
+                                        title={session?.role !== "accountant" ? "Only the Accountant can backdate entries" : undefined}
                                         className={`w-full bg-transparent rounded px-1.5 py-1 text-foreground focus:outline-none text-xs ${editMode ? "border border-transparent hover:border-border focus:border-orange-500/50" : "border border-transparent cursor-default"}`}
                                       />
                                     </td>
