@@ -1,4 +1,4 @@
-import { ensureSheet, readSheet, clearAndWrite } from "@/lib/google-sheets";
+import { ensureSheet, readSheet, updateRow, writeRows, deleteRow } from "@/lib/google-sheets";
 
 const SHEET = "CNF_MasterFreight";
 const HEADERS = ["id", "destination", "country", "freightPerCarton", "currency", "updatedAt"];
@@ -28,13 +28,28 @@ export async function POST(request: Request) {
     await init();
     const { freightCards } = await request.json() as { freightCards: Record<string, unknown>[] };
     const now = new Date().toISOString();
-    await clearAndWrite(SHEET, [
-      HEADERS,
-      ...freightCards.map(c => [
-        String(c.id ?? ""), String(c.destination ?? ""), String(c.country ?? ""),
-        String(c.freightPerCarton ?? 0), String(c.currency ?? "USD"), now,
-      ]),
-    ]);
+
+    // Reconcile per-row instead of wiping the sheet: upsert each provided card,
+    // then delete only the cards that were removed. No clearAndWrite, so a
+    // concurrent read can never catch the sheet mid-wipe.
+    const rows = await readSheet(SHEET);
+    const existing = new Map<string, number>();
+    rows.forEach((r, i) => { if (i > 0 && r[0]) existing.set(r[0], i + 1); });
+    const providedIds = new Set(freightCards.map(c => String(c.id ?? "")));
+
+    for (const c of freightCards) {
+      const id = String(c.id ?? "");
+      if (!id) continue;
+      const row = [id, String(c.destination ?? ""), String(c.country ?? ""),
+        String(c.freightPerCarton ?? 0), String(c.currency ?? "USD"), now];
+      const ri = existing.get(id);
+      if (ri) await updateRow(SHEET, ri, row);
+      else await writeRows(SHEET, [row]);
+    }
+    // Delete removed cards bottom-up so earlier row indices stay valid.
+    const toDelete = [...existing.entries()].filter(([id]) => !providedIds.has(id)).map(([, ri]) => ri).sort((a, b) => b - a);
+    for (const ri of toDelete) await deleteRow(SHEET, ri);
+
     return Response.json({ saved: true });
   } catch (err) {
     return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });

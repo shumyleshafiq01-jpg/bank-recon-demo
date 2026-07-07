@@ -58,6 +58,17 @@ const genId = () => Math.random().toString(36).slice(2, 10);
 const fmt = (n: number) =>
   n === 0 ? "0.00" : n.toLocaleString("en-PK", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+// Stable fingerprints so we sync only the rows that actually changed (per-row),
+// instead of overwriting the whole sheet — which let concurrent tabs clobber.
+function bankSignature(b: BankAccount): string { return JSON.stringify(b); }
+function entrySignature(e: LedgerRow): string {
+  return JSON.stringify([e.date, e.pdcDate, e.ibftNo, e.chequeNo, e.description, e.debit, e.credit, e.aa1Tick, e.aa1At, e.aa2Tick, e.aa2At]);
+}
+// A ledger row with no real content yet — never written to the sheet.
+function entryIsBlank(e: LedgerRow): boolean {
+  return !e.description?.trim() && e.debit == null && e.credit == null && !e.ibftNo?.trim() && !e.chequeNo?.trim() && !e.pdcDate;
+}
+
 const emptyBank = (): BankAccount => ({
   id: genId(),
   bankName: "",
@@ -178,6 +189,9 @@ export default function FundEstimatorPage() {
   const [lastSync, setLastSync] = useState("");
   const [syncError, setSyncError] = useState("");
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Signatures of what was last written to each sheet, so we push only changed rows.
+  const syncedBanksRef = useRef<Map<string, string>>(new Map());
+  const syncedLedgerRef = useRef<Map<string, string>>(new Map());
   const [undoState, setUndoState] = useState<{ row: LedgerRow; accountId: string; index: number } | null>(null);
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -219,8 +233,19 @@ export default function FundEstimatorPage() {
         if (res.ok) {
           const data = await res.json();
           if (data.banks && data.banks.length > 0) {
-            setBanks(data.banks as BankAccount[]);
-            setLedger(data.ledger as LedgerData);
+            const loadedBanks = data.banks as BankAccount[];
+            const loadedLedger = data.ledger as LedgerData;
+            setBanks(loadedBanks);
+            setLedger(loadedLedger);
+            // Seed synced-signatures so we don't re-push rows already in the sheet.
+            const bSeed = new Map<string, string>();
+            for (const b of loadedBanks) bSeed.set(b.id, bankSignature(b));
+            syncedBanksRef.current = bSeed;
+            const lSeed = new Map<string, string>();
+            for (const [accId, rows] of Object.entries(loadedLedger)) {
+              for (const r of rows) lSeed.set(`${accId}::${r.id}`, entrySignature(r));
+            }
+            syncedLedgerRef.current = lSeed;
             setLastSync(new Date().toLocaleTimeString()); try { localStorage.setItem("fe_sync", new Date().toLocaleTimeString()); } catch {};
             setLoaded(true);
             return;
@@ -252,28 +277,49 @@ export default function FundEstimatorPage() {
     localStorage.setItem(STORAGE_KEY_LEDGER, JSON.stringify(ledger));
   }, [ledger, loaded]);
 
+  // Debounced PER-ROW sync. Diffs banks and ledger against what was last written
+  // and pushes only the changed rows (upsert edited/new, delete removed) as
+  // targeted single-row operations — so concurrent tabs can't wipe each other.
   const syncToSheets = useCallback(() => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
-      setSyncing(true);
-      try {
-        const res = await fetch("/api/fund-estimator", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ banks, ledger }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (res.ok && data.saved) {
-          setLastSync(new Date().toLocaleTimeString()); try { localStorage.setItem("fe_sync", new Date().toLocaleTimeString()); } catch {};
-          setSyncError("");
-        } else {
-          setSyncError(data.error || "Sync failed");
+      const syncedBanks = syncedBanksRef.current;
+      const syncedLedger = syncedLedgerRef.current;
+
+      const bankIds = new Set(banks.map((b) => b.id));
+      const banksToUpsert = banks.filter((b) => syncedBanks.get(b.id) !== bankSignature(b));
+      const banksToDelete = [...syncedBanks.keys()].filter((id) => !bankIds.has(id));
+
+      const ledgerKeys = new Set<string>();
+      const entriesToUpsert: { accountId: string; entry: LedgerRow }[] = [];
+      for (const [accId, rows] of Object.entries(ledger)) {
+        for (const r of rows) {
+          const key = `${accId}::${r.id}`;
+          ledgerKeys.add(key);
+          if (entryIsBlank(r) && !syncedLedger.has(key)) continue;
+          if (syncedLedger.get(key) !== entrySignature(r)) entriesToUpsert.push({ accountId: accId, entry: r });
         }
+      }
+      const entriesToDelete = [...syncedLedger.keys()].filter((k) => !ledgerKeys.has(k));
+
+      if (banksToUpsert.length === 0 && banksToDelete.length === 0 && entriesToUpsert.length === 0 && entriesToDelete.length === 0) return;
+
+      setSyncing(true);
+      const post = (payload: unknown) => fetch("/api/fund-estimator", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+      }).then((r) => { if (!r.ok) throw new Error("sync failed"); });
+      try {
+        for (const b of banksToUpsert) { await post({ action: "upsert-bank", bank: b }); syncedBanks.set(b.id, bankSignature(b)); }
+        for (const id of banksToDelete) { await post({ action: "delete-bank", id }); syncedBanks.delete(id); }
+        for (const { accountId, entry } of entriesToUpsert) { await post({ action: "upsert-entry", accountId, entry }); syncedLedger.set(`${accountId}::${entry.id}`, entrySignature(entry)); }
+        for (const key of entriesToDelete) { const [accountId, rowId] = key.split("::"); await post({ action: "delete-entry", accountId, rowId }); syncedLedger.delete(key); }
+        setLastSync(new Date().toLocaleTimeString()); try { localStorage.setItem("fe_sync", new Date().toLocaleTimeString()); } catch {};
+        setSyncError("");
       } catch {
         setSyncError("Network error");
       }
       setSyncing(false);
-    }, 1500);
+    }, 1200);
   }, [banks, ledger]);
 
   useEffect(() => {

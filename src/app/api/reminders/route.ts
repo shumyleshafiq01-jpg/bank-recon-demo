@@ -1,4 +1,4 @@
-import { ensureSheet, readSheet, writeRows, clearAndWrite } from "@/lib/google-sheets";
+import { ensureSheet, readSheet, writeRows, updateRow, deleteRow } from "@/lib/google-sheets";
 
 const REMINDERS_SHEET = "Reminders";
 const DONE_SHEET = "RemindersDone";
@@ -127,26 +127,26 @@ export async function PATCH(request: Request) {
           rows[i][2] = target;
           rows[i][3] = dueDate;
           rows[i][4] = frequency;
+          await updateRow(REMINDERS_SHEET, i + 1, rows[i]);
           break;
         }
       }
-      await clearAndWrite(REMINDERS_SHEET, rows);
       return Response.json({ updated: true });
     }
 
     if (body.action === "reset") {
       const rows = await readSheet(DONE_SHEET);
-      const filtered = [rows[0], ...rows.slice(1).filter((r) => r[0] !== body.reminderId)].filter(Boolean);
-      await clearAndWrite(DONE_SHEET, filtered as string[][]);
+      const toDelete: number[] = [];
+      for (let i = 1; i < rows.length; i++) if (rows[i][0] === body.reminderId) toDelete.push(i + 1);
+      for (const ri of toDelete.sort((a, b) => b - a)) await deleteRow(DONE_SHEET, ri);
       return Response.json({ reset: true });
     }
 
     if (body.action === "deactivate") {
       const rows = await readSheet(REMINDERS_SHEET);
       for (let i = 1; i < rows.length; i++) {
-        if (rows[i][0] === body.reminderId) { rows[i][6] = "false"; break; }
+        if (rows[i][0] === body.reminderId) { rows[i][6] = "false"; await updateRow(REMINDERS_SHEET, i + 1, rows[i]); break; }
       }
-      await clearAndWrite(REMINDERS_SHEET, rows);
       return Response.json({ deactivated: true });
     }
 
@@ -161,9 +161,12 @@ export async function DELETE(request: Request) {
     await init();
     const body = await request.json() as { reminderId: string };
     const rows = await readSheet(REMINDERS_SHEET);
-    await clearAndWrite(REMINDERS_SHEET, [rows[0], ...rows.slice(1).filter((r) => r[0] !== body.reminderId)].filter(Boolean) as string[][]);
+    const remIdx = rows.findIndex((r, i) => i > 0 && r[0] === body.reminderId);
+    if (remIdx > 0) await deleteRow(REMINDERS_SHEET, remIdx + 1);
     const doneRows = await readSheet(DONE_SHEET);
-    await clearAndWrite(DONE_SHEET, [doneRows[0], ...doneRows.slice(1).filter((r) => r[0] !== body.reminderId)].filter(Boolean) as string[][]);
+    const doneToDelete: number[] = [];
+    for (let i = 1; i < doneRows.length; i++) if (doneRows[i][0] === body.reminderId) doneToDelete.push(i + 1);
+    for (const ri of doneToDelete.sort((a, b) => b - a)) await deleteRow(DONE_SHEET, ri);
     return Response.json({ deleted: true });
   } catch (err) {
     return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });

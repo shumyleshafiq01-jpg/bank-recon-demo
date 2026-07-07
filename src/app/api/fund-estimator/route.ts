@@ -1,4 +1,4 @@
-import { ensureSheet, readSheet, clearAndWrite } from "@/lib/google-sheets";
+import { ensureSheet, readSheet, clearAndWrite, updateRow, writeRows, deleteRow } from "@/lib/google-sheets";
 
 const BANKS_SHEET = "FE_Banks";
 const LEDGER_SHEET = "FE_Ledger";
@@ -17,6 +17,14 @@ const LEDGER_HEADERS = [
 async function init() {
   await ensureSheet(BANKS_SHEET, BANK_HEADERS);
   await ensureSheet(LEDGER_SHEET, LEDGER_HEADERS);
+}
+
+function serializeBank(b: Record<string, unknown>): string[] {
+  return BANK_HEADERS.map((h) => String(b[h] ?? ""));
+}
+
+function serializeEntry(accountId: string, e: Record<string, unknown>): string[] {
+  return [accountId, ...LEDGER_HEADERS.slice(1).map((h) => String(e[h] ?? ""))];
 }
 
 export async function GET() {
@@ -61,30 +69,88 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     await init();
-
     const body = await request.json() as {
-      banks: Record<string, string | number>[];
-      ledger: Record<string, Record<string, unknown>[]>;
+      action?: string;
+      bank?: Record<string, unknown>;
+      id?: string;
+      accountId?: string;
+      entry?: Record<string, unknown>;
+      rowId?: string;
+      banks?: Record<string, string | number>[];
+      ledger?: Record<string, Record<string, unknown>[]>;
     };
 
-    const bankData = [BANK_HEADERS];
-    for (const bank of body.banks) {
-      bankData.push(BANK_HEADERS.map((h) => String(bank[h] ?? "")));
+    // ── Per-row bank upsert: touches only this bank's row. ──
+    if (body.action === "upsert-bank" && body.bank) {
+      const rows = await readSheet(BANKS_SHEET);
+      const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.bank!.id);
+      const row = serializeBank(body.bank);
+      if (idx > 0) await updateRow(BANKS_SHEET, idx + 1, row);
+      else await writeRows(BANKS_SHEET, [row]);
+      return Response.json({ saved: true });
     }
-    await clearAndWrite(BANKS_SHEET, bankData);
 
-    const ledgerData = [LEDGER_HEADERS];
-    for (const [accountId, rows] of Object.entries(body.ledger)) {
-      for (const row of rows) {
-        ledgerData.push([
-          accountId,
-          ...LEDGER_HEADERS.slice(1).map((h) => String(row[h] ?? "")),
-        ]);
+    // ── Per-row bank delete. (The client removes the account's ledger rows too,
+    //    which arrive as their own delete-entry calls — no cascade needed here.) ──
+    if (body.action === "delete-bank" && body.id) {
+      const rows = await readSheet(BANKS_SHEET);
+      const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.id);
+      if (idx > 0) await deleteRow(BANKS_SHEET, idx + 1);
+      return Response.json({ deleted: true });
+    }
+
+    // ── Per-row ledger entry upsert: keyed by (accountId, entry id). ──
+    if (body.action === "upsert-entry" && body.accountId && body.entry) {
+      const rows = await readSheet(LEDGER_SHEET);
+      const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.accountId && r[1] === body.entry!.id);
+      const row = serializeEntry(body.accountId, body.entry);
+      if (idx > 0) await updateRow(LEDGER_SHEET, idx + 1, row);
+      else await writeRows(LEDGER_SHEET, [row]);
+      return Response.json({ saved: true });
+    }
+
+    // ── Per-row ledger entry delete. ──
+    if (body.action === "delete-entry" && body.accountId && body.rowId) {
+      const rows = await readSheet(LEDGER_SHEET);
+      const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.accountId && r[1] === body.rowId);
+      if (idx > 0) await deleteRow(LEDGER_SHEET, idx + 1);
+      return Response.json({ deleted: true });
+    }
+
+    // ── Legacy whole-state path (older cached tabs). MADE NON-DESTRUCTIVE:
+    //    merge/upsert each bank + ledger row, NEVER clear a sheet — so a stale
+    //    tab can no longer wipe the ledger. ──
+    if (body.banks || body.ledger) {
+      if (body.banks) {
+        const rows = await readSheet(BANKS_SHEET);
+        const idById = new Map<string, number>();
+        rows.forEach((r, i) => { if (i > 0 && r[0]) idById.set(r[0], i + 1); });
+        for (const bank of body.banks) {
+          if (!bank.id) continue;
+          const row = serializeBank(bank);
+          const sheetRow = idById.get(String(bank.id));
+          if (sheetRow) await updateRow(BANKS_SHEET, sheetRow, row);
+          else await writeRows(BANKS_SHEET, [row]);
+        }
       }
+      if (body.ledger) {
+        const rows = await readSheet(LEDGER_SHEET);
+        const keyToRow = new Map<string, number>();
+        rows.forEach((r, i) => { if (i > 0 && r[0]) keyToRow.set(`${r[0]}::${r[1]}`, i + 1); });
+        for (const [accountId, entries] of Object.entries(body.ledger)) {
+          for (const e of entries) {
+            if (!e.id) continue;
+            const row = serializeEntry(accountId, e);
+            const sheetRow = keyToRow.get(`${accountId}::${e.id}`);
+            if (sheetRow) await updateRow(LEDGER_SHEET, sheetRow, row);
+            else await writeRows(LEDGER_SHEET, [row]);
+          }
+        }
+      }
+      return Response.json({ saved: true, merged: true });
     }
-    await clearAndWrite(LEDGER_SHEET, ledgerData);
 
-    return Response.json({ saved: true });
+    return Response.json({ error: "Unknown action" }, { status: 400 });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return Response.json({ error: msg }, { status: 500 });
@@ -108,20 +174,21 @@ export async function PATCH(request: Request) {
       return Response.json({ error: `Unknown field: ${body.field}` }, { status: 400 });
     }
 
-    let updated = false;
+    let updatedRowIdx = -1;
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === body.accountId && rows[i][1] === body.rowId) {
         rows[i][fieldIdx] = String(body.value ?? "");
-        updated = true;
+        updatedRowIdx = i;
         break;
       }
     }
 
-    if (!updated) {
+    if (updatedRowIdx === -1) {
       return Response.json({ error: "Row not found" }, { status: 404 });
     }
 
-    await clearAndWrite(LEDGER_SHEET, rows);
+    // Write only the one changed row — no full-sheet rewrite.
+    await updateRow(LEDGER_SHEET, updatedRowIdx + 1, rows[updatedRowIdx]);
     return Response.json({ updated: true });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

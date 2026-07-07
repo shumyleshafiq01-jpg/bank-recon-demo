@@ -1,4 +1,4 @@
-import { ensureSheet, readSheet, clearAndWrite, writeRows } from "@/lib/google-sheets";
+import { ensureSheet, readSheet, clearAndWrite, updateRow, writeRows, deleteRow } from "@/lib/google-sheets";
 
 const SHEET = "PL_Master";
 const HEADERS = ["id", "name", "unit", "category", "pricePerUnit", "updatedAt", "defaultUnitType"];
@@ -31,15 +31,15 @@ export async function POST(request: Request) {
       const idx = rows.findIndex((r, i) => i > 0 && r[0] === m.id);
       const row = [String(m.id ?? ""), String(m.name ?? ""), String(m.unit ?? ""), String(m.category ?? ""),
         String(m.pricePerUnit ?? 0), new Date().toISOString(), String(m.defaultUnitType ?? "PCS")];
-      if (idx > 0) { rows[idx] = row; await clearAndWrite(SHEET, rows); }
-      else { await writeRows(SHEET, [row]); }
+      if (idx > 0) await updateRow(SHEET, idx + 1, row);
+      else await writeRows(SHEET, [row]);
       return Response.json({ saved: true });
     }
 
     if (body.action === "delete" && body.material) {
       const rows = await readSheet(SHEET);
-      const filtered = [rows[0], ...rows.slice(1).filter(r => r[0] !== body.material!.id)];
-      await clearAndWrite(SHEET, filtered as string[][]);
+      const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.material!.id);
+      if (idx > 0) await deleteRow(SHEET, idx + 1);
       return Response.json({ deleted: true });
     }
 

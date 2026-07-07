@@ -1,4 +1,4 @@
-import { ensureSheet, readSheet, clearAndWrite } from "@/lib/google-sheets";
+import { ensureSheet, readSheet, writeRows, deleteRow } from "@/lib/google-sheets";
 
 const SHEET = "PC_Denominations";
 const HEADERS = ["id", "date", "holder", "denominationsJson", "total", "countedBy", "createdAt"];
@@ -34,18 +34,16 @@ export async function POST(request: Request) {
     };
 
     if (body.action === "create" && body.count) {
-      const rows = await readSheet(SHEET);
       const c = body.count;
       const row = [crypto.randomUUID(), c.date, c.holder, JSON.stringify(c.denominations), String(c.total), c.countedBy, new Date().toISOString()];
-      rows.push(row);
-      await clearAndWrite(SHEET, rows);
+      await writeRows(SHEET, [row]);
       return Response.json({ saved: true });
     }
 
     if (body.action === "delete" && body.id) {
       const rows = await readSheet(SHEET);
-      const filtered = [rows[0], ...rows.slice(1).filter(r => r[0] !== body.id)];
-      await clearAndWrite(SHEET, filtered as string[][]);
+      const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.id);
+      if (idx > 0) await deleteRow(SHEET, idx + 1);
       return Response.json({ deleted: true });
     }
 
