@@ -488,6 +488,36 @@ function EmpForm({ item, onSave, onClose }: { item: Employee; onSave: (e: Employ
   );
 }
 
+/* Per-row diff sync: pushes only added/changed/removed rows as single-row
+   upsert/delete calls, so concurrent tabs can't overwrite each other's data. */
+async function diffSyncArray<T extends { id: string }>(
+  items: T[], synced: Map<string, string>, endpoint: string, upsertKey: string,
+): Promise<boolean> {
+  const ids = new Set(items.map((i) => i.id));
+  const toUpsert = items.filter((i) => i.id && synced.get(i.id) !== JSON.stringify(i));
+  const toDelete = [...synced.keys()].filter((id) => !ids.has(id));
+  if (toUpsert.length === 0 && toDelete.length === 0) return true;
+  try {
+    for (const item of toUpsert) {
+      const res = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "upsert", [upsertKey]: item }) });
+      if (!res.ok) throw new Error("upsert failed");
+      synced.set(item.id, JSON.stringify(item));
+    }
+    for (const id of toDelete) {
+      const res = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete", id }) });
+      if (!res.ok) throw new Error("delete failed");
+      synced.delete(id);
+    }
+    return true;
+  } catch { return false; }
+}
+
+function seedSigMap<T extends { id: string }>(items: T[]): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const i of items) m.set(i.id, JSON.stringify(i));
+  return m;
+}
+
 /* ═══════════════════════════════════════════ MAIN PAGE */
 export default function VendorsPage() {
   const router = useRouter();
@@ -525,6 +555,12 @@ export default function VendorsPage() {
   const [syncError, setSyncError] = useState("");
   const suppTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bankTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Per-row sync signatures (id -> JSON) so we push only changed rows instead of
+  // overwriting the whole sheet — prevents concurrent tabs clobbering each other.
+  const syncedSuppRef = useRef<Map<string, string>>(new Map());
+  const syncedVendorsRef = useRef<Map<string, string>>(new Map());
+  const syncedEmpRef = useRef<Map<string, string>>(new Map());
+  const syncedBcRef = useRef<Map<string, string>>(new Map());
 
   const [search, setSearch] = useState("");
   const [catFilter, setCatFilter] = useState("");
@@ -549,40 +585,34 @@ export default function VendorsPage() {
 
   // Load both datasets
   useEffect(() => {
-    fetch("/api/suppliers").then(r => r.json()).then(d => { setSuppliers(d.suppliers ?? []); setSuppLoaded(true); }).catch(() => setSuppLoaded(true));
-    fetch("/api/vendors").then(r => r.json()).then(d => { setVendors(d.vendors ?? []); setBankLoaded(true); }).catch(() => setBankLoaded(true));
-    fetch("/api/employees").then(r => r.json()).then(d => { setEmployees(d.employees ?? []); setEmpLoaded(true); }).catch(() => setEmpLoaded(true));
-    fetch("/api/bank-contacts").then(r => r.json()).then(d => { setBankContacts(d.contacts ?? []); setBcLoaded(true); }).catch(() => setBcLoaded(true));
+    fetch("/api/suppliers").then(r => r.json()).then(d => { const list = d.suppliers ?? []; setSuppliers(list); syncedSuppRef.current = seedSigMap(list); setSuppLoaded(true); }).catch(() => setSuppLoaded(true));
+    fetch("/api/vendors").then(r => r.json()).then(d => { const list = d.vendors ?? []; setVendors(list); syncedVendorsRef.current = seedSigMap(list); setBankLoaded(true); }).catch(() => setBankLoaded(true));
+    fetch("/api/employees").then(r => r.json()).then(d => { const list = d.employees ?? []; setEmployees(list); syncedEmpRef.current = seedSigMap(list); setEmpLoaded(true); }).catch(() => setEmpLoaded(true));
+    fetch("/api/bank-contacts").then(r => r.json()).then(d => { const list = d.contacts ?? []; setBankContacts(list); syncedBcRef.current = seedSigMap(list); setBcLoaded(true); }).catch(() => setBcLoaded(true));
     fetch("/api/directory-config").then(r => r.json()).then(d => setDirConfig(dc => ({ ...dc, ...d }))).catch(() => {});
   }, []);
 
-  // Debounced syncs
+  // Debounced PER-ROW syncs (diff against last-written, push only changed rows)
   const syncSuppliers = useCallback(() => {
     if (suppTimer.current) clearTimeout(suppTimer.current);
     suppTimer.current = setTimeout(async () => {
       setSyncing(true);
-      try {
-        const r = await fetch("/api/suppliers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ suppliers }) });
-        const d = await r.json().catch(() => ({}));
-        if (r.ok && d.saved) { setLastSync(new Date().toLocaleTimeString()); try { localStorage.setItem("vb_sync", new Date().toLocaleTimeString()); } catch {}; setSyncError(""); }
-        else setSyncError(d.error || "Sync failed");
-      } catch { setSyncError("Network error"); }
+      const ok = await diffSyncArray(suppliers, syncedSuppRef.current, "/api/suppliers", "supplier");
+      if (ok) { setLastSync(new Date().toLocaleTimeString()); try { localStorage.setItem("vb_sync", new Date().toLocaleTimeString()); } catch {}; setSyncError(""); }
+      else setSyncError("Network error");
       setSyncing(false);
-    }, 1500);
+    }, 1200);
   }, [suppliers]);
 
   const syncVendors = useCallback(() => {
     if (bankTimer.current) clearTimeout(bankTimer.current);
     bankTimer.current = setTimeout(async () => {
       setSyncing(true);
-      try {
-        const r = await fetch("/api/vendors", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ vendors }) });
-        const d = await r.json().catch(() => ({}));
-        if (r.ok && d.saved) { setLastSync(new Date().toLocaleTimeString()); try { localStorage.setItem("vb_sync", new Date().toLocaleTimeString()); } catch {}; setSyncError(""); }
-        else setSyncError(d.error || "Sync failed");
-      } catch { setSyncError("Network error"); }
+      const ok = await diffSyncArray(vendors, syncedVendorsRef.current, "/api/vendors", "vendor");
+      if (ok) { setLastSync(new Date().toLocaleTimeString()); try { localStorage.setItem("vb_sync", new Date().toLocaleTimeString()); } catch {}; setSyncError(""); }
+      else setSyncError("Network error");
       setSyncing(false);
-    }, 1500);
+    }, 1200);
   }, [vendors]);
 
   useEffect(() => { if (suppLoaded) syncSuppliers(); }, [suppliers, suppLoaded, syncSuppliers]);
@@ -591,10 +621,8 @@ export default function VendorsPage() {
   const syncEmployees = useCallback(() => {
     if (empTimer.current) clearTimeout(empTimer.current);
     empTimer.current = setTimeout(async () => {
-      try {
-        await fetch("/api/employees", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ employees }) });
-      } catch { /* ignore */ }
-    }, 1500);
+      await diffSyncArray(employees, syncedEmpRef.current, "/api/employees", "employee");
+    }, 1200);
   }, [employees]);
 
   useEffect(() => { if (empLoaded) syncEmployees(); }, [employees, empLoaded, syncEmployees]);
@@ -610,12 +638,12 @@ export default function VendorsPage() {
     setEmployees(prev => prev.filter(e => e.id !== id));
   }
 
-  // Bank Contacts sync
+  // Bank Contacts sync (per-row)
   const syncBankContacts = useCallback(() => {
     if (bcTimer.current) clearTimeout(bcTimer.current);
     bcTimer.current = setTimeout(async () => {
-      try { await fetch("/api/bank-contacts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contacts: bankContacts }) }); } catch { /* */ }
-    }, 1500);
+      await diffSyncArray(bankContacts, syncedBcRef.current, "/api/bank-contacts", "contact");
+    }, 1200);
   }, [bankContacts]);
 
   useEffect(() => { if (bcLoaded) syncBankContacts(); }, [bankContacts, bcLoaded, syncBankContacts]);

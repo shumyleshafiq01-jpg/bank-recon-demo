@@ -1,4 +1,4 @@
-import { ensureSheet, readSheet, clearAndWrite } from "@/lib/google-sheets";
+import { ensureSheet, readSheet, updateRow, writeRows, deleteRow } from "@/lib/google-sheets";
 
 const SHEET = "VB_Vendors";
 const HEADERS = ["id","vendorName","contactPerson","commodity","phone","bank","acTitle","acNo","branchCode","notes"];
@@ -28,9 +28,40 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     await init();
-    const { vendors } = await request.json() as { vendors: Record<string,string>[] };
-    await clearAndWrite(SHEET, [HEADERS, ...vendors.map(serializeRow)]);
-    return Response.json({ saved: true });
+    const body = await request.json() as { action?: string; vendor?: Record<string,string>; id?: string; vendors?: Record<string,string>[] };
+
+    if (body.action === "upsert" && body.vendor) {
+      const rows = await readSheet(SHEET);
+      const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.vendor!.id);
+      const row = serializeRow(body.vendor);
+      if (idx > 0) await updateRow(SHEET, idx + 1, row);
+      else await writeRows(SHEET, [row]);
+      return Response.json({ saved: true });
+    }
+
+    if (body.action === "delete" && body.id) {
+      const rows = await readSheet(SHEET);
+      const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.id);
+      if (idx > 0) await deleteRow(SHEET, idx + 1);
+      return Response.json({ deleted: true });
+    }
+
+    // Legacy whole-array path (older cached tabs) — merge only, never clear.
+    if (body.vendors) {
+      const rows = await readSheet(SHEET);
+      const idById = new Map<string, number>();
+      rows.forEach((r, i) => { if (i > 0 && r[0]) idById.set(r[0], i + 1); });
+      for (const v of body.vendors) {
+        if (!v.id) continue;
+        const row = serializeRow(v);
+        const sr = idById.get(v.id);
+        if (sr) await updateRow(SHEET, sr, row);
+        else await writeRows(SHEET, [row]);
+      }
+      return Response.json({ saved: true, merged: true });
+    }
+
+    return Response.json({ error: "Unknown action" }, { status: 400 });
   } catch (err) {
     return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
