@@ -4,14 +4,14 @@ import { Package } from "lucide-react";
 
 interface Material { id: string; name: string; unit: string; pricePerUnit: number; }
 interface Product { id: string; sku: string; name: string; productType: string; fclQty: number; adminPct: number; grossProfitPct: number; whtPct: number; serviceCharges: number; eds: number; courierCharges: number; imageUrl: string; notes: string; }
-interface RecipeItem { id: string; productId: string; materialId: string; materialName: string; qty: number; unitType: string; }
+interface RecipeItem { id: string; productId: string; materialId: string; materialName: string; qty: number; unitType: string; priceOverride?: number | null; }
 interface Settings { fcRate: number; currency: string; targetCurrency: string; }
 
 function calcCost(recipe: RecipeItem[], materials: Material[], product: Product, settings: Settings) {
   const matMap = new Map(materials.map(m => [m.id, m]));
   let cogPKR = 0;
   for (const item of recipe) {
-    const price = matMap.get(item.materialId)?.pricePerUnit ?? 0;
+    const price = item.priceOverride != null ? item.priceOverride : (matMap.get(item.materialId)?.pricePerUnit ?? 0);
     if (item.unitType === "CONTAINER") cogPKR += price / (product.fclQty || 1500);
     else cogPKR += item.qty * price;
   }

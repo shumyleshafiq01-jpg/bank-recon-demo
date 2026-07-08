@@ -1,13 +1,14 @@
-import { ensureSheet, readSheet, clearAndWrite, writeRows } from "@/lib/google-sheets";
+import { ensureSheet, readSheet, updateRow, writeRows, deleteRow } from "@/lib/google-sheets";
 
 const SHEET = "PL_Brands";
-const HEADERS = ["id", "name", "address", "city", "country", "logoUrl", "createdAt"];
+const HEADERS = ["id", "name", "address", "city", "country", "logoUrl", "createdAt", "contactPerson", "website", "email"];
 
 async function init() { await ensureSheet(SHEET, HEADERS); }
 
 function parseRow(r: string[]) {
   return { id: r[0] ?? "", name: r[1] ?? "", address: r[2] ?? "", city: r[3] ?? "",
-    country: r[4] ?? "", logoUrl: r[5] ?? "", createdAt: r[6] ?? "" };
+    country: r[4] ?? "", logoUrl: r[5] ?? "", createdAt: r[6] ?? "",
+    contactPerson: r[7] ?? "", website: r[8] ?? "", email: r[9] ?? "" };
 }
 
 export async function GET() {
@@ -30,16 +31,17 @@ export async function POST(request: Request) {
       const rows = await readSheet(SHEET);
       const idx = rows.findIndex((r, i) => i > 0 && r[0] === b.id);
       const row = [String(b.id ?? ""), String(b.name ?? ""), String(b.address ?? ""), String(b.city ?? ""),
-        String(b.country ?? ""), String(b.logoUrl ?? ""), idx > 0 ? rows[idx][6] : new Date().toISOString()];
-      if (idx > 0) { rows[idx] = row; await clearAndWrite(SHEET, rows); }
-      else { await writeRows(SHEET, [row]); }
+        String(b.country ?? ""), String(b.logoUrl ?? ""), idx > 0 ? rows[idx][6] : new Date().toISOString(),
+        String(b.contactPerson ?? ""), String(b.website ?? ""), String(b.email ?? "")];
+      if (idx > 0) await updateRow(SHEET, idx + 1, row);
+      else await writeRows(SHEET, [row]);
       return Response.json({ saved: true });
     }
 
     if (body.action === "delete" && body.brand) {
       const rows = await readSheet(SHEET);
-      const filtered = [rows[0], ...rows.slice(1).filter(r => r[0] !== body.brand!.id)];
-      await clearAndWrite(SHEET, filtered as string[][]);
+      const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.brand!.id);
+      if (idx > 0) await deleteRow(SHEET, idx + 1);
       return Response.json({ deleted: true });
     }
 

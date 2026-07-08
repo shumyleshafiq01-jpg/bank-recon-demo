@@ -1,4 +1,4 @@
-import { ensureSheet, readSheet, clearAndWrite } from "@/lib/google-sheets";
+import { ensureSheet, readSheet, updateRow, writeRows, deleteRow } from "@/lib/google-sheets";
 
 const SHEET = "CNF_Quotes";
 const HEADERS = [
@@ -6,6 +6,7 @@ const HEADERS = [
   "generatedAt", "validTill", "status", "createdBy", "brandKafi", "brandEssence",
   "notes", "productsSnapshot",
   "quoteType", "discountType", "discountScope", "discountValue", "discountAmount", "discountProductIds",
+  "shipmentPort", "shippingMode", "leadTime",
 ];
 
 async function init() { await ensureSheet(SHEET, HEADERS); }
@@ -27,6 +28,9 @@ function parseRow(r: string[]) {
     discountValue: parseFloat(r[17]) || 0,
     discountAmount: parseFloat(r[18]) || 0,
     discountProductIds,
+    shipmentPort: r[20] || "Karachi Port",
+    shippingMode: r[21] || "By Sea",
+    leadTime: r[22] || "30 to 35 Working Days",
   };
 }
 
@@ -74,9 +78,9 @@ export async function POST(request: Request) {
         String(q.notes ?? ""), JSON.stringify(q.productsSnapshot ?? []),
         String(q.quoteType ?? "CNF"), String(q.discountType ?? "none"), String(q.discountScope ?? "all"),
         String(q.discountValue ?? 0), String(q.discountAmount ?? 0), JSON.stringify(q.discountProductIds ?? []),
+        String(q.shipmentPort ?? "Karachi Port"), String(q.shippingMode ?? "By Sea"), String(q.leadTime ?? "30 to 35 Working Days"),
       ];
-      rows.push(row);
-      await clearAndWrite(SHEET, rows);
+      await writeRows(SHEET, [row]);
       return Response.json({ saved: true, id, quoteNo });
     }
 
@@ -85,15 +89,15 @@ export async function POST(request: Request) {
       const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.id);
       if (idx > 0) {
         rows[idx][8] = body.action === "archive" ? "archived" : "active";
-        await clearAndWrite(SHEET, rows);
+        await updateRow(SHEET, idx + 1, rows[idx]);
       }
       return Response.json({ saved: true });
     }
 
     if (body.action === "delete" && body.id) {
       const rows = await readSheet(SHEET);
-      const filtered = [rows[0], ...rows.slice(1).filter(r => r[0] !== body.id)];
-      await clearAndWrite(SHEET, filtered as string[][]);
+      const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.id);
+      if (idx > 0) await deleteRow(SHEET, idx + 1);
       return Response.json({ deleted: true });
     }
 

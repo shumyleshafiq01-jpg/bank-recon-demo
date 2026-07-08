@@ -7,12 +7,19 @@ const SHEET = "CNF_Quotes";
 const HEADERS = [
   "id","quoteNo","clientName","clientContact","destination","country","generatedAt","validTill","status","createdBy","brandKafi","brandEssence","notes","productsSnapshot",
   "quoteType","discountType","discountScope","discountValue","discountAmount","discountProductIds",
+  "shipmentPort","shippingMode","leadTime",
 ];
+
+const BRANDS_SHEET = "PL_Brands";
+const BRANDS_HEADERS = ["id", "name", "address", "city", "country", "logoUrl", "createdAt", "contactPerson", "website", "email"];
 
 type QuoteProduct = {
   productName: string; sku: string; specs: string; packagingDesc: string;
   qty: number; fobPerCarton: number; freightPerCarton: number; cnfPerCarton: number;
+  category?: string; imageUrl?: string;
 };
+
+type Brand = { id: string; name: string; contactPerson: string; website: string; email: string };
 
 async function getQuote(id: string) {
   try {
@@ -29,9 +36,24 @@ async function getQuote(id: string) {
       notes: row[12], products,
       quoteType: (row[14] || "CNF") as "CNF" | "FOB",
       discountAmount: parseFloat(row[18]) || 0,
+      shipmentPort: row[20] || "Karachi Port",
+      shippingMode: row[21] || "By Sea",
+      leadTime: row[22] || "30 to 35 Working Days",
     };
   } catch {
     return null;
+  }
+}
+
+async function getBrands(): Promise<Brand[]> {
+  try {
+    await ensureSheet(BRANDS_SHEET, BRANDS_HEADERS);
+    const rows = await readSheet(BRANDS_SHEET);
+    return rows.slice(1).filter(r => r[0]).map(r => ({
+      id: r[0] ?? "", name: r[1] ?? "", contactPerson: r[7] ?? "", website: r[8] ?? "", email: r[9] ?? "",
+    }));
+  } catch {
+    return [];
   }
 }
 
@@ -47,11 +69,11 @@ function fmtDate(iso: string) {
   catch { return iso; }
 }
 
-function fmtUSD(n: number) { return "$" + n.toFixed(2); }
+function fmtUSD(n: number) { return n.toFixed(2); }
 
 export default async function CNFSharePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const quote = await getQuote(id);
+  const [quote, brands] = await Promise.all([getQuote(id), getBrands()]);
   if (!quote) notFound();
 
   const isFob = quote.quoteType === "FOB";
@@ -59,9 +81,14 @@ export default async function CNFSharePage({ params }: { params: Promise<{ id: s
   const grandTotal = subtotal - (quote.discountAmount || 0);
   const isExpired = quote.validTill && new Date(quote.validTill + "T23:59:59") < new Date();
 
-  const brandName = quote.brandKafi && quote.brandEssence
-    ? "Kafi Commodities / Essence"
-    : quote.brandEssence ? "Essence" : "Kafi Commodities";
+  // Contact info is per-brand — Kafi takes priority since it's always the primary exporter on a quote today.
+  const kafiBrand = brands.find(b => b.name.toLowerCase().includes("kafi"));
+  const essenceBrand = brands.find(b => b.name.toLowerCase().includes("essence"));
+  const contactBrand = quote.brandKafi ? kafiBrand : (quote.brandEssence ? essenceBrand : kafiBrand);
+
+  // Group products by category (e.g. RICE, SALT) — each gets its own header bar, like the reference quotation format.
+  const categories = Array.from(new Set(quote.products.map(p => p.category || "PRODUCTS")));
+  const priceHeader = `${isFob ? "FOB" : "CNF"} - ${(quote.destination || "").toUpperCase()}`;
 
   return (
     <>
@@ -69,107 +96,118 @@ export default async function CNFSharePage({ params }: { params: Promise<{ id: s
         @media print {
           body { background: #fff !important; }
           .no-print { display: none !important; }
-          .share-page { box-shadow: none !important; margin: 0 !important; border-radius: 0 !important; }
+          .share-page { box-shadow: none !important; margin: 0 !important; }
         }
       `}</style>
 
       <div style={{ background: "#f5f7fa", minHeight: "100vh", padding: "32px 16px", WebkitPrintColorAdjust: "exact" }}>
-        <div className="share-page" style={{ maxWidth: 860, margin: "0 auto", background: "#fff", borderRadius: 16, overflow: "hidden", boxShadow: "0 4px 24px rgba(0,0,0,0.08)" }}>
+        <div className="share-page" style={{ maxWidth: 1000, margin: "0 auto", background: "#fff", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", border: "1px solid #1a1a2e" }}>
 
-          {/* Header */}
-          <div style={{ background: "linear-gradient(135deg, #1e3a5f 0%, #0f2540 100%)", padding: "36px 40px 28px", color: "#fff" }}>
-            <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.5, color: "#fff" }}>{brandName}</div>
-            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", marginTop: 2, textTransform: "uppercase", letterSpacing: 1.5 }}>International Trade</div>
-            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", textTransform: "uppercase", letterSpacing: 1.5, marginTop: 20 }}>{isFob ? "FOB Price Quotation" : "CNF Price Quotation"}</div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: "#fff", marginTop: 4, fontFamily: "monospace" }}>{quote.quoteNo}</div>
+          {/* Reference strip */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 24px", background: "#f8f9fb", borderBottom: "1px solid #e8eaed", fontSize: 11, color: "#888" }}>
+            <span>Quote <strong style={{ color: "#1a1a2e", fontFamily: "monospace" }}>{quote.quoteNo}</strong> · Prepared for <strong style={{ color: "#1a1a2e" }}>{quote.clientName}</strong></span>
+            <span>
+              Issued {fmtDate(quote.generatedAt)} · Valid Until{" "}
+              {isExpired
+                ? <strong style={{ color: "#dc2626" }}>EXPIRED</strong>
+                : <strong style={{ color: "#1a1a2e" }}>{fmtDate(quote.validTill + "T00:00:00")}</strong>}
+            </span>
           </div>
 
-          {/* Meta */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, padding: "24px 40px", borderBottom: "1px solid #f0f0f0", background: "#fafbfc" }}>
-            {[
-              { label: "Prepared For", value: quote.clientName, sub: quote.clientContact },
-              { label: "Destination", value: quote.destination, sub: quote.country },
-              { label: "Issue Date", value: fmtDate(quote.generatedAt), sub: null },
-            ].map((m, i) => (
-              <div key={i}>
-                <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 1, color: "#888", marginBottom: 3 }}>{m.label}</div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#1a1a2e" }}>{m.value}</div>
-                {m.sub && <div style={{ fontSize: 11, color: "#888" }}>{m.sub}</div>}
-                {i === 2 && (
-                  <>
-                    <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 1, color: "#888", marginTop: 10, marginBottom: 3 }}>Valid Until</div>
-                    {isExpired ? (
-                      <span style={{ display: "inline-flex", alignItems: "center", background: "#fee2e2", color: "#dc2626", fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 20, border: "1px solid #fca5a5" }}>EXPIRED</span>
-                    ) : (
-                      <div style={{ fontSize: 13, fontWeight: 600, color: "#1a1a2e" }}>{fmtDate(quote.validTill + "T00:00:00")}</div>
-                    )}
-                  </>
-                )}
+          {/* Logo header */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "20px 32px", borderBottom: "2px solid #1a1a2e" }}>
+            <div style={{ height: 64, display: "flex", alignItems: "center" }}>
+              {quote.brandEssence && <img src="/brands/essence-logo.jpeg" alt="Essence" style={{ height: 64, objectFit: "contain" }} />}
+            </div>
+            <div style={{ height: 64, display: "flex", alignItems: "center" }}>
+              {quote.brandKafi && <img src="/brands/kafi-logo.jpeg" alt="Kafi Commodities" style={{ height: 64, objectFit: "contain" }} />}
+            </div>
+          </div>
+
+          {/* Terms & Contact bar */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", background: "#dfe6f2", borderBottom: "1px solid #c7d2e6" }}>
+            <div style={{ padding: "14px 24px", borderRight: "1px solid #c7d2e6", fontSize: 13, color: "#1a1a2e" }}>
+              <div style={{ fontWeight: 700, textDecoration: "underline", marginBottom: 6, textAlign: "center" }}>Terms &amp; Condition</div>
+              <div style={{ textAlign: "center" }}>Shipment Port: {quote.shipmentPort}</div>
+              <div style={{ textAlign: "center" }}>Shipping: {quote.shippingMode}</div>
+              <div style={{ textAlign: "center" }}>Lead Time: {quote.leadTime}</div>
+            </div>
+            <div style={{ padding: "14px 24px", fontSize: 13, color: "#1a1a2e" }}>
+              {contactBrand?.contactPerson && <div><strong>Contact Person:</strong> {contactBrand.contactPerson}</div>}
+              {contactBrand?.website && <div>Website: {contactBrand.website}</div>}
+              {contactBrand?.email && <div>Email ID: {contactBrand.email}</div>}
+              {!contactBrand?.contactPerson && !contactBrand?.website && !contactBrand?.email && (
+                <div style={{ color: "#888" }}>Add contact details for this brand in Product List → Brands.</div>
+              )}
+            </div>
+          </div>
+
+          {/* Category sections */}
+          {categories.map(cat => {
+            const items = quote.products.filter(p => (p.category || "PRODUCTS") === cat);
+            return (
+              <div key={cat}>
+                <div style={{ background: "#1e3a5f", color: "#fff", textAlign: "center", padding: "10px 12px", fontSize: 16, fontWeight: 700, textDecoration: "underline" }}>
+                  {cat.toUpperCase()}
+                </div>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr>
+                      {["S.No", "Product", "Packaging", priceHeader, "Images"].map((h, i) => (
+                        <th key={i} style={{ padding: "12px 10px", textAlign: "center", fontSize: 13, fontWeight: 700, color: "#1a1a2e", border: "1px solid #1a1a2e", background: "#fff" }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map((p, i) => (
+                      <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "#dfe6f2" }}>
+                        <td style={{ padding: "16px 10px", textAlign: "center", fontSize: 14, fontWeight: 700, border: "1px solid #1a1a2e" }}>{i + 1}</td>
+                        <td style={{ padding: "16px 10px", textAlign: "center", fontSize: 14, fontWeight: 700, color: "#1a1a2e", border: "1px solid #1a1a2e" }}>{p.productName}</td>
+                        <td style={{ padding: "16px 10px", textAlign: "center", fontSize: 13, fontWeight: 600, color: "#1a1a2e", border: "1px solid #1a1a2e", whiteSpace: "pre-line" }}>{p.specs || p.packagingDesc || "—"}</td>
+                        <td style={{ padding: "16px 10px", fontSize: 15, fontWeight: 700, color: "#1a1a2e", border: "1px solid #1a1a2e" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", padding: "0 8px" }}>
+                            <span>$</span><span>{fmtUSD(p.cnfPerCarton * p.qty)}</span>
+                          </div>
+                        </td>
+                        <td style={{ padding: "10px", textAlign: "center", border: "1px solid #1a1a2e" }}>
+                          {p.imageUrl ? (
+                            <img src={p.imageUrl} alt={p.productName} style={{ width: 90, height: 110, objectFit: "cover", margin: "0 auto" }} />
+                          ) : (
+                            <div style={{ width: 90, height: 110, background: "#f0f2f5", margin: "0 auto" }} />
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            ))}
-          </div>
+            );
+          })}
 
-          {/* Products table — kept simple for clients/vendors: no cost breakdown, just what they need */}
-          <div style={{ padding: "28px 40px" }}>
-            <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 1.5, color: "#888", fontWeight: 700, marginBottom: 14 }}>Products &amp; Pricing</div>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr style={{ background: "#f8f9fb" }}>
-                  {["#", "Product", "Product Packaging", "Total Amount"].map((h, i) => (
-                    <th key={h} style={{ padding: "10px 12px", textAlign: i === 3 ? "right" : "left", fontSize: 10, textTransform: "uppercase", letterSpacing: 1, color: "#888", fontWeight: 700, borderBottom: "2px solid #e8eaed" }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {quote.products.map((p, i) => (
-                  <tr key={i} style={{ borderBottom: i < quote.products.length - 1 ? "1px solid #f0f2f5" : "none" }}>
-                    <td style={{ padding: "12px 12px", color: "#aaa", fontSize: 12 }}>{i + 1}</td>
-                    <td style={{ padding: "12px 12px", verticalAlign: "top" }}>
-                      <div style={{ fontWeight: 600, color: "#1a1a2e", fontSize: 13 }}>{p.productName}</div>
-                      {p.sku && <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>{p.sku}</div>}
-                    </td>
-                    <td style={{ padding: "12px 12px", verticalAlign: "top", fontSize: 12, color: "#555" }}>{p.specs || p.packagingDesc || "—"}</td>
-                    <td style={{ padding: "12px 12px", textAlign: "right", fontSize: 13, fontWeight: 700, color: "#1e40af" }}>{fmtUSD(p.cnfPerCarton * p.qty)}</td>
-                  </tr>
-                ))}
-                <tr>
-                  <td colSpan={3} style={{ padding: "8px 12px", textAlign: "right", fontSize: 12, color: "#888", borderTop: "2px solid #e8eaed" }}>Subtotal</td>
-                  <td style={{ padding: "8px 12px", textAlign: "right", fontSize: 13, color: "#555", borderTop: "2px solid #e8eaed" }}>{fmtUSD(subtotal)}</td>
-                </tr>
-                {(quote.discountAmount || 0) > 0 && (
-                  <tr>
-                    <td colSpan={3} style={{ padding: "8px 12px", textAlign: "right", fontSize: 12, color: "#dc2626" }}>Discount</td>
-                    <td style={{ padding: "8px 12px", textAlign: "right", fontSize: 13, color: "#dc2626" }}>−{fmtUSD(quote.discountAmount)}</td>
-                  </tr>
-                )}
-                <tr style={{ background: "#eff6ff" }}>
-                  <td colSpan={3} style={{ padding: "14px 12px", textAlign: "right", fontSize: 12, fontWeight: 700, color: "#1e40af", borderTop: "2px solid #bfdbfe" }}>Grand Total</td>
-                  <td style={{ padding: "14px 12px", textAlign: "right", fontSize: 14, fontWeight: 700, color: "#1e40af", borderTop: "2px solid #bfdbfe" }}>{fmtUSD(grandTotal)}</td>
-                </tr>
-              </tbody>
-            </table>
+          {/* Totals */}
+          <div style={{ padding: "18px 32px", borderTop: "2px solid #1a1a2e" }}>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 40 }}>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 12, color: "#888" }}>Subtotal</div>
+                {(quote.discountAmount || 0) > 0 && <div style={{ fontSize: 12, color: "#dc2626", marginTop: 4 }}>Discount</div>}
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#1e3a5f", marginTop: 4 }}>Grand Total</div>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 13, color: "#1a1a2e" }}>${fmtUSD(subtotal)}</div>
+                {(quote.discountAmount || 0) > 0 && <div style={{ fontSize: 13, color: "#dc2626", marginTop: 4 }}>−${fmtUSD(quote.discountAmount)}</div>}
+                <div style={{ fontSize: 15, fontWeight: 700, color: "#1e3a5f", marginTop: 4 }}>${fmtUSD(grandTotal)}</div>
+              </div>
+            </div>
           </div>
 
           {/* Notes */}
           {quote.notes && (
-            <div style={{ margin: "0 40px 24px", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "12px 16px", fontSize: 12, color: "#92400e" }}>
+            <div style={{ margin: "0 32px 20px", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "12px 16px", fontSize: 12, color: "#92400e" }}>
               <strong>Note:</strong> {quote.notes}
             </div>
           )}
 
-          {/* Footer */}
-          <div style={{ padding: "20px 40px", background: "#f8f9fb", borderTop: "1px solid #f0f0f0", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "#1e3a5f" }}>{brandName}</div>
-              <div style={{ fontSize: 11, color: "#aaa" }}>All prices in USD · Prices valid as stated above</div>
-            </div>
-            <div style={{ textAlign: "right", fontSize: 11, color: "#aaa" }}>
-              <div>Quote: {quote.quoteNo}</div>
-              <div>By: {quote.createdBy}</div>
-            </div>
-          </div>
-
-          <div style={{ fontSize: 10, color: "#bbb", textAlign: "center", padding: 12 }}>Generated by Kafi Commodities AI Agent</div>
+          <div style={{ fontSize: 10, color: "#bbb", textAlign: "center", padding: 12, borderTop: "1px solid #f0f0f0" }}>Generated by Kafi Commodities AI Agent · By {quote.createdBy}</div>
         </div>
 
         <PrintButton />

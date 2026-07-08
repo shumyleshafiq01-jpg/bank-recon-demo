@@ -5,6 +5,7 @@ const SHEET = "CNF_Quotes";
 const HEADERS = [
   "id","quoteNo","clientName","clientContact","destination","country","generatedAt","validTill","status","createdBy","brandKafi","brandEssence","notes","productsSnapshot",
   "quoteType","discountType","discountScope","discountValue","discountAmount","discountProductIds",
+  "shipmentPort","shippingMode","leadTime",
 ];
 
 type QuoteRow = {

@@ -17,6 +17,7 @@ type FreightCard = {
 type QuoteProduct = {
   productId: string; productName: string; sku: string; specs: string; packagingDesc: string;
   qty: number; fobPerCarton: number; freightPerCarton: number; cnfPerCarton: number;
+  category: string; imageUrl: string;
 };
 
 type QuoteType = "CNF" | "FOB";
@@ -31,6 +32,7 @@ type Quote = {
   quoteType: QuoteType;
   discountType: DiscountType; discountScope: DiscountScope; discountValue: number;
   discountAmount: number; discountProductIds: string[];
+  shipmentPort: string; shippingMode: string; leadTime: string;
 };
 
 // Discount is computed on the (already CNF/FOB-appropriate) line totals —
@@ -93,10 +95,15 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
   const brandEssence = false;
   const [quoteType, setQuoteType] = useState<QuoteType>("CNF");
   const [products, setProducts] = useState<QuoteProduct[]>([
-    { productId: "", productName: "", sku: "", specs: "", packagingDesc: "", qty: 1, fobPerCarton: 0, freightPerCarton: 0, cnfPerCarton: 0 },
+    { productId: "", productName: "", sku: "", specs: "", packagingDesc: "", qty: 1, fobPerCarton: 0, freightPerCarton: 0, cnfPerCarton: 0, category: "", imageUrl: "" },
   ]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  // Terms & Conditions — fixed defaults for now; will be sourced per-brand later
+  const [shipmentPort, setShipmentPort] = useState("Karachi Port");
+  const [shippingMode, setShippingMode] = useState("By Sea");
+  const [leadTime, setLeadTime] = useState("30 to 35 Working Days");
 
   // Discount
   const [discountEnabled, setDiscountEnabled] = useState(false);
@@ -157,6 +164,8 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
         // "Product Packaging" (notes) now carries this combined description.
         p.specs = product?.specs || product?.notes || "";
         p.packagingDesc = product?.packagingDesc ?? "";
+        p.category = product?.category ?? "";
+        p.imageUrl = product?.imageUrl ?? "";
         p.fobPerCarton = fobFor(String(value), p.qty);
         p.freightPerCarton = (quoteType === "CNF") ? freightFor(String(value), freightPerCarton) : 0;
         p.cnfPerCarton = p.fobPerCarton + p.freightPerCarton;
@@ -177,6 +186,7 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
     setProducts(prev => [...prev, {
       productId: "", productName: "", sku: "", specs: "", packagingDesc: "",
       qty: 1, fobPerCarton: 0, freightPerCarton: 0, cnfPerCarton: 0,
+      category: "", imageUrl: "",
     }]);
   }
 
@@ -203,6 +213,7 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
             discountType: finalDiscountType, discountScope, discountValue,
             discountAmount, discountProductIds: finalDiscountType === "none" ? [] : discountProductIds,
             productsSnapshot: finalProducts,
+            shipmentPort, shippingMode, leadTime,
           },
         }),
       });
@@ -299,6 +310,28 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
               <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="e.g. Subject to LC confirmation"
                 className="w-full border border-gray-200 rounded-lg px-3.5 py-2.5 text-base text-gray-900 focus:outline-none focus:border-blue-400" />
             </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-600 mb-2.5">Terms &amp; Conditions</label>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Shipment Port</label>
+                <input value={shipmentPort} onChange={e => setShipmentPort(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-400" />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Shipping</label>
+                <input value={shippingMode} onChange={e => setShippingMode(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-400" />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Lead Time</label>
+                <input value={leadTime} onChange={e => setLeadTime(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-400" />
+              </div>
+            </div>
+            <p className="text-xs text-gray-400 mt-1.5">Pre-filled with standard defaults — edit if this quote needs different terms.</p>
           </div>
 
           <div className="border-t border-gray-100 pt-5">

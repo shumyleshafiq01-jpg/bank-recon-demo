@@ -1,6 +1,6 @@
 export interface CostMaterial { id: string; name: string; unit: string; category: string; pricePerUnit: number; updatedAt: string; }
-export interface CostProduct { id: string; sku: string; name: string; productType: string; fclQty: number; grossProfitPct: number; imageUrl: string; notes: string; active: boolean; specs?: string; packagingDesc?: string; }
-export interface CostRecipeItem { id: string; productId: string; materialId: string; materialName: string; qty: number; unitType: "PCS" | "CONTAINER" | "FIXED"; sortOrder: number; }
+export interface CostProduct { id: string; sku: string; name: string; productType: string; fclQty: number; grossProfitPct: number; imageUrl: string; notes: string; active: boolean; specs?: string; packagingDesc?: string; category?: string; }
+export interface CostRecipeItem { id: string; productId: string; materialId: string; materialName: string; qty: number; unitType: "PCS" | "CONTAINER" | "FIXED"; sortOrder: number; priceOverride?: number | null; }
 export interface CostSettings { fcRate: number; currency: string; targetCurrency: string; adminPct: number; whtPct: number; serviceCharges: number; eds: number; courierCharges: number; }
 
 export function calcCost(recipe: CostRecipeItem[], materials: CostMaterial[], product: CostProduct, settings: CostSettings, quoteQty = 1) {
@@ -8,7 +8,8 @@ export function calcCost(recipe: CostRecipeItem[], materials: CostMaterial[], pr
   let pcsCOG = 0;   // scales with quoteQty
   let fixedCOG = 0; // stays same regardless of qty
   for (const item of recipe) {
-    const price = matMap.get(item.materialId)?.pricePerUnit ?? 0;
+    // A per-line price override locks that ingredient's price so future Master Price changes don't touch it.
+    const price = item.priceOverride != null ? item.priceOverride : (matMap.get(item.materialId)?.pricePerUnit ?? 0);
     if (item.unitType === "CONTAINER") fixedCOG += price / (product.fclQty || 1500);
     else if (item.unitType === "FIXED") fixedCOG += item.qty * price;
     else pcsCOG += item.qty * price; // PCS — scales

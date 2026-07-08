@@ -6,9 +6,9 @@ import * as XLSX from "xlsx";
 
 /* ════════════════════════════════ TYPES */
 interface Material { id: string; name: string; unit: string; category: string; pricePerUnit: number; updatedAt: string; defaultUnitType: "PCS" | "CONTAINER" | "FIXED"; }
-interface Brand { id: string; name: string; address: string; city: string; country: string; logoUrl: string; createdAt: string; }
-interface Product { id: string; sku: string; name: string; productType: string; fclQty: number; grossProfitPct: number; imageUrl: string; notes: string; active: boolean; specs: string; packagingDesc: string; brandId: string; }
-interface RecipeItem { id: string; productId: string; materialId: string; materialName: string; qty: number; unitType: "PCS" | "CONTAINER" | "FIXED"; sortOrder: number; }
+interface Brand { id: string; name: string; address: string; city: string; country: string; logoUrl: string; createdAt: string; contactPerson: string; website: string; email: string; }
+interface Product { id: string; sku: string; name: string; productType: string; fclQty: number; grossProfitPct: number; imageUrl: string; notes: string; active: boolean; specs: string; packagingDesc: string; brandId: string; category: string; }
+interface RecipeItem { id: string; productId: string; materialId: string; materialName: string; qty: number; unitType: "PCS" | "CONTAINER" | "FIXED"; sortOrder: number; priceOverride?: number | null; }
 interface Settings { fcRate: number; currency: string; targetCurrency: string; adminPct: number; whtPct: number; serviceCharges: number; eds: number; courierCharges: number; }
 
 // Materials that must exist on every product's recipe (accountant-mandated standard export charges)
@@ -63,7 +63,7 @@ function calcCost(recipe: RecipeItem[], materials: Material[], product: Product,
   let pcsCOG = 0;   // scales with quoteQty
   let fixedCOG = 0; // stays same regardless of qty
   for (const item of recipe) {
-    const price = matMap.get(item.materialId)?.pricePerUnit ?? 0;
+    const price = item.priceOverride != null ? item.priceOverride : (matMap.get(item.materialId)?.pricePerUnit ?? 0);
     if (item.unitType === "CONTAINER") fixedCOG += price / (product.fclQty || 1500);
     else if (item.unitType === "FIXED") fixedCOG += item.qty * price;
     else pcsCOG += item.qty * price; // PCS — scales
@@ -346,7 +346,7 @@ export default function ProductListPage() {
   }
 
   function addRecipeRow() {
-    setProductRecipe(prev => [...prev, { id: genId(), productId: selectedProduct?.id ?? "", materialId: "", materialName: "", qty: 1, unitType: "PCS", sortOrder: prev.length }]);
+    setProductRecipe(prev => [...prev, { id: genId(), productId: selectedProduct?.id ?? "", materialId: "", materialName: "", qty: 1, unitType: "PCS", sortOrder: prev.length, priceOverride: null }]);
   }
 
   function updateRecipeRow(idx: number, field: keyof RecipeItem, value: unknown) {
@@ -482,7 +482,9 @@ export default function ProductListPage() {
                         {productRecipe.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-muted">No ingredients. Click "Add Row" to start.</td></tr>}
                         {productRecipe.map((item, idx) => {
                           const mat = materials.find(m => m.id === item.materialId);
-                          const price = mat?.pricePerUnit ?? 0;
+                          const masterPrice = mat?.pricePerUnit ?? 0;
+                          const isOverride = item.priceOverride != null;
+                          const price = isOverride ? item.priceOverride! : masterPrice;
                           const total = item.unitType === "CONTAINER" ? price / (selectedProduct.fclQty || 1500) : item.qty * price;
                           return (
                             <tr key={item.id} className={idx % 2 === 0 ? "" : "bg-surface-light/20"}>
@@ -509,7 +511,15 @@ export default function ProductListPage() {
                                   {UNIT_TYPES.map(u => <option key={u} value={u}>{u === "PCS" ? "PCS (×qty)" : u === "CONTAINER" ? "CONTAINER (÷FCL)" : "FIXED (flat)"}</option>)}
                                 </select>
                               </td>
-                              <td className="px-3 py-1.5 text-right text-muted">{price.toFixed(2)}</td>
+                              <td className="px-3 py-1.5">
+                                <div className="flex items-center gap-1 justify-end">
+                                  <input type="number" step="0.01" value={price}
+                                    onChange={e => updateRecipeRow(idx, "priceOverride", e.target.value === "" ? null : (parseFloat(e.target.value) || 0))}
+                                    title={isOverride ? "Custom price — locked, won't change when Master Price updates" : "Fetched from Master Price — edit to set a custom price for this product only"}
+                                    className={`w-16 bg-background border rounded px-1.5 py-1 text-xs text-right focus:outline-none ${isOverride ? "border-amber-500/60 text-amber-400 font-semibold" : "border-border text-muted focus:border-green-500/50"}`} />
+                                  {isOverride && <button onClick={() => updateRecipeRow(idx, "priceOverride", null)} title="Reset to Master Price" className="text-amber-400 hover:text-amber-300 cursor-pointer text-xs leading-none">↺</button>}
+                                </div>
+                              </td>
                               <td className="px-3 py-1.5 text-right font-mono font-semibold text-foreground">{total.toFixed(2)}</td>
                               <td className="px-3 py-1.5"><button onClick={() => setProductRecipe(prev => prev.filter((_, i) => i !== idx))} className="text-muted hover:text-red-400 cursor-pointer"><X className="w-3 h-3" /></button></td>
                             </tr>
@@ -517,6 +527,9 @@ export default function ProductListPage() {
                         })}
                       </tbody>
                     </table>
+                  </div>
+                  <div className="px-5 py-2 border-t border-border">
+                    <p className="text-[10px] text-muted">Rate auto-fetches from Master Prices. Edit a rate to set a <span className="text-amber-400 font-semibold">custom price</span> for this product only — it locks and won&apos;t change when Master Prices update. Click ↺ to reset to master.</p>
                   </div>
                 </div>
 
@@ -948,7 +961,7 @@ function suggestNextSku(products: Product[], productType: string): string {
 }
 
 function ProductForm({ item, products, brands, onSave, onClose }: { item: Product | null; products: Product[]; brands: Brand[]; onSave: (p: Product) => void; onClose: () => void }) {
-  const empty: Product = { id: Math.random().toString(36).slice(2, 10), sku: suggestNextSku(products, "FINISH GOODS"), name: "", productType: "FINISH GOODS", fclQty: 1500, grossProfitPct: 50, imageUrl: "", notes: "", active: true, specs: "", packagingDesc: "", brandId: "" };
+  const empty: Product = { id: Math.random().toString(36).slice(2, 10), sku: suggestNextSku(products, "FINISH GOODS"), name: "", productType: "FINISH GOODS", fclQty: 1500, grossProfitPct: 50, imageUrl: "", notes: "", active: true, specs: "", packagingDesc: "", brandId: "", category: "" };
   const [f, setF] = useState<Product>(item ?? empty);
   const [skuTouched, setSkuTouched] = useState(!!item);
   const [uploading, setUploading] = useState(false);
@@ -1020,6 +1033,13 @@ function ProductForm({ item, products, brands, onSave, onClose }: { item: Produc
                 {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
               </select>
               {brands.length === 0 && <p className="text-[10px] text-red-400 mt-1">No brands yet — add one in the Brands tab first.</p>}
+            </div>
+            <div><label className="text-[10px] text-muted uppercase tracking-wide block mb-1">Category</label>
+              <input type="text" list="product-categories" value={f.category} onChange={e => s("category", e.target.value)} placeholder="e.g. RICE, SALT" className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50" />
+              <datalist id="product-categories">
+                {[...new Set(products.map(p => p.category).filter(Boolean))].map(c => <option key={c} value={c} />)}
+              </datalist>
+              <p className="text-[10px] text-muted mt-1">Groups products on the CNF client price list (e.g. all RICE items under one heading).</p>
             </div>
             {([["fclQty","FCL Container Qty"],["grossProfitPct","Gross Profit %"]] as [keyof Product, string][]).map(([k, l]) => (
               <div key={k}><label className="text-[10px] text-muted uppercase tracking-wide block mb-1">{l}</label>
@@ -1241,7 +1261,7 @@ function MaterialForm({ item, onSave, onClose }: { item: Material | null; onSave
 
 /* ════════════════════════════════ BRAND FORM */
 function BrandForm({ item, onSave, onClose }: { item: Brand | null; onSave: (b: Brand) => void; onClose: () => void }) {
-  const empty: Brand = { id: Math.random().toString(36).slice(2, 10), name: "", address: "", city: "", country: "", logoUrl: "", createdAt: "" };
+  const empty: Brand = { id: Math.random().toString(36).slice(2, 10), name: "", address: "", city: "", country: "", logoUrl: "", createdAt: "", contactPerson: "", website: "", email: "" };
   const [f, setF] = useState<Brand>(item ?? empty);
   const [uploading, setUploading] = useState(false);
   const s = <K extends keyof Brand>(k: K, v: Brand[K]) => setF(p => ({ ...p, [k]: v }));
@@ -1279,6 +1299,14 @@ function BrandForm({ item, onSave, onClose }: { item: Brand | null; onSave: (b: 
             <input type="text" value={f.city} onChange={e => s("city", e.target.value)} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50" /></div>
           <div><label className="text-[10px] text-muted uppercase tracking-wide block mb-1">Country</label>
             <input type="text" value={f.country} onChange={e => s("country", e.target.value)} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50" /></div>
+        </div>
+        <div><label className="text-[10px] text-muted uppercase tracking-wide block mb-1">Contact Person</label>
+          <input type="text" value={f.contactPerson} onChange={e => s("contactPerson", e.target.value)} placeholder="e.g. Mr. Khalid Mehmood Paracha" className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50" /></div>
+        <div className="grid grid-cols-2 gap-3">
+          <div><label className="text-[10px] text-muted uppercase tracking-wide block mb-1">Website</label>
+            <input type="text" value={f.website} onChange={e => s("website", e.target.value)} placeholder="www.example.com" className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50" /></div>
+          <div><label className="text-[10px] text-muted uppercase tracking-wide block mb-1">Email</label>
+            <input type="text" value={f.email} onChange={e => s("email", e.target.value)} placeholder="name@example.com" className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-green-500/50" /></div>
         </div>
         <div>
           <label className="text-[10px] text-muted uppercase tracking-wide block mb-1">Logo</label>
