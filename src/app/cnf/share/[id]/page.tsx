@@ -14,7 +14,7 @@ const BRANDS_SHEET = "PL_Brands";
 const BRANDS_HEADERS = ["id", "name", "address", "city", "country", "logoUrl", "createdAt", "contactPerson", "website", "email"];
 
 type QuoteProduct = {
-  productName: string; sku: string; specs: string; packagingDesc: string;
+  productId?: string; productName: string; sku: string; specs: string; packagingDesc: string;
   qty: number; fobPerCarton: number; freightPerCarton: number; cnfPerCarton: number;
   category?: string; imageUrl?: string;
 };
@@ -29,13 +29,19 @@ async function getQuote(id: string) {
     if (!row) return null;
     let products: QuoteProduct[] = [];
     try { products = JSON.parse(row[13] ?? "[]"); } catch { products = []; }
+    let discountProductIds: string[] = [];
+    try { discountProductIds = JSON.parse(row[19] ?? "[]"); } catch { discountProductIds = []; }
     return {
       id: row[0], quoteNo: row[1], clientName: row[2], clientContact: row[3],
       destination: row[4], country: row[5], generatedAt: row[6], validTill: row[7],
       status: row[8], createdBy: row[9], brandKafi: row[10] !== "false", brandEssence: row[11] === "true",
       notes: row[12], products,
       quoteType: (row[14] || "CNF") as "CNF" | "FOB",
+      discountType: (row[15] || "none") as "none" | "percent" | "amount",
+      discountScope: (row[16] || "all") as "all" | "specific",
+      discountValue: parseFloat(row[17]) || 0,
       discountAmount: parseFloat(row[18]) || 0,
+      discountProductIds,
       shipmentPort: row[20] || "Karachi Port",
       shippingMode: row[21] || "By Sea",
       leadTime: row[22] || "30 to 35 Working Days",
@@ -71,14 +77,37 @@ function fmtDate(iso: string) {
 
 function fmtUSD(n: number) { return n.toFixed(2); }
 
+// Per-product breakdown of the quote-level discount, so each row can show its
+// own "before → after" price instead of one lump total at the bottom.
+function itemDiscount(
+  item: QuoteProduct, allItems: QuoteProduct[],
+  discountType: "none" | "percent" | "amount", discountScope: "all" | "specific",
+  discountValue: number, discountProductIds: string[],
+): { original: number; discounted: number; hasDiscount: boolean } {
+  const original = item.cnfPerCarton * item.qty;
+  if (discountType === "none" || discountValue <= 0) return { original, discounted: original, hasDiscount: false };
+
+  const scoped = discountScope === "all" ? allItems : allItems.filter(p => p.productId && discountProductIds.includes(p.productId));
+  const inScope = discountScope === "all" || (item.productId ? discountProductIds.includes(item.productId) : false);
+  if (!inScope) return { original, discounted: original, hasDiscount: false };
+
+  let cut: number;
+  if (discountType === "percent") {
+    cut = original * (discountValue / 100);
+  } else {
+    const scopedSubtotal = scoped.reduce((s, p) => s + p.cnfPerCarton * p.qty, 0);
+    cut = scopedSubtotal > 0 ? (original / scopedSubtotal) * discountValue : 0;
+  }
+  cut = Math.min(cut, original);
+  return { original, discounted: Math.round((original - cut) * 100) / 100, hasDiscount: cut > 0 };
+}
+
 export default async function CNFSharePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const [quote, brands] = await Promise.all([getQuote(id), getBrands()]);
   if (!quote) notFound();
 
   const isFob = quote.quoteType === "FOB";
-  const subtotal = quote.products.reduce((s, p) => s + p.cnfPerCarton * p.qty, 0);
-  const grandTotal = subtotal - (quote.discountAmount || 0);
   const isExpired = quote.validTill && new Date(quote.validTill + "T23:59:59") < new Date();
 
   // Contact info is per-brand — Kafi takes priority since it's always the primary exporter on a quote today.
@@ -165,9 +194,26 @@ export default async function CNFSharePage({ params }: { params: Promise<{ id: s
                         <td style={{ padding: "16px 10px", textAlign: "center", fontSize: 14, fontWeight: 700, color: "#1a1a2e", border: "1px solid #1a1a2e" }}>{p.productName}</td>
                         <td style={{ padding: "16px 10px", textAlign: "center", fontSize: 13, fontWeight: 600, color: "#1a1a2e", border: "1px solid #1a1a2e", whiteSpace: "pre-line", background: "#dfe6f2" }}>{p.specs || p.packagingDesc || "—"}</td>
                         <td style={{ padding: "16px 10px", fontSize: 15, fontWeight: 700, color: "#1a1a2e", border: "1px solid #1a1a2e" }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", padding: "0 8px" }}>
-                            <span>$</span><span>{fmtUSD(p.cnfPerCarton * p.qty)}</span>
-                          </div>
+                          {(() => {
+                            const { original, discounted, hasDiscount } = itemDiscount(
+                              p, quote.products, quote.discountType, quote.discountScope, quote.discountValue, quote.discountProductIds,
+                            );
+                            if (!hasDiscount) return (
+                              <div style={{ display: "flex", justifyContent: "space-between", padding: "0 8px" }}>
+                                <span>$</span><span>{fmtUSD(original)}</span>
+                              </div>
+                            );
+                            return (
+                              <div style={{ padding: "0 8px" }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, fontWeight: 500, color: "#dc2626", textDecoration: "line-through" }}>
+                                  <span>$</span><span>{fmtUSD(original)}</span>
+                                </div>
+                                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 2 }}>
+                                  <span>$</span><span>{fmtUSD(discounted)}</span>
+                                </div>
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td style={{ padding: "10px", textAlign: "center", border: "1px solid #1a1a2e" }}>
                           {p.imageUrl ? (
@@ -184,25 +230,9 @@ export default async function CNFSharePage({ params }: { params: Promise<{ id: s
             );
           })}
 
-          {/* Totals */}
-          <div style={{ padding: "18px 32px", borderTop: "2px solid #1a1a2e" }}>
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 40 }}>
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontSize: 12, color: "#888" }}>Subtotal</div>
-                {(quote.discountAmount || 0) > 0 && <div style={{ fontSize: 12, color: "#dc2626", marginTop: 4 }}>Discount</div>}
-                <div style={{ fontSize: 14, fontWeight: 700, color: "#1e3a5f", marginTop: 4 }}>Grand Total</div>
-              </div>
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontSize: 13, color: "#1a1a2e" }}>${fmtUSD(subtotal)}</div>
-                {(quote.discountAmount || 0) > 0 && <div style={{ fontSize: 13, color: "#dc2626", marginTop: 4 }}>−${fmtUSD(quote.discountAmount)}</div>}
-                <div style={{ fontSize: 15, fontWeight: 700, color: "#1e3a5f", marginTop: 4 }}>${fmtUSD(grandTotal)}</div>
-              </div>
-            </div>
-          </div>
-
           {/* Notes */}
           {quote.notes && (
-            <div style={{ margin: "0 32px 20px", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "12px 16px", fontSize: 12, color: "#92400e" }}>
+            <div style={{ margin: "20px 32px", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "14px 18px", fontSize: 15, color: "#92400e" }}>
               <strong>Note:</strong> {quote.notes}
             </div>
           )}
