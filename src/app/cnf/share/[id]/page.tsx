@@ -160,10 +160,10 @@ export default async function CNFSharePage({ params }: { params: Promise<{ id: s
                   </thead>
                   <tbody>
                     {items.map((p, i) => (
-                      <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "#dfe6f2" }}>
-                        <td style={{ padding: "16px 10px", textAlign: "center", fontSize: 14, fontWeight: 700, border: "1px solid #1a1a2e" }}>{i + 1}</td>
+                      <tr key={i} style={{ background: "#fff" }}>
+                        <td style={{ padding: "16px 10px", textAlign: "center", fontSize: 14, fontWeight: 700, border: "1px solid #1a1a2e", background: "#dfe6f2" }}>{i + 1}</td>
                         <td style={{ padding: "16px 10px", textAlign: "center", fontSize: 14, fontWeight: 700, color: "#1a1a2e", border: "1px solid #1a1a2e" }}>{p.productName}</td>
-                        <td style={{ padding: "16px 10px", textAlign: "center", fontSize: 13, fontWeight: 600, color: "#1a1a2e", border: "1px solid #1a1a2e", whiteSpace: "pre-line" }}>{p.specs || p.packagingDesc || "—"}</td>
+                        <td style={{ padding: "16px 10px", textAlign: "center", fontSize: 13, fontWeight: 600, color: "#1a1a2e", border: "1px solid #1a1a2e", whiteSpace: "pre-line", background: "#dfe6f2" }}>{p.specs || p.packagingDesc || "—"}</td>
                         <td style={{ padding: "16px 10px", fontSize: 15, fontWeight: 700, color: "#1a1a2e", border: "1px solid #1a1a2e" }}>
                           <div style={{ display: "flex", justifyContent: "space-between", padding: "0 8px" }}>
                             <span>$</span><span>{fmtUSD(p.cnfPerCarton * p.qty)}</span>
