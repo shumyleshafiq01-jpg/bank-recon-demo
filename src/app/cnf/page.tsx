@@ -748,6 +748,7 @@ export default function CNFPage() {
   const [catalogRecipes, setCatalogRecipes] = useState<Map<string, CostRecipeItem[]>>(new Map());
   const [catalogSettings, setCatalogSettings] = useState<CostSettings>({ fcRate: 275, currency: "PKR", targetCurrency: "USD", adminPct: 5, whtPct: 2, serviceCharges: 0, eds: 0, courierCharges: 0 });
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [showNew, setShowNew] = useState(false);
 
   // Filters
@@ -759,27 +760,45 @@ export default function CNFPage() {
   const [showFilters, setShowFilters] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
+  // A failed/empty-looking load should never be silently indistinguishable
+  // from "there really are zero quotes" — that's what caused real panic when
+  // a transient fetch hiccup made an intact quote list look wiped.
+  async function fetchJsonSafe<T>(url: string, fallback: T): Promise<{ data: T; failed: boolean }> {
+    try {
+      const res = await fetch(url);
+      const json = await res.json();
+      if (!res.ok || json?.error) return { data: fallback, failed: true };
+      return { data: json, failed: false };
+    } catch {
+      return { data: fallback, failed: true };
+    }
+  }
+
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(false);
     const [q, f, prod, mat, settings, rec] = await Promise.all([
-      fetch("/api/cnf/quotes").then(r => r.json()).catch(() => ({ quotes: [] })),
-      fetch("/api/cnf/master-freight").then(r => r.json()).catch(() => ({ freightCards: [] })),
-      fetch("/api/product-list/products").then(r => r.json()).catch(() => ({ products: [] })),
-      fetch("/api/product-list/master").then(r => r.json()).catch(() => ({ materials: [] })),
-      fetch("/api/product-list/settings").then(r => r.json()).catch(() => ({ fcRate: 275, currency: "PKR", targetCurrency: "USD" })),
-      fetch("/api/product-list/recipes").then(r => r.json()).catch(() => ({ items: [] })),
+      fetchJsonSafe<{ quotes: Quote[] }>("/api/cnf/quotes", { quotes: [] }),
+      fetchJsonSafe<{ freightCards: FreightCard[] }>("/api/cnf/master-freight", { freightCards: [] }),
+      fetchJsonSafe<{ products: CostProduct[] }>("/api/product-list/products", { products: [] }),
+      fetchJsonSafe<{ materials: CostMaterial[] }>("/api/product-list/master", { materials: [] }),
+      fetchJsonSafe<CostSettings>("/api/product-list/settings", { fcRate: 275, currency: "PKR", targetCurrency: "USD", adminPct: 5, whtPct: 2, serviceCharges: 0, eds: 0, courierCharges: 0 }),
+      fetchJsonSafe<{ items: CostRecipeItem[] }>("/api/product-list/recipes", { items: [] }),
     ]);
-    setQuotes(q.quotes ?? []);
-    setFreightCards(f.freightCards ?? []);
-    setCatalogProducts((prod.products ?? []).filter((p: CostProduct) => p.active !== false));
-    setCatalogMaterials(mat.materials ?? []);
+    // Only the quotes fetch failing is worth alarming about — the others are
+    // supporting data for the New Quote form, not "is my data gone?" panic.
+    if (q.failed) setLoadError(true);
+    setQuotes(q.data.quotes ?? []);
+    setFreightCards(f.data.freightCards ?? []);
+    setCatalogProducts((prod.data.products ?? []).filter((p: CostProduct) => p.active !== false));
+    setCatalogMaterials(mat.data.materials ?? []);
     setCatalogSettings({
-      fcRate: settings.fcRate ?? 275, currency: settings.currency ?? "PKR", targetCurrency: settings.targetCurrency ?? "USD",
-      adminPct: settings.adminPct ?? 5, whtPct: settings.whtPct ?? 2,
-      serviceCharges: settings.serviceCharges ?? 0, eds: settings.eds ?? 0, courierCharges: settings.courierCharges ?? 0,
+      fcRate: settings.data.fcRate ?? 275, currency: settings.data.currency ?? "PKR", targetCurrency: settings.data.targetCurrency ?? "USD",
+      adminPct: settings.data.adminPct ?? 5, whtPct: settings.data.whtPct ?? 2,
+      serviceCharges: settings.data.serviceCharges ?? 0, eds: settings.data.eds ?? 0, courierCharges: settings.data.courierCharges ?? 0,
     });
     const recMap = new Map<string, CostRecipeItem[]>();
-    for (const item of (rec.items ?? []) as CostRecipeItem[]) {
+    for (const item of (rec.data.items ?? []) as CostRecipeItem[]) {
       if (!recMap.has(item.productId)) recMap.set(item.productId, []);
       recMap.get(item.productId)!.push(item);
     }
@@ -956,6 +975,14 @@ export default function CNFPage() {
           {loading ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="w-5 h-5 animate-spin text-blue-500" />
+            </div>
+          ) : loadError ? (
+            <div className="flex flex-col items-center gap-3 py-12 text-center">
+              <p className="text-sm font-semibold text-red-600">Couldn&apos;t load quotations — your data is safe, this is just a connection hiccup.</p>
+              <p className="text-xs text-gray-400">Nothing was deleted. Try again below.</p>
+              <button onClick={load} className="flex items-center gap-1.5 text-xs font-semibold px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer transition-colors">
+                <Loader2 className="w-3.5 h-3.5" /> Retry
+              </button>
             </div>
           ) : filtered.length === 0 ? (
             <div className="text-center py-12 text-sm text-gray-400">

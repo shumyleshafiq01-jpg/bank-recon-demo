@@ -97,6 +97,7 @@ export default function ProductListPage() {
   const [recipes, setRecipes] = useState<Map<string, RecipeItem[]>>(new Map());
   const [settings, setSettings] = useState<Settings>({ fcRate: 275, currency: "PKR", targetCurrency: "USD", adminPct: 5, whtPct: 2, serviceCharges: 0, eds: 0, courierCharges: 0 });
   const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [search, setSearch] = useState("");
   const [session, setSession] = useState<PLSession | null>(null);
   const [pinModal, setPinModal] = useState<{ action: (s: PLSession) => void } | null>(null);
@@ -149,21 +150,22 @@ export default function ProductListPage() {
   // Price list
   const [copiedId, setCopiedId] = useState("");
 
-  useEffect(() => {
-    try { const s = localStorage.getItem(PL_SESSION_KEY); if (s) setSession(JSON.parse(s)); } catch { /* */ }
-    Promise.all([
-      fetch("/api/product-list/master").then(r => r.json()).then(d => setMaterials(d.materials ?? [])),
-      fetch("/api/product-list/products").then(r => r.json()).then(d => setProducts(d.products ?? [])),
-      fetch("/api/product-list/brands").then(r => r.json()).then(d => setBrands(d.brands ?? [])),
-      fetch("/api/product-list/categories").then(r => r.json()).then(d => setCategories(d.categories ?? [])),
-      fetch("/api/product-list/material-lists").then(r => r.json()).then(d => { setMaterialUnits(d.units ?? []); setMaterialCategories(d.categories ?? []); }),
+  // A failed fetch must never look like "there's really nothing here" — that
+  // ambiguity is exactly what caused real alarm over data that was actually
+  // fine. Each loader reports whether it truly succeeded.
+  async function loadAll() {
+    setLoadError(false);
+    const results = await Promise.all([
+      fetch("/api/product-list/master").then(r => r.json()).then(d => { setMaterials(d.materials ?? []); return !d?.error; }).catch(() => false),
+      fetch("/api/product-list/products").then(r => r.json()).then(d => { setProducts(d.products ?? []); return !d?.error; }).catch(() => false),
+      fetch("/api/product-list/brands").then(r => r.json()).then(d => { setBrands(d.brands ?? []); return !d?.error; }).catch(() => false),
+      fetch("/api/product-list/categories").then(r => r.json()).then(d => { setCategories(d.categories ?? []); return !d?.error; }).catch(() => false),
+      fetch("/api/product-list/material-lists").then(r => r.json()).then(d => { setMaterialUnits(d.units ?? []); setMaterialCategories(d.categories ?? []); return !d?.error; }).catch(() => false),
       fetch("/api/product-list/settings").then(r => r.json()).then(d => {
         setSettings(d);
-        // Load access config from settings
-        if (d.pl_access) {
-          try { setAccessConfig(JSON.parse(d.pl_access)); } catch { /* use defaults */ }
-        }
-      }),
+        if (d.pl_access) { try { setAccessConfig(JSON.parse(d.pl_access)); } catch { /* use defaults */ } }
+        return !d?.error;
+      }).catch(() => false),
       fetch("/api/product-list/recipes").then(r => r.json()).then(d => {
         const map = new Map<string, RecipeItem[]>();
         for (const item of (d.items ?? []) as RecipeItem[]) {
@@ -171,8 +173,16 @@ export default function ProductListPage() {
           map.get(item.productId)!.push(item);
         }
         setRecipes(map);
-      }),
-    ]).finally(() => setLoaded(true));
+        return !d?.error;
+      }).catch(() => false),
+    ]);
+    if (results.some(ok => !ok)) setLoadError(true);
+    setLoaded(true);
+  }
+
+  useEffect(() => {
+    try { const s = localStorage.getItem(PL_SESSION_KEY); if (s) setSession(JSON.parse(s)); } catch { /* */ }
+    loadAll();
   }, []);
 
   function login(s: PLSession) { localStorage.setItem(PL_SESSION_KEY, JSON.stringify(s)); setSession(s); setPinModal(null); }
@@ -453,6 +463,13 @@ export default function ProductListPage() {
           )}
         </div>
       </header>
+
+      {loadError && (
+        <div className="flex items-center justify-between gap-3 px-4 md:px-6 py-2.5 bg-red-500/10 border-b border-red-500/20 text-xs">
+          <span className="text-red-400 font-semibold">Couldn&apos;t load some data — your data is safe, this is just a connection hiccup. Nothing was deleted.</span>
+          <button onClick={loadAll} className="flex items-center gap-1 px-3 py-1 bg-red-500 hover:bg-red-500/80 text-white rounded-lg cursor-pointer whitespace-nowrap">Retry</button>
+        </div>
+      )}
 
       {/* ── PRODUCT DETAIL VIEW ── */}
       {selectedProduct && (() => {
