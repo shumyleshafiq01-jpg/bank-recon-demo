@@ -100,6 +100,11 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  // Add-by-category picker
+  const [showCatPicker, setShowCatPicker] = useState(false);
+  const [catPickerCategory, setCatPickerCategory] = useState("");
+  const [catPickerSelected, setCatPickerSelected] = useState<Set<string>>(new Set());
+
   // Terms & Conditions — fixed defaults for now; will be sourced per-brand later
   const [shipmentPort, setShipmentPort] = useState("Karachi Port");
   const [shippingMode, setShippingMode] = useState("By Sea");
@@ -188,6 +193,31 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
       qty: 1, fobPerCarton: 0, freightPerCarton: 0, cnfPerCarton: 0,
       category: "", imageUrl: "",
     }]);
+  }
+
+  // Build a fully-computed quote line from a catalog product id (same logic as
+  // selecting it in a row) — used for bulk add-by-category.
+  function buildQuoteProduct(productId: string): QuoteProduct {
+    const product = catalogProducts.find(cp => cp.id === productId);
+    const fob = fobFor(productId, 1);
+    const freight = (quoteType === "CNF") ? freightFor(productId, freightPerCarton) : 0;
+    return {
+      productId, productName: product?.name ?? "", sku: product?.sku ?? "",
+      specs: product?.specs || product?.notes || "", packagingDesc: product?.packagingDesc ?? "",
+      category: product?.category ?? "", imageUrl: product?.imageUrl ?? "",
+      qty: 1, fobPerCarton: fob, freightPerCarton: freight, cnfPerCarton: fob + freight,
+    };
+  }
+
+  function addProductsByIds(ids: string[]) {
+    setProducts(prev => {
+      const existing = new Set(prev.map(p => p.productId).filter(Boolean));
+      const toAdd = ids.filter(id => !existing.has(id)).map(buildQuoteProduct);
+      if (toAdd.length === 0) return prev;
+      // drop leftover empty placeholder rows once we're adding real products
+      const kept = prev.filter(p => p.productId);
+      return [...kept, ...toAdd];
+    });
   }
 
   function removeProduct(i: number) {
@@ -337,9 +367,21 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
           <div className="border-t border-gray-100 pt-5">
             <div className="flex items-center justify-between mb-3">
               <label className="block text-sm font-medium text-gray-600">Products</label>
-              <button onClick={addProduct} className="flex items-center gap-1.5 text-sm bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 cursor-pointer transition-colors">
-                <Plus className="w-4 h-4" /> Add Product
-              </button>
+              <div className="flex items-center gap-2">
+                <button onClick={() => {
+                  const cats = [...new Set(catalogProducts.map(p => p.category).filter(Boolean))] as string[];
+                  const firstCat = cats[0] ?? "";
+                  setCatPickerCategory(firstCat);
+                  const inQuote = new Set(products.map(p => p.productId).filter(Boolean));
+                  setCatPickerSelected(new Set(catalogProducts.filter(p => p.category === firstCat && !inQuote.has(p.id)).map(p => p.id)));
+                  setShowCatPicker(true);
+                }} className="flex items-center gap-1.5 text-sm border border-blue-600 text-blue-700 px-4 py-2 rounded-lg hover:bg-blue-50 cursor-pointer transition-colors">
+                  <Plus className="w-4 h-4" /> Add by Category
+                </button>
+                <button onClick={addProduct} className="flex items-center gap-1.5 text-sm bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 cursor-pointer transition-colors">
+                  <Plus className="w-4 h-4" /> Add Product
+                </button>
+              </div>
             </div>
 
             {sortedProducts.length === 0 && (
@@ -492,6 +534,77 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
           </button>
         </div>
       </div>
+
+      {/* Add-by-category picker */}
+      {showCatPicker && (
+        <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4" onClick={() => setShowCatPicker(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <h3 className="text-base font-semibold text-gray-900">Add Products by Category</h3>
+              <button onClick={() => setShowCatPicker(false)} className="p-1.5 text-gray-400 hover:text-gray-600 cursor-pointer"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="px-6 py-4 space-y-3 flex-1 overflow-y-auto">
+              {(() => {
+                const cats = [...new Set(catalogProducts.map(p => p.category).filter(Boolean))] as string[];
+                if (cats.length === 0) return <p className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">No product categories yet. Assign a category to products in Product List → Products first (e.g. tag all pink-salt items as "PINK SALT").</p>;
+                const inQuote = new Set(products.map(p => p.productId).filter(Boolean));
+                const catProducts = catalogProducts.filter(p => p.category === catPickerCategory);
+                const selectableIds = catProducts.filter(p => !inQuote.has(p.id)).map(p => p.id);
+                const allSelected = selectableIds.length > 0 && selectableIds.every(id => catPickerSelected.has(id));
+                return (
+                  <>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Category</label>
+                      <select value={catPickerCategory} onChange={e => {
+                        const c = e.target.value; setCatPickerCategory(c);
+                        setCatPickerSelected(new Set(catalogProducts.filter(p => p.category === c && !inQuote.has(p.id)).map(p => p.id)));
+                      }} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-400 cursor-pointer">
+                        {cats.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-gray-500">{catProducts.length} product{catProducts.length !== 1 ? "s" : ""} in {catPickerCategory}</span>
+                      <button onClick={() => setCatPickerSelected(allSelected ? new Set() : new Set(selectableIds))} className="text-xs text-blue-600 hover:text-blue-700 cursor-pointer">
+                        {allSelected ? "Deselect all" : "Select all"}
+                      </button>
+                    </div>
+                    <div className="border border-gray-200 rounded-xl divide-y divide-gray-100 max-h-[45vh] overflow-y-auto">
+                      {catProducts.map(p => {
+                        const already = inQuote.has(p.id);
+                        const fob = fobFor(p.id, 1);
+                        const cnf = fob + (quoteType === "CNF" ? freightFor(p.id, freightPerCarton) : 0);
+                        const checked = catPickerSelected.has(p.id);
+                        return (
+                          <label key={p.id} className={`flex items-center gap-3 px-3 py-2.5 ${already ? "opacity-50" : "cursor-pointer hover:bg-gray-50"}`}>
+                            <input type="checkbox" disabled={already} checked={already ? false : checked}
+                              onChange={() => setCatPickerSelected(prev => { const n = new Set(prev); if (n.has(p.id)) n.delete(p.id); else n.add(p.id); return n; })}
+                              className="accent-blue-600 w-4 h-4 shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-gray-900 truncate">{p.name}</p>
+                              {p.sku && <p className="text-[11px] text-gray-400">{p.sku}</p>}
+                            </div>
+                            {already
+                              ? <span className="text-[11px] text-gray-400 whitespace-nowrap">already added</span>
+                              : <span className="text-sm font-semibold text-blue-700 whitespace-nowrap">${cnf.toFixed(2)}</span>}
+                          </label>
+                        );
+                      })}
+                      {catProducts.length === 0 && <p className="px-3 py-4 text-sm text-gray-400 text-center">No products in this category.</p>}
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+            <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100">
+              <button onClick={() => setShowCatPicker(false)} className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 cursor-pointer">Cancel</button>
+              <button onClick={() => { addProductsByIds([...catPickerSelected]); setShowCatPicker(false); }} disabled={catPickerSelected.size === 0}
+                className="flex items-center gap-1.5 px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400 text-white text-sm font-semibold rounded-lg cursor-pointer disabled:cursor-not-allowed">
+                <Plus className="w-4 h-4" /> Add Selected ({catPickerSelected.size})
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

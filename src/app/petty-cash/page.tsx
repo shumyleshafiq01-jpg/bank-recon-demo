@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   ArrowLeft, Plus, Trash2, Download,
-  Wallet, Lock, Unlock, ChevronRight, ChevronLeft, CalendarDays, X,
+  Wallet, Lock, Unlock, ChevronRight, ChevronLeft, ChevronDown, CalendarDays, X,
   HandCoins, Calculator, Check, AlertTriangle,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -282,6 +282,11 @@ export default function PettyCashPage() {
   const [openingDate, setOpeningDate] = useState("");
 
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
+  // Transaction Flow Report (in/out summary) — independent of the ledger's own filter
+  const [showFlowReport, setShowFlowReport] = useState(false);
+  const [flowHolderFilter, setFlowHolderFilter] = useState<"" | CashHolder>("");
+  const [flowDateFrom, setFlowDateFrom] = useState("");
+  const [flowDateTo, setFlowDateTo] = useState("");
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [calendarViewMonth, setCalendarViewMonth] = useState(() => {
     const now = new Date();
@@ -689,6 +694,111 @@ export default function PettyCashPage() {
 
       <div className="flex-1 overflow-y-auto p-4 md:p-6">
         <div className="max-w-7xl mx-auto space-y-5 animate-fade-in">
+
+          {/* Transaction Flow Report — cash in / out summary across any date range & holder */}
+          <div className="bg-surface rounded-2xl border border-border overflow-hidden">
+            <button onClick={() => setShowFlowReport(v => !v)}
+              className="w-full flex items-center justify-between px-5 py-4 cursor-pointer hover:bg-surface-light/30 transition-colors">
+              <div className="flex items-center gap-3">
+                <ChevronDown className={`w-4 h-4 text-orange-400 transition-transform ${showFlowReport ? "rotate-180" : ""}`} />
+                <h3 className="text-sm font-semibold text-foreground">Transaction Flow Report
+                  <span className="ml-2 text-xs font-normal text-muted">— cash in &amp; out summary by date / holder</span>
+                </h3>
+              </div>
+            </button>
+
+            {showFlowReport && (() => {
+              const flowEntries = entries
+                .filter(e => !flowHolderFilter || e.holder === flowHolderFilter)
+                .filter(e => (!flowDateFrom || e.date >= flowDateFrom) && (!flowDateTo || e.date <= flowDateTo))
+                .sort((a, b) => a.date.localeCompare(b.date));
+              const outRows = flowEntries.filter(e => (e.cashOut ?? 0) > 0);
+              const inRows  = flowEntries.filter(e => (e.cashIn ?? 0) > 0);
+              const totalOut = outRows.reduce((s, e) => s + (e.cashOut ?? 0), 0);
+              const totalIn  = inRows.reduce((s, e) => s + (e.cashIn ?? 0), 0);
+
+              const FlowTable = ({ rows, type }: { rows: PettyCashEntry[]; type: "out" | "in" }) => (
+                <div>
+                  <h4 className={`text-xs font-bold uppercase tracking-wide mb-2 ${type === "out" ? "text-red-400" : "text-emerald-400"}`}>
+                    {type === "out" ? "Cash Out (Debits)" : "Cash In (Credits)"} — {rows.length} transactions
+                  </h4>
+                  <div className="rounded-xl border border-border overflow-hidden">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className={type === "out" ? "bg-red-500/10 text-red-400" : "bg-emerald-500/10 text-emerald-400"}>
+                          <th className="px-3 py-2 text-left font-semibold w-[36px]">#</th>
+                          <th className="px-3 py-2 text-left font-semibold w-[100px]">Date</th>
+                          <th className="px-3 py-2 text-left font-semibold w-[80px]">Holder</th>
+                          <th className="px-3 py-2 text-left font-semibold w-[150px]">A/C Head</th>
+                          <th className="px-3 py-2 text-left font-semibold">Purpose</th>
+                          <th className="px-3 py-2 text-right font-semibold w-[120px]">Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.length === 0 ? (
+                          <tr><td colSpan={6} className="px-3 py-6 text-center text-muted">No {type === "out" ? "cash-out" : "cash-in"} transactions in this period.</td></tr>
+                        ) : rows.map((e, i) => (
+                          <tr key={e.id} className="align-top">
+                            <td className="px-3 py-2 text-muted">{i + 1}</td>
+                            <td className="px-3 py-2 text-muted whitespace-nowrap">{e.date || "—"}</td>
+                            <td className="px-3 py-2 text-foreground">{HOLDER_LABELS[e.holder]}</td>
+                            <td className="px-3 py-2 text-foreground">{e.acHead || "—"}</td>
+                            <td className="px-3 py-2 text-muted">{e.purpose || "—"}</td>
+                            <td className={`px-3 py-2 text-right font-mono font-semibold ${type === "out" ? "text-red-400" : "text-emerald-400"}`}>
+                              {fmtBal(type === "out" ? (e.cashOut ?? 0) : (e.cashIn ?? 0))}
+                            </td>
+                          </tr>
+                        ))}
+                        <tr className={`border-t border-border font-bold ${type === "out" ? "bg-red-500/5" : "bg-emerald-500/5"}`}>
+                          <td colSpan={5} className="px-3 py-2.5 text-right">TOTAL</td>
+                          <td className={`px-3 py-2.5 text-right font-mono ${type === "out" ? "text-red-400" : "text-emerald-400"}`}>
+                            {fmtBal(type === "out" ? totalOut : totalIn)}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              );
+
+              return (
+                <div className="px-5 pb-5 space-y-5">
+                  <div className="flex items-center gap-3 flex-wrap pt-1">
+                    <select value={flowHolderFilter} onChange={e => setFlowHolderFilter(e.target.value as "" | CashHolder)}
+                      className="text-xs bg-background border border-border rounded-lg px-2 py-1.5 text-foreground focus:outline-none focus:border-orange-500/50 cursor-pointer">
+                      <option value="">All Holders</option>
+                      <option value="main">Main</option>
+                      <option value="aa1">Moiz</option>
+                      <option value="aa2">Hamza</option>
+                    </select>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-muted">From</span>
+                      <input type="date" value={flowDateFrom} onChange={e => setFlowDateFrom(e.target.value)}
+                        className="text-xs bg-background border border-border rounded-lg px-2 py-1.5 text-foreground focus:outline-none focus:border-orange-500/50 cursor-pointer" />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-muted">To</span>
+                      <input type="date" value={flowDateTo} onChange={e => setFlowDateTo(e.target.value)}
+                        className="text-xs bg-background border border-border rounded-lg px-2 py-1.5 text-foreground focus:outline-none focus:border-orange-500/50 cursor-pointer" />
+                    </div>
+                    {(flowHolderFilter || flowDateFrom || flowDateTo) && (
+                      <button onClick={() => { setFlowHolderFilter(""); setFlowDateFrom(""); setFlowDateTo(""); }}
+                        className="text-[10px] text-muted hover:text-foreground cursor-pointer">Clear</button>
+                    )}
+                    <div className="ml-auto flex items-center gap-4 text-xs font-semibold">
+                      <span className="text-red-400">Total Out: {fmtBal(totalOut)}</span>
+                      <span className="text-emerald-400">Total In: {fmtBal(totalIn)}</span>
+                      <span className={`${totalIn - totalOut >= 0 ? "text-orange-400" : "text-red-400"}`}>
+                        Net: {fmtBal(Math.abs(totalIn - totalOut))} {totalIn - totalOut >= 0 ? "▲" : "▼"}
+                      </span>
+                    </div>
+                  </div>
+                  <FlowTable rows={inRows} type="in" />
+                  <FlowTable rows={outRows} type="out" />
+                </div>
+              );
+            })()}
+          </div>
 
           {/* Opening Balance Card — view-only, auto-computed as of today from the running ledger */}
           <div className="bg-surface rounded-2xl border border-border p-4">
