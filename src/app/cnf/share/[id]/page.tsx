@@ -130,7 +130,7 @@ export default async function CNFSharePage({ params }: { params: Promise<{ id: s
       `}</style>
 
       <div style={{ background: "#f5f7fa", minHeight: "100vh", padding: "32px 16px", WebkitPrintColorAdjust: "exact" }}>
-        <div className="share-page" style={{ maxWidth: 1000, margin: "0 auto", background: "#fff", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", border: "1px solid #1a1a2e" }}>
+        <div className="share-page" style={{ maxWidth: 1300, margin: "0 auto", background: "#fff", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", border: "1px solid #1a1a2e" }}>
 
           {/* Reference strip */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 24px", background: "#f8f9fb", borderBottom: "1px solid #e8eaed", fontSize: 11, color: "#888" }}>
@@ -179,11 +179,18 @@ export default async function CNFSharePage({ params }: { params: Promise<{ id: s
                 <div style={{ background: "#1e3a5f", color: "#fff", textAlign: "center", padding: "10px 12px", fontSize: 16, fontWeight: 700, textDecoration: "underline" }}>
                   {cat.toUpperCase()}
                 </div>
-                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+                  <colgroup>
+                    <col style={{ width: "6%" }} />
+                    <col style={{ width: "22%" }} />
+                    <col style={{ width: "30%" }} />
+                    <col style={{ width: "20%" }} />
+                    <col style={{ width: "22%" }} />
+                  </colgroup>
                   <thead>
                     <tr>
                       {["S.No", "Product", "Packaging", priceHeader, "Images"].map((h, i) => (
-                        <th key={i} style={{ padding: "12px 10px", textAlign: "center", fontSize: 13, fontWeight: 700, color: "#1a1a2e", border: "1px solid #1a1a2e", background: "#fff" }}>{h}</th>
+                        <th key={i} style={{ padding: "12px 10px", textAlign: "center", fontSize: 13, fontWeight: 700, color: "#1a1a2e", border: "1px solid #1a1a2e", background: "#fff", wordWrap: "break-word", overflowWrap: "break-word" }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -191,9 +198,9 @@ export default async function CNFSharePage({ params }: { params: Promise<{ id: s
                     {items.map((p, i) => (
                       <tr key={i} style={{ background: "#fff" }}>
                         <td style={{ padding: "16px 10px", textAlign: "center", fontSize: 14, fontWeight: 700, border: "1px solid #1a1a2e", background: "#dfe6f2" }}>{i + 1}</td>
-                        <td style={{ padding: "16px 10px", textAlign: "center", fontSize: 14, fontWeight: 700, color: "#1a1a2e", border: "1px solid #1a1a2e" }}>{p.productName}</td>
-                        <td style={{ padding: "16px 10px", textAlign: "center", fontSize: 13, fontWeight: 600, color: "#1a1a2e", border: "1px solid #1a1a2e", whiteSpace: "pre-line", background: "#dfe6f2" }}>{p.specs || p.packagingDesc || "—"}</td>
-                        <td style={{ padding: "16px 10px", fontSize: 15, fontWeight: 700, color: "#1a1a2e", border: "1px solid #1a1a2e" }}>
+                        <td style={{ padding: "16px 10px", textAlign: "center", fontSize: 14, fontWeight: 700, color: "#1a1a2e", border: "1px solid #1a1a2e", wordWrap: "break-word", overflowWrap: "break-word" }}>{p.productName}</td>
+                        <td style={{ padding: "16px 10px", textAlign: "center", fontSize: 13, fontWeight: 600, color: "#1a1a2e", border: "1px solid #1a1a2e", whiteSpace: "pre-line", wordWrap: "break-word", overflowWrap: "break-word", background: "#dfe6f2" }}>{p.specs || p.packagingDesc || "—"}</td>
+                        <td style={{ padding: "16px 10px", fontSize: 15, fontWeight: 700, color: "#1a1a2e", border: "1px solid #1a1a2e", wordWrap: "break-word", overflowWrap: "break-word" }}>
                           {(() => {
                             const { original, discounted, hasDiscount } = itemDiscount(
                               p, quote.products, quote.discountType, quote.discountScope, quote.discountValue, quote.discountProductIds,
