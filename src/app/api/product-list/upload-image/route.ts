@@ -1,7 +1,11 @@
 import { google } from "googleapis";
 import { Readable } from "stream";
 
-const FOLDER_ID = "16Vx5mJOfK3bt-mQm_ERAMWjptvbvT-PM";
+// Must be a folder owned by a real Google account (not the service account
+// itself), shared with the service account as Editor — service accounts have
+// zero storage quota of their own, so uploads need a human-owned folder to
+// draw quota from.
+const FOLDER_ID = "1gVsgPeafXu_W0ycAyLa1-glAEL8xBQcu";
 
 function getAuth() {
   return new google.auth.GoogleAuth({
