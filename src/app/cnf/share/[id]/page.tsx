@@ -21,33 +21,46 @@ type QuoteProduct = {
 
 type Brand = { id: string; name: string; contactPerson: string; website: string; email: string };
 
-async function getQuote(id: string) {
+// Distinguishes "this quote genuinely doesn't exist" (real 404) from "the
+// Sheets read failed" (transient — e.g. a brief rate-limit hiccup), which
+// used to be conflated: any fetch error rendered a hard 404 that looked like
+// the quote had vanished, when it was actually still there.
+type GetQuoteResult =
+  | { status: "ok"; quote: NonNullable<ReturnType<typeof parseQuoteRow>> }
+  | { status: "not_found" }
+  | { status: "error" };
+
+function parseQuoteRow(row: string[]) {
+  let products: QuoteProduct[] = [];
+  try { products = JSON.parse(row[13] ?? "[]"); } catch { products = []; }
+  let discountProductIds: string[] = [];
+  try { discountProductIds = JSON.parse(row[19] ?? "[]"); } catch { discountProductIds = []; }
+  return {
+    id: row[0], quoteNo: row[1], clientName: row[2], clientContact: row[3],
+    destination: row[4], country: row[5], generatedAt: row[6], validTill: row[7],
+    status: row[8], createdBy: row[9], brandKafi: row[10] !== "false", brandEssence: row[11] === "true",
+    notes: row[12], products,
+    quoteType: (row[14] || "CNF") as "CNF" | "FOB",
+    discountType: (row[15] || "none") as "none" | "percent" | "amount",
+    discountScope: (row[16] || "all") as "all" | "specific",
+    discountValue: parseFloat(row[17]) || 0,
+    discountAmount: parseFloat(row[18]) || 0,
+    discountProductIds,
+    shipmentPort: row[20] || "Karachi Port",
+    shippingMode: row[21] || "By Sea",
+    leadTime: row[22] || "30 to 35 Working Days",
+  };
+}
+
+async function getQuote(id: string): Promise<GetQuoteResult> {
   try {
     await ensureSheet(SHEET, HEADERS);
     const rows = await readSheet(SHEET);
     const row = rows.slice(1).find(r => r[0] === id);
-    if (!row) return null;
-    let products: QuoteProduct[] = [];
-    try { products = JSON.parse(row[13] ?? "[]"); } catch { products = []; }
-    let discountProductIds: string[] = [];
-    try { discountProductIds = JSON.parse(row[19] ?? "[]"); } catch { discountProductIds = []; }
-    return {
-      id: row[0], quoteNo: row[1], clientName: row[2], clientContact: row[3],
-      destination: row[4], country: row[5], generatedAt: row[6], validTill: row[7],
-      status: row[8], createdBy: row[9], brandKafi: row[10] !== "false", brandEssence: row[11] === "true",
-      notes: row[12], products,
-      quoteType: (row[14] || "CNF") as "CNF" | "FOB",
-      discountType: (row[15] || "none") as "none" | "percent" | "amount",
-      discountScope: (row[16] || "all") as "all" | "specific",
-      discountValue: parseFloat(row[17]) || 0,
-      discountAmount: parseFloat(row[18]) || 0,
-      discountProductIds,
-      shipmentPort: row[20] || "Karachi Port",
-      shippingMode: row[21] || "By Sea",
-      leadTime: row[22] || "30 to 35 Working Days",
-    };
+    if (!row) return { status: "not_found" };
+    return { status: "ok", quote: parseQuoteRow(row) };
   } catch {
-    return null;
+    return { status: "error" };
   }
 }
 
@@ -65,8 +78,8 @@ async function getBrands(): Promise<Brand[]> {
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
-  const quote = await getQuote(id);
-  return { title: quote ? `${quote.quoteNo} — CNF Price Quotation` : "CNF Quote" };
+  const result = await getQuote(id);
+  return { title: result.status === "ok" ? `${result.quote.quoteNo} — CNF Price Quotation` : "CNF Quote" };
 }
 
 function fmtDate(iso: string) {
@@ -104,9 +117,23 @@ function itemDiscount(
 
 export default async function CNFSharePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [quote, brands] = await Promise.all([getQuote(id), getBrands()]);
-  if (!quote) notFound();
+  const [result, brands] = await Promise.all([getQuote(id), getBrands()]);
 
+  if (result.status === "not_found") notFound();
+
+  if (result.status === "error") {
+    return (
+      <div style={{ background: "#f5f7fa", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+        <div style={{ background: "#fff", borderRadius: 16, padding: "40px 32px", maxWidth: 420, textAlign: "center", boxShadow: "0 4px 24px rgba(0,0,0,0.08)" }}>
+          <p style={{ fontSize: 15, fontWeight: 700, color: "#dc2626", marginBottom: 8 }}>Couldn&apos;t load this quotation</p>
+          <p style={{ fontSize: 13, color: "#888", marginBottom: 20 }}>This is just a connection hiccup — the quote is still there, nothing was deleted. Please try again.</p>
+          <a href={`/cnf/share/${id}`} style={{ display: "inline-block", padding: "10px 24px", background: "#1e40af", color: "#fff", borderRadius: 10, fontSize: 13, fontWeight: 700, textDecoration: "none" }}>Retry</a>
+        </div>
+      </div>
+    );
+  }
+
+  const quote = result.quote;
   const isFob = quote.quoteType === "FOB";
   const isExpired = quote.validTill && new Date(quote.validTill + "T23:59:59") < new Date();
 
