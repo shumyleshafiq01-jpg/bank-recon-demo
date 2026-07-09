@@ -86,7 +86,10 @@ export default async function AllQuotesPage() {
                         {expired ? "EXPIRED" : fmtDate(q.validTill + "T00:00:00")}
                       </td>
                       <td style={{ padding: "14px 16px", textAlign: "right" }}>
-                        <Link href={`/cnf/share/${q.id}`} style={{ fontSize: 12, fontWeight: 600, color: "#1e40af", textDecoration: "none" }}>View →</Link>
+                        {/* prefetch=false: with many active quotes, Next.js prefetching every visible
+                            Link would fire dozens of simultaneous Google Sheets reads on page load —
+                            enough to trip Sheets' rate limit and cause failures elsewhere in the app. */}
+                        <Link href={`/cnf/share/${q.id}`} prefetch={false} style={{ fontSize: 12, fontWeight: 600, color: "#1e40af", textDecoration: "none" }}>View →</Link>
                       </td>
                     </tr>
                   );
