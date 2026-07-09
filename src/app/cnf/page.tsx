@@ -17,8 +17,10 @@ type FreightCard = {
 type QuoteProduct = {
   productId: string; productName: string; sku: string; specs: string; packagingDesc: string;
   qty: number; fobPerCarton: number; freightPerCarton: number; cnfPerCarton: number;
-  category: string; imageUrl: string;
+  category: string; imageUrl: string; brandName: string;
 };
+
+type QuoteBrand = { id: string; name: string };
 
 type QuoteType = "CNF" | "FOB";
 type DiscountType = "none" | "percent" | "amount";
@@ -77,12 +79,14 @@ type NewQuoteModalProps = {
   catalogMaterials: CostMaterial[];
   catalogRecipes: Map<string, CostRecipeItem[]>;
   catalogSettings: CostSettings;
+  catalogBrands: QuoteBrand[];
   createdBy: string;
   onClose: () => void;
   onCreated: () => void;
 };
 
-function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalogRecipes, catalogSettings, createdBy, onClose, onCreated }: NewQuoteModalProps) {
+function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalogRecipes, catalogSettings, catalogBrands, createdBy, onClose, onCreated }: NewQuoteModalProps) {
+  const brandName = (productBrandId?: string) => catalogBrands.find(b => b.id === productBrandId)?.name ?? "";
   const [clientName, setClientName] = useState("");
   const [clientContact, setClientContact] = useState("");
   const [destination, setDestination] = useState("");
@@ -95,7 +99,7 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
   const brandEssence = false;
   const [quoteType, setQuoteType] = useState<QuoteType>("CNF");
   const [products, setProducts] = useState<QuoteProduct[]>([
-    { productId: "", productName: "", sku: "", specs: "", packagingDesc: "", qty: 1, fobPerCarton: 0, freightPerCarton: 0, cnfPerCarton: 0, category: "", imageUrl: "" },
+    { productId: "", productName: "", sku: "", specs: "", packagingDesc: "", qty: 1, fobPerCarton: 0, freightPerCarton: 0, cnfPerCarton: 0, category: "", imageUrl: "", brandName: "" },
   ]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -171,6 +175,7 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
         p.packagingDesc = product?.packagingDesc ?? "";
         p.category = product?.category ?? "";
         p.imageUrl = product?.imageUrl ?? "";
+        p.brandName = brandName(product?.brandId);
         p.fobPerCarton = fobFor(String(value), p.qty);
         p.freightPerCarton = (quoteType === "CNF") ? freightFor(String(value), freightPerCarton) : 0;
         p.cnfPerCarton = p.fobPerCarton + p.freightPerCarton;
@@ -191,7 +196,7 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
     setProducts(prev => [...prev, {
       productId: "", productName: "", sku: "", specs: "", packagingDesc: "",
       qty: 1, fobPerCarton: 0, freightPerCarton: 0, cnfPerCarton: 0,
-      category: "", imageUrl: "",
+      category: "", imageUrl: "", brandName: "",
     }]);
   }
 
@@ -204,7 +209,7 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
     return {
       productId, productName: product?.name ?? "", sku: product?.sku ?? "",
       specs: product?.specs || product?.notes || "", packagingDesc: product?.packagingDesc ?? "",
-      category: product?.category ?? "", imageUrl: product?.imageUrl ?? "",
+      category: product?.category ?? "", imageUrl: product?.imageUrl ?? "", brandName: brandName(product?.brandId),
       qty: 1, fobPerCarton: fob, freightPerCarton: freight, cnfPerCarton: fob + freight,
     };
   }
@@ -746,6 +751,7 @@ export default function CNFPage() {
   const [catalogProducts, setCatalogProducts] = useState<CostProduct[]>([]);
   const [catalogMaterials, setCatalogMaterials] = useState<CostMaterial[]>([]);
   const [catalogRecipes, setCatalogRecipes] = useState<Map<string, CostRecipeItem[]>>(new Map());
+  const [catalogBrands, setCatalogBrands] = useState<QuoteBrand[]>([]);
   const [catalogSettings, setCatalogSettings] = useState<CostSettings>({ fcRate: 275, currency: "PKR", targetCurrency: "USD", adminPct: 5, whtPct: 2, serviceCharges: 0, eds: 0, courierCharges: 0 });
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -777,13 +783,14 @@ export default function CNFPage() {
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(false);
-    const [q, f, prod, mat, settings, rec] = await Promise.all([
+    const [q, f, prod, mat, settings, rec, br] = await Promise.all([
       fetchJsonSafe<{ quotes: Quote[] }>("/api/cnf/quotes", { quotes: [] }),
       fetchJsonSafe<{ freightCards: FreightCard[] }>("/api/cnf/master-freight", { freightCards: [] }),
       fetchJsonSafe<{ products: CostProduct[] }>("/api/product-list/products", { products: [] }),
       fetchJsonSafe<{ materials: CostMaterial[] }>("/api/product-list/master", { materials: [] }),
       fetchJsonSafe<CostSettings>("/api/product-list/settings", { fcRate: 275, currency: "PKR", targetCurrency: "USD", adminPct: 5, whtPct: 2, serviceCharges: 0, eds: 0, courierCharges: 0 }),
       fetchJsonSafe<{ items: CostRecipeItem[] }>("/api/product-list/recipes", { items: [] }),
+      fetchJsonSafe<{ brands: QuoteBrand[] }>("/api/product-list/brands", { brands: [] }),
     ]);
     // Only the quotes fetch failing is worth alarming about — the others are
     // supporting data for the New Quote form, not "is my data gone?" panic.
@@ -803,6 +810,7 @@ export default function CNFPage() {
       recMap.get(item.productId)!.push(item);
     }
     setCatalogRecipes(recMap);
+    setCatalogBrands(br.data.brands ?? []);
     setLoading(false);
   }, []);
 
@@ -1095,6 +1103,7 @@ export default function CNFPage() {
           catalogMaterials={catalogMaterials}
           catalogRecipes={catalogRecipes}
           catalogSettings={catalogSettings}
+          catalogBrands={catalogBrands}
           createdBy={user}
           onClose={() => setShowNew(false)}
           onCreated={load}

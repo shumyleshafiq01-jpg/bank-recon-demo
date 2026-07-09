@@ -16,7 +16,7 @@ const BRANDS_HEADERS = ["id", "name", "address", "city", "country", "logoUrl", "
 type QuoteProduct = {
   productId?: string; productName: string; sku: string; specs: string; packagingDesc: string;
   qty: number; fobPerCarton: number; freightPerCarton: number; cnfPerCarton: number;
-  category?: string; imageUrl?: string;
+  category?: string; imageUrl?: string; brandName?: string;
 };
 
 type Brand = { id: string; name: string; contactPerson: string; website: string; email: string };
@@ -137,10 +137,10 @@ export default async function CNFSharePage({ params }: { params: Promise<{ id: s
   const isFob = quote.quoteType === "FOB";
   const isExpired = quote.validTill && new Date(quote.validTill + "T23:59:59") < new Date();
 
-  // Contact info is per-brand — Kafi takes priority since it's always the primary exporter on a quote today.
+  // Both logos are always fixed on every quote — contact info is always Kafi's,
+  // regardless of which brand a given product row belongs to.
   const kafiBrand = brands.find(b => b.name.toLowerCase().includes("kafi"));
-  const essenceBrand = brands.find(b => b.name.toLowerCase().includes("essence"));
-  const contactBrand = quote.brandKafi ? kafiBrand : (quote.brandEssence ? essenceBrand : kafiBrand);
+  const contactBrand = kafiBrand;
 
   // Group products by category (e.g. RICE, SALT) — each gets its own header bar, like the reference quotation format.
   const categories = Array.from(new Set(quote.products.map(p => p.category || "PRODUCTS")));
@@ -173,10 +173,10 @@ export default async function CNFSharePage({ params }: { params: Promise<{ id: s
           {/* Logo header */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "20px 32px", borderBottom: "2px solid #1a1a2e" }}>
             <div style={{ height: 64, display: "flex", alignItems: "center" }}>
-              {quote.brandEssence && <img src="/brands/essence-logo.jpeg" alt="Essence" style={{ height: 64, objectFit: "contain" }} />}
+              <img src="/brands/essence-logo.jpeg" alt="Essence" style={{ height: 64, objectFit: "contain" }} />
             </div>
             <div style={{ height: 64, display: "flex", alignItems: "center" }}>
-              {quote.brandKafi && <img src="/brands/kafi-logo.jpeg" alt="Kafi Commodities" style={{ height: 64, objectFit: "contain" }} />}
+              <img src="/brands/kafi-logo.jpeg" alt="Kafi Commodities" style={{ height: 64, objectFit: "contain" }} />
             </div>
           </div>
 
@@ -188,7 +188,7 @@ export default async function CNFSharePage({ params }: { params: Promise<{ id: s
               <div style={{ textAlign: "center" }}>Shipping: {quote.shippingMode}</div>
               <div style={{ textAlign: "center" }}>Lead Time: {quote.leadTime}</div>
             </div>
-            <div style={{ padding: "14px 24px", fontSize: 13, color: "#1a1a2e" }}>
+            <div style={{ padding: "14px 24px", fontSize: 13, color: "#1a1a2e", textAlign: "center" }}>
               {contactBrand?.contactPerson && <div><strong>Contact Person:</strong> {contactBrand.contactPerson}</div>}
               {contactBrand?.website && <div>Website: {contactBrand.website}</div>}
               {contactBrand?.email && <div>Email ID: {contactBrand.email}</div>}
@@ -225,7 +225,7 @@ export default async function CNFSharePage({ params }: { params: Promise<{ id: s
                     {items.map((p, i) => (
                       <tr key={i} style={{ background: "#fff" }}>
                         <td style={{ padding: "16px 10px", textAlign: "center", fontSize: 14, fontWeight: 700, border: "1px solid #1a1a2e", background: "#dfe6f2" }}>{i + 1}</td>
-                        <td style={{ padding: "16px 10px", textAlign: "center", fontSize: 14, fontWeight: 700, color: "#1a1a2e", border: "1px solid #1a1a2e", wordWrap: "break-word", overflowWrap: "break-word" }}>{p.productName}</td>
+                        <td style={{ padding: "16px 10px", textAlign: "center", fontSize: 14, fontWeight: 700, color: "#1a1a2e", border: "1px solid #1a1a2e", wordWrap: "break-word", overflowWrap: "break-word" }}>{p.productName}{p.brandName ? ` - ${p.brandName}` : ""}</td>
                         <td style={{ padding: "16px 10px", textAlign: "center", fontSize: 13, fontWeight: 600, color: "#1a1a2e", border: "1px solid #1a1a2e", whiteSpace: "pre-line", wordWrap: "break-word", overflowWrap: "break-word", background: "#dfe6f2" }}>{p.specs || p.packagingDesc || "—"}</td>
                         <td style={{ padding: "16px 10px", fontSize: 15, fontWeight: 700, color: "#1a1a2e", border: "1px solid #1a1a2e", wordWrap: "break-word", overflowWrap: "break-word" }}>
                           {(() => {
@@ -237,6 +237,7 @@ export default async function CNFSharePage({ params }: { params: Promise<{ id: s
                                 <span>$</span><span>{fmtUSD(original)}</span>
                               </div>
                             );
+                            const pct = original > 0 ? Math.round(((original - discounted) / original) * 100) : 0;
                             return (
                               <div style={{ padding: "0 8px" }}>
                                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, fontWeight: 500, color: "#dc2626", textDecoration: "line-through" }}>
@@ -245,13 +246,16 @@ export default async function CNFSharePage({ params }: { params: Promise<{ id: s
                                 <div style={{ display: "flex", justifyContent: "space-between", marginTop: 2 }}>
                                   <span>$</span><span>{fmtUSD(discounted)}</span>
                                 </div>
+                                <div style={{ textAlign: "center", fontSize: 11, fontWeight: 700, color: "#dc2626", marginTop: 2 }}>
+                                  -{pct}% (${fmtUSD(original - discounted)})
+                                </div>
                               </div>
                             );
                           })()}
                         </td>
                         <td style={{ padding: "10px", textAlign: "center", border: "1px solid #1a1a2e" }}>
                           {p.imageUrl ? (
-                            <img src={p.imageUrl} alt={p.productName} style={{ width: 90, height: 110, objectFit: "cover", margin: "0 auto" }} />
+                            <img src={p.imageUrl} alt={p.productName} style={{ width: 90, height: 110, objectFit: "contain", margin: "0 auto" }} />
                           ) : (
                             <div style={{ width: 90, height: 110, background: "#f0f2f5", margin: "0 auto" }} />
                           )}

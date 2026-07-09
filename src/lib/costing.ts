@@ -1,5 +1,5 @@
 export interface CostMaterial { id: string; name: string; unit: string; category: string; pricePerUnit: number; updatedAt: string; }
-export interface CostProduct { id: string; sku: string; name: string; productType: string; fclQty: number; grossProfitPct: number; imageUrl: string; notes: string; active: boolean; specs?: string; packagingDesc?: string; category?: string; }
+export interface CostProduct { id: string; sku: string; name: string; productType: string; fclQty: number; grossProfitPct: number; imageUrl: string; notes: string; active: boolean; specs?: string; packagingDesc?: string; category?: string; brandId?: string; }
 export interface CostRecipeItem { id: string; productId: string; materialId: string; materialName: string; qty: number; unitType: "PCS" | "CONTAINER" | "FIXED"; sortOrder: number; priceOverride?: number | null; }
 export interface CostSettings { fcRate: number; currency: string; targetCurrency: string; adminPct: number; whtPct: number; serviceCharges: number; eds: number; courierCharges: number; }
 
