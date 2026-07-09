@@ -1138,8 +1138,8 @@ function ProductForm({ item, products, brands, categories, onSave, onClose }: { 
                     <input type="file" accept="image/*" className="hidden" disabled={uploading}
                       onChange={e => { const file = e.target.files?.[0]; if (file) handleImageUpload(file); e.target.value = ""; }} />
                   </label>
-                  <p className="text-[10px] text-muted">Uploads to Google Drive · Only thumbnail stored · JPG/PNG recommended</p>
-                  {f.imageUrl && <input type="text" value={f.imageUrl} onChange={e => s("imageUrl", e.target.value)} placeholder="Or paste Drive URL" className="w-full bg-background border border-border rounded-lg px-2 py-1.5 text-xs text-foreground focus:outline-none focus:border-green-500/50" />}
+                  <p className="text-[10px] text-muted">JPG/PNG recommended</p>
+                  {f.imageUrl && <input type="text" value={f.imageUrl} onChange={e => s("imageUrl", e.target.value)} placeholder="Or paste an image URL" className="w-full bg-background border border-border rounded-lg px-2 py-1.5 text-xs text-foreground focus:outline-none focus:border-green-500/50" />}
                 </div>
               </div>
             </div>
@@ -1512,7 +1512,7 @@ function BrandForm({ item, onSave, onClose }: { item: Brand | null; onSave: (b: 
                 <input type="file" accept="image/*" className="hidden" disabled={uploading}
                   onChange={e => { const file = e.target.files?.[0]; if (file) handleLogoUpload(file); e.target.value = ""; }} />
               </label>
-              <p className="text-[10px] text-muted">Uploads to Google Drive · JPG/PNG recommended</p>
+              <p className="text-[10px] text-muted">JPG/PNG recommended</p>
             </div>
           </div>
         </div>

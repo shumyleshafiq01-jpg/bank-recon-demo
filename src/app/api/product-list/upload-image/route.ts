@@ -1,47 +1,21 @@
-import { google } from "googleapis";
-import { Readable } from "stream";
-
-// Must be a folder owned by a real Google account (not the service account
-// itself), shared with the service account as Editor — service accounts have
-// zero storage quota of their own, so uploads need a human-owned folder to
-// draw quota from.
-const FOLDER_ID = "1gVsgPeafXu_W0ycAyLa1-glAEL8xBQcu";
-
-function getAuth() {
-  return new google.auth.GoogleAuth({
-    credentials: {
-      client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL?.replace(/^["']|["']$/g, ""),
-      private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/^["']|["']$/g, "").replace(/\\n/g, "\n"),
-    },
-    scopes: ["https://www.googleapis.com/auth/drive.file"],
-  });
-}
+import { put } from "@vercel/blob";
 
 export async function POST(request: Request) {
   try {
     const body = await request.json() as { filename: string; mimeType: string; base64: string };
     if (!body.base64 || !body.filename) return Response.json({ error: "Missing data" }, { status: 400 });
 
-    const drive = google.drive({ version: "v3", auth: getAuth() });
     const buffer = Buffer.from(body.base64, "base64");
-    const stream = Readable.from(buffer);
-
-    const res = await drive.files.create({
-      requestBody: { name: body.filename, parents: [FOLDER_ID] },
-      media: { mimeType: body.mimeType, body: stream },
-      fields: "id, webViewLink",
+    // addRandomSuffix avoids collisions between products/brands uploading files with the same name.
+    const blob = await put(body.filename, buffer, {
+      access: "public",
+      contentType: body.mimeType,
+      addRandomSuffix: true,
     });
 
-    const fileId = res.data.id;
-    if (!fileId) throw new Error("Upload failed");
-
-    await drive.permissions.create({ fileId, requestBody: { role: "reader", type: "anyone" } });
-
-    // Return thumbnail URL (lightweight, cached by Google)
-    const thumbnailUrl = `https://drive.google.com/thumbnail?id=${fileId}&sz=w400`;
-    const fullUrl = `https://drive.google.com/uc?export=view&id=${fileId}`;
-
-    return Response.json({ thumbnailUrl, fullUrl, fileId });
+    // Kept as both fields for compatibility with existing client code, which
+    // only reads thumbnailUrl — Vercel Blob URLs serve the full image directly.
+    return Response.json({ thumbnailUrl: blob.url, fullUrl: blob.url });
   } catch (err) {
     return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
