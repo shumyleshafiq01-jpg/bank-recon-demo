@@ -171,24 +171,24 @@ export default async function CNFSharePage({ params }: { params: Promise<{ id: s
           </div>
 
           {/* Logo header */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "20px 32px", borderBottom: "2px solid #1a1a2e" }}>
-            <div style={{ height: 64, display: "flex", alignItems: "center" }}>
-              <img src="/brands/essence-logo.jpeg" alt="Essence" style={{ height: 64, objectFit: "contain" }} />
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "24px 32px", borderBottom: "2px solid #1a1a2e" }}>
+            <div style={{ height: 100, display: "flex", alignItems: "center" }}>
+              <img src="/brands/essence-logo.jpeg" alt="Essence" style={{ height: 100, objectFit: "contain" }} />
             </div>
-            <div style={{ height: 64, display: "flex", alignItems: "center" }}>
-              <img src="/brands/kafi-logo.jpeg" alt="Kafi Commodities" style={{ height: 64, objectFit: "contain" }} />
+            <div style={{ height: 100, display: "flex", alignItems: "center" }}>
+              <img src="/brands/kafi-logo.jpeg" alt="Kafi Commodities" style={{ height: 100, objectFit: "contain" }} />
             </div>
           </div>
 
           {/* Terms & Contact bar */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", background: "#dfe6f2", borderBottom: "1px solid #c7d2e6" }}>
-            <div style={{ padding: "14px 24px", borderRight: "1px solid #c7d2e6", fontSize: 13, color: "#1a1a2e" }}>
+            <div style={{ padding: "14px 24px", borderRight: "1px solid #c7d2e6", fontSize: 15, color: "#1a1a2e" }}>
               <div style={{ fontWeight: 700, textDecoration: "underline", marginBottom: 6, textAlign: "center" }}>Terms &amp; Condition</div>
               <div style={{ textAlign: "center" }}>Shipment Port: {quote.shipmentPort}</div>
               <div style={{ textAlign: "center" }}>Shipping: {quote.shippingMode}</div>
               <div style={{ textAlign: "center" }}>Lead Time: {quote.leadTime}</div>
             </div>
-            <div style={{ padding: "14px 24px", fontSize: 13, color: "#1a1a2e", textAlign: "center" }}>
+            <div style={{ padding: "14px 24px", fontSize: 15, color: "#1a1a2e", textAlign: "center" }}>
               {contactBrand?.contactPerson && <div><strong>Contact Person:</strong> {contactBrand.contactPerson}</div>}
               {contactBrand?.website && <div>Website: {contactBrand.website}</div>}
               {contactBrand?.email && <div>Email ID: {contactBrand.email}</div>}
@@ -203,7 +203,7 @@ export default async function CNFSharePage({ params }: { params: Promise<{ id: s
             const items = quote.products.filter(p => (p.category || "PRODUCTS") === cat);
             return (
               <div key={cat}>
-                <div style={{ background: "#1e3a5f", color: "#fff", textAlign: "center", padding: "10px 12px", fontSize: 16, fontWeight: 700, textDecoration: "underline" }}>
+                <div style={{ background: "#1e3a5f", color: "#fff", textAlign: "center", padding: "12px 12px", fontSize: 22, fontWeight: 700, textDecoration: "underline" }}>
                   {cat.toUpperCase()}
                 </div>
                 <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
@@ -217,17 +217,17 @@ export default async function CNFSharePage({ params }: { params: Promise<{ id: s
                   <thead>
                     <tr>
                       {["S.No", "Product", "Packaging", priceHeader, "Images"].map((h, i) => (
-                        <th key={i} style={{ padding: "12px 10px", textAlign: "center", fontSize: 13, fontWeight: 700, color: "#1a1a2e", border: "1px solid #1a1a2e", background: "#fff", wordWrap: "break-word", overflowWrap: "break-word" }}>{h}</th>
+                        <th key={i} style={{ padding: "14px 10px", textAlign: "center", fontSize: 19, fontWeight: 700, color: "#1a1a2e", border: "1px solid #1a1a2e", background: "#fff", wordWrap: "break-word", overflowWrap: "break-word" }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {items.map((p, i) => (
                       <tr key={i} style={{ background: "#fff" }}>
-                        <td style={{ padding: "16px 10px", textAlign: "center", fontSize: 14, fontWeight: 700, border: "1px solid #1a1a2e", background: "#dfe6f2" }}>{i + 1}</td>
-                        <td style={{ padding: "16px 10px", textAlign: "center", fontSize: 14, fontWeight: 700, color: "#1a1a2e", border: "1px solid #1a1a2e", wordWrap: "break-word", overflowWrap: "break-word" }}>{p.productName}{p.brandName ? ` - ${p.brandName}` : ""}</td>
-                        <td style={{ padding: "16px 10px", textAlign: "center", fontSize: 13, fontWeight: 600, color: "#1a1a2e", border: "1px solid #1a1a2e", whiteSpace: "pre-line", wordWrap: "break-word", overflowWrap: "break-word", background: "#dfe6f2" }}>{p.specs || p.packagingDesc || "—"}</td>
-                        <td style={{ padding: "16px 10px", fontSize: 15, fontWeight: 700, color: "#1a1a2e", border: "1px solid #1a1a2e", wordWrap: "break-word", overflowWrap: "break-word" }}>
+                        <td style={{ padding: "18px 10px", textAlign: "center", fontSize: 20, fontWeight: 700, border: "1px solid #1a1a2e", background: "#dfe6f2" }}>{i + 1}</td>
+                        <td style={{ padding: "18px 10px", textAlign: "center", fontSize: 22, fontWeight: 700, color: "#1a1a2e", border: "1px solid #1a1a2e", wordWrap: "break-word", overflowWrap: "break-word" }}>{p.productName}{p.brandName ? ` - ${p.brandName}` : ""}</td>
+                        <td style={{ padding: "18px 10px", textAlign: "center", fontSize: 18, fontWeight: 600, color: "#1a1a2e", border: "1px solid #1a1a2e", whiteSpace: "pre-line", wordWrap: "break-word", overflowWrap: "break-word", background: "#dfe6f2" }}>{p.specs || p.packagingDesc || "—"}</td>
+                        <td style={{ padding: "18px 10px", fontSize: 24, fontWeight: 700, color: "#1a1a2e", border: "1px solid #1a1a2e", wordWrap: "break-word", overflowWrap: "break-word" }}>
                           {(() => {
                             const { original, discounted, hasDiscount } = itemDiscount(
                               p, quote.products, quote.discountType, quote.discountScope, quote.discountValue, quote.discountProductIds,
@@ -240,13 +240,13 @@ export default async function CNFSharePage({ params }: { params: Promise<{ id: s
                             const pct = original > 0 ? Math.round(((original - discounted) / original) * 100) : 0;
                             return (
                               <div style={{ padding: "0 8px" }}>
-                                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, fontWeight: 500, color: "#dc2626", textDecoration: "line-through" }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 17, fontWeight: 500, color: "#dc2626", textDecoration: "line-through" }}>
                                   <span>$</span><span>{fmtUSD(original)}</span>
                                 </div>
-                                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 2 }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3 }}>
                                   <span>$</span><span>{fmtUSD(discounted)}</span>
                                 </div>
-                                <div style={{ textAlign: "center", fontSize: 11, fontWeight: 700, color: "#dc2626", marginTop: 2 }}>
+                                <div style={{ textAlign: "center", fontSize: 16, fontWeight: 700, color: "#dc2626", marginTop: 3 }}>
                                   -{pct}% (${fmtUSD(original - discounted)})
                                 </div>
                               </div>
@@ -255,9 +255,9 @@ export default async function CNFSharePage({ params }: { params: Promise<{ id: s
                         </td>
                         <td style={{ padding: "10px", textAlign: "center", border: "1px solid #1a1a2e" }}>
                           {p.imageUrl ? (
-                            <img src={p.imageUrl} alt={p.productName} style={{ width: 90, height: 110, objectFit: "contain", margin: "0 auto" }} />
+                            <img src={p.imageUrl} alt={p.productName} style={{ width: 130, height: 160, objectFit: "contain", margin: "0 auto" }} />
                           ) : (
-                            <div style={{ width: 90, height: 110, background: "#f0f2f5", margin: "0 auto" }} />
+                            <div style={{ width: 130, height: 160, background: "#f0f2f5", margin: "0 auto" }} />
                           )}
                         </td>
                       </tr>

@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
-import { ArrowLeft, Plus, Trash2, Pencil, X, Save, Lock, Search, Package, List, DollarSign, Settings2, ChevronRight, ChevronDown, ExternalLink, Copy, Ship, Upload, Check, Tag } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Pencil, X, Save, Lock, Search, Package, List, LayoutGrid, DollarSign, Settings2, ChevronRight, ChevronDown, ExternalLink, Copy, Ship, Upload, Check, Tag } from "lucide-react";
 import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
 
@@ -127,6 +127,12 @@ export default function ProductListPage() {
   const [editingMaterial, setEditingMaterial] = useState<Material | null>(null);
   const [showMaterialForm, setShowMaterialForm] = useState(false);
   const [matCatFilter, setMatCatFilter] = useState("");
+
+  // Price List view + filters/sort
+  const [plView, setPlView] = useState<"grid" | "list">("grid");
+  const [plBrandFilter, setPlBrandFilter] = useState("");
+  const [plCategoryFilter, setPlCategoryFilter] = useState("");
+  const [plSort, setPlSort] = useState<"name-asc" | "name-desc" | "price-asc" | "price-desc" | "category">("name-asc");
 
   // Brands
   const [brands, setBrands] = useState<Brand[]>([]);
@@ -432,6 +438,21 @@ export default function ProductListPage() {
   const filteredMaterials = materials.filter(m => (!search || m.name.toLowerCase().includes(search.toLowerCase())) && (!matCatFilter || m.category === matCatFilter));
   const filteredBrands = brands.filter(b => !search || b.name.toLowerCase().includes(search.toLowerCase()));
   const brandName = (id: string) => brands.find(b => b.id === id)?.name || "—";
+
+  // Price List: search + brand/category filters, then sort. Each row carries its
+  // computed cost so we can sort by price without recomputing during render.
+  const pricelistRows = filteredProducts
+    .filter(p => (!plBrandFilter || p.brandId === plBrandFilter) && (!plCategoryFilter || (p.category || "") === plCategoryFilter))
+    .map(p => ({ p, calc: calcCost(recipes.get(p.id) ?? [], materials, p, settings) }))
+    .sort((a, b) => {
+      switch (plSort) {
+        case "name-desc": return b.p.name.localeCompare(a.p.name);
+        case "price-asc": return a.calc.fobUSD - b.calc.fobUSD;
+        case "price-desc": return b.calc.fobUSD - a.calc.fobUSD;
+        case "category": return (a.p.category || "").localeCompare(b.p.category || "") || a.p.name.localeCompare(b.p.name);
+        default: return a.p.name.localeCompare(b.p.name);
+      }
+    });
 
   if (!loaded) return null;
 
@@ -741,6 +762,33 @@ export default function ProductListPage() {
                     {materialCategories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
                   </select>
                 )}
+                {tab === "pricelist" && (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <select value={plBrandFilter} onChange={e => setPlBrandFilter(e.target.value)} className="bg-surface border border-border rounded-xl px-3 py-2.5 text-sm text-foreground focus:outline-none focus:border-green-500/50 cursor-pointer">
+                      <option value="">All Brands</option>
+                      {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                    </select>
+                    <select value={plCategoryFilter} onChange={e => setPlCategoryFilter(e.target.value)} className="bg-surface border border-border rounded-xl px-3 py-2.5 text-sm text-foreground focus:outline-none focus:border-green-500/50 cursor-pointer">
+                      <option value="">All Categories</option>
+                      {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                    </select>
+                    <select value={plSort} onChange={e => setPlSort(e.target.value as typeof plSort)} className="bg-surface border border-border rounded-xl px-3 py-2.5 text-sm text-foreground focus:outline-none focus:border-green-500/50 cursor-pointer">
+                      <option value="name-asc">Product (A–Z)</option>
+                      <option value="name-desc">Product (Z–A)</option>
+                      <option value="price-asc">Price (Low → High)</option>
+                      <option value="price-desc">Price (High → Low)</option>
+                      <option value="category">Category</option>
+                    </select>
+                    <div className="flex items-center border border-border rounded-xl overflow-hidden">
+                      <button onClick={() => setPlView("grid")} title="Grid view" className={`p-2.5 cursor-pointer transition-colors ${plView === "grid" ? "bg-green-500/15 text-green-400" : "text-muted hover:text-foreground"}`}>
+                        <LayoutGrid className="w-4 h-4" />
+                      </button>
+                      <button onClick={() => setPlView("list")} title="List view" className={`p-2.5 cursor-pointer transition-colors border-l border-border ${plView === "list" ? "bg-green-500/15 text-green-400" : "text-muted hover:text-foreground"}`}>
+                        <List className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -823,13 +871,10 @@ export default function ProductListPage() {
               </div>
             )}
 
-            {/* ── PRICE LIST TAB ── */}
-            {tab === "pricelist" && (
+            {/* ── PRICE LIST TAB (grid) ── */}
+            {tab === "pricelist" && plView === "grid" && (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filteredProducts.map(p => {
-                  const recipe = recipes.get(p.id) ?? [];
-                  const calc = calcCost(recipe, materials, p, settings);
-                  return (
+                {pricelistRows.map(({ p, calc }) => (
                     <div key={p.id} className="bg-surface rounded-2xl border border-border overflow-hidden hover:border-green-500/40 transition-all">
                       {p.imageUrl ? (
                         <img src={p.imageUrl} alt={p.name} className="w-full h-40 object-cover" />
@@ -864,9 +909,54 @@ export default function ProductListPage() {
                         </div>
                       </div>
                     </div>
-                  );
-                })}
-                {filteredProducts.length === 0 && <div className="col-span-3 py-12 text-center text-muted">No products yet.</div>}
+                ))}
+                {pricelistRows.length === 0 && <div className="col-span-3 py-12 text-center text-muted">No products match your filters.</div>}
+              </div>
+            )}
+
+            {/* ── PRICE LIST TAB (list) ── */}
+            {tab === "pricelist" && plView === "list" && (
+              <div className="bg-surface rounded-2xl border border-border overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead><tr className="bg-green-500/10 text-green-400">
+                    <th className="px-4 py-3 text-left font-semibold w-[64px]">Image</th>
+                    <th className="px-4 py-3 text-left font-semibold w-[110px]">SKU</th>
+                    <th className="px-4 py-3 text-left font-semibold">Product Name</th>
+                    <th className="px-4 py-3 text-left font-semibold w-[120px]">Brand</th>
+                    <th className="px-4 py-3 text-left font-semibold w-[120px]">Category</th>
+                    <th className="px-4 py-3 text-right font-semibold w-[110px]">FOB (USD)</th>
+                    <th className="px-4 py-3 text-right font-semibold w-[120px]">COG (PKR)</th>
+                    <th className="px-4 py-3 text-center w-[130px]">Actions</th>
+                  </tr></thead>
+                  <tbody>
+                    {pricelistRows.length === 0 && <tr><td colSpan={8} className="px-4 py-10 text-center text-muted">No products match your filters.</td></tr>}
+                    {pricelistRows.map(({ p, calc }, i) => (
+                      <tr key={p.id} className={`hover:bg-green-500/5 transition-colors ${i % 2 === 0 ? "" : "bg-surface-light/20"}`}>
+                        <td className="px-4 py-2">
+                          {p.imageUrl ? (
+                            <img src={p.imageUrl} alt={p.name} className="w-10 h-10 rounded-lg object-cover border border-border" />
+                          ) : (
+                            <div className="w-10 h-10 rounded-lg bg-green-500/5 flex items-center justify-center"><Package className="w-4 h-4 text-green-500/30" /></div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 font-mono text-[11px] text-muted">{p.sku}</td>
+                        <td className="px-4 py-3 font-semibold text-foreground">{p.name}</td>
+                        <td className="px-4 py-3">{p.brandId ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-400 font-semibold">{brandName(p.brandId)}</span> : <span className="text-[10px] text-muted">—</span>}</td>
+                        <td className="px-4 py-3 text-muted">{p.category || "—"}</td>
+                        <td className="px-4 py-3 text-right font-mono font-bold text-green-400">USD {fmt2(calc.fobUSD)}</td>
+                        <td className="px-4 py-3 text-right font-mono text-muted">PKR {fmt2(calc.cogPKR)}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-center gap-1">
+                            <button onClick={() => openProduct(p)} title="Recipe" className="p-1 text-muted hover:text-green-400 cursor-pointer"><Pencil className="w-3.5 h-3.5" /></button>
+                            <button onClick={() => copyShareLink(p.id)} title="Copy share link" className={`p-1 cursor-pointer ${copiedId === p.id ? "text-green-400" : "text-muted hover:text-green-400"}`}>
+                              {copiedId === p.id ? <Copy className="w-3.5 h-3.5" /> : <ExternalLink className="w-3.5 h-3.5" />}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
 
