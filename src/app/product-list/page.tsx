@@ -4,6 +4,7 @@ import { ArrowLeft, Plus, Trash2, Pencil, X, Save, Lock, Search, Package, List, 
 import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
 import RiceWorkspace from "./RiceWorkspace";
+import { compressImage } from "@/lib/image-compress";
 
 /* ════════════════════════════════ TYPES */
 interface Material { id: string; name: string; unit: string; category: string; pricePerUnit: number; updatedAt: string; defaultUnitType: "PCS" | "CONTAINER" | "FIXED"; }
@@ -1200,9 +1201,10 @@ function ProductForm({ item, products, brands, categories, onSave, onClose }: { 
   const [uploading, setUploading] = useState(false);
   const s = <K extends keyof Product>(k: K, v: Product[K]) => setF(p => ({ ...p, [k]: v }));
 
-  async function handleImageUpload(file: File) {
+  async function handleImageUpload(rawFile: File) {
     setUploading(true);
     try {
+      const file = await compressImage(rawFile);
       const reader = new FileReader();
       reader.onload = async (e) => {
         const base64 = (e.target?.result as string).split(",")[1];
@@ -1564,9 +1566,10 @@ function BrandForm({ item, onSave, onClose }: { item: Brand | null; onSave: (b: 
   const [uploading, setUploading] = useState(false);
   const s = <K extends keyof Brand>(k: K, v: Brand[K]) => setF(p => ({ ...p, [k]: v }));
 
-  async function handleLogoUpload(file: File) {
+  async function handleLogoUpload(rawFile: File) {
     setUploading(true);
     try {
+      const file = await compressImage(rawFile);
       const reader = new FileReader();
       reader.onload = async (e) => {
         const base64 = (e.target?.result as string).split(",")[1];

@@ -1,10 +1,11 @@
 import { ensureSheet, readSheet, updateRow, writeRows, deleteRow } from "@/lib/google-sheets";
-import { RICE_DEFAULT_BYPRODUCTS, RICE_DEFAULT_CHARGES } from "@/lib/rice-costing";
+import { RICE_DEFAULT_CHARGES, RICE_DEFAULT_BAGS } from "@/lib/rice-costing";
 
-// Rice "Master Prices": the shared rate table that drives every rice product's
-// costing. Two kinds of row:
-//   byproduct — PKR/kg resale value of a milling by-product (BROKEN/B2, CSR…)
-//   charge    — PKR/kg milling/handling cost (MILLING, SGS, FUMIGATION…)
+// Rice "Master Prices": the shared rate tables that drive rice costing.
+//   charge — PKR/kg milling/handling cost (MILLING, SGS, FUMIGATION…)
+//   bag    — USD/PMT bag-packaging surcharge, added at CNF (5KG BAG, 10KG BAG…)
+// (By-product resale rates are entered per-product, not here — they vary by
+//  product. Legacy "byproduct" rows in the sheet are ignored.)
 const SHEET = "RICE_Master";
 const HEADERS = ["id", "kind", "name", "rate", "sortOrder"];
 
@@ -13,17 +14,21 @@ const genId = () => Math.random().toString(36).slice(2, 10);
 async function init() { await ensureSheet(SHEET, HEADERS); }
 
 function parseRow(r: string[]) {
-  return { id: r[0] ?? "", kind: (r[1] ?? "charge") as "byproduct" | "charge", name: r[2] ?? "", rate: parseFloat(r[3]) || 0, sortOrder: parseInt(r[4]) || 0 };
+  return { id: r[0] ?? "", kind: (r[1] ?? "charge") as "byproduct" | "charge" | "bag", name: r[2] ?? "", rate: parseFloat(r[3]) || 0, sortOrder: parseInt(r[4]) || 0 };
 }
 
-// First time the Rice division is opened there's nothing in the sheet — seed it
-// with the sample rates so the accountant has a recognisable starting point.
+// Seed each kind independently: charges and bags are added if that kind has no
+// rows yet, so an already-seeded sheet still gains the new Bag Packaging rows.
 async function ensureSeeded() {
   const rows = await readSheet(SHEET);
-  if (rows.length > 1) return;
+  const existing = rows.slice(1).filter(r => r[0]).map(parseRow);
   const seed: string[][] = [];
-  RICE_DEFAULT_BYPRODUCTS.forEach((b, i) => seed.push([genId(), "byproduct", b.name, String(b.rate), String(i)]));
-  RICE_DEFAULT_CHARGES.forEach((c, i) => seed.push([genId(), "charge", c.name, String(c.rate), String(i)]));
+  if (!existing.some(i => i.kind === "charge")) {
+    RICE_DEFAULT_CHARGES.forEach((c, i) => seed.push([genId(), "charge", c.name, String(c.rate), String(i)]));
+  }
+  if (!existing.some(i => i.kind === "bag")) {
+    RICE_DEFAULT_BAGS.forEach((b, i) => seed.push([genId(), "bag", b.name, String(b.rate), String(i)]));
+  }
   if (seed.length) await writeRows(SHEET, seed);
 }
 
@@ -36,6 +41,7 @@ export async function GET() {
     return Response.json({
       byproducts: items.filter(i => i.kind === "byproduct"),
       charges: items.filter(i => i.kind === "charge"),
+      bags: items.filter(i => i.kind === "bag"),
     });
   } catch (err) {
     return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });

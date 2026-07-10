@@ -28,9 +28,16 @@
 export interface RiceByproductRate { id: string; name: string; rate: number; sortOrder: number; }   // PKR/kg resale value (master)
 export interface RiceChargeRate    { id: string; name: string; rate: number; sortOrder: number; }   // PKR/kg milling/handling (master)
 
+// A bag-packaging option — the extra USD-per-metric-ton charged for packing the
+// rice into this bag type (e.g. 5KG bag = +$61/PMT, 10KG bag = +$30/PMT). Added
+// at CNF time, on top of freight. Some of these are derived by a formula and
+// some are hard-coded by the accountant — stored here as an editable $/PMT.
+export interface RiceBagRate { id: string; name: string; rate: number; sortOrder: number; }
+
 export interface RiceMaster {
   byproducts: RiceByproductRate[];
   charges: RiceChargeRate[];
+  bags: RiceBagRate[];
 }
 
 export interface RiceSettings {
@@ -152,6 +159,13 @@ export const RICE_DEFAULT_BYPRODUCTS: { name: string; rate: number }[] = [
   { name: "SWEEPING", rate: 145 },
   { name: "SHORT GRAIN", rate: 140 },
   { name: "WEIGHT LOSS", rate: -300 },
+];
+
+// Bag packaging surcharges ($/PMT). Seeded with the two known from the sheet;
+// the accountant maintains the rest (and the formula behind them) here.
+export const RICE_DEFAULT_BAGS: { name: string; rate: number }[] = [
+  { name: "5KG BAG", rate: 61 },
+  { name: "10KG BAG", rate: 30 },
 ];
 
 export const RICE_DEFAULT_CHARGES: { name: string; rate: number }[] = [

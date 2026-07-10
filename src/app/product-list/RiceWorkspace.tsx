@@ -6,6 +6,7 @@ import {
   RICE_DEFAULT_SETTINGS, RICE_DEFAULT_PRODUCT_BYPRODUCTS,
 } from "@/lib/rice-costing";
 import CnfCards from "./CnfCards";
+import { compressImage } from "@/lib/image-compress";
 
 /* ═══════════ types (brands/categories mirror Food & Spices) */
 interface RiceBrand { id: string; name: string; address: string; city: string; country: string; logoUrl: string; createdAt: string; contactPerson: string; website: string; email: string; }
@@ -21,7 +22,8 @@ async function getJson<T>(url: string, fallback: T): Promise<T> {
   catch { return fallback; }
 }
 
-async function uploadImage(file: File): Promise<string> {
+async function uploadImage(rawFile: File): Promise<string> {
+  const file = await compressImage(rawFile);
   const base64 = await new Promise<string>((res, rej) => {
     const reader = new FileReader();
     reader.onload = () => res((reader.result as string).split(",")[1] ?? "");
@@ -48,7 +50,7 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
   const [loadError, setLoadError] = useState(false);
 
   const [products, setProducts] = useState<RiceProduct[]>([]);
-  const [master, setMaster] = useState<RiceMaster>({ byproducts: [], charges: [] });
+  const [master, setMaster] = useState<RiceMaster>({ byproducts: [], charges: [], bags: [] });
   const [settings, setSettings] = useState<RiceSettings>({ ...RICE_DEFAULT_SETTINGS });
   const [brands, setBrands] = useState<RiceBrand[]>([]);
   const [categories, setCategories] = useState<RiceCategory[]>([]);
@@ -70,13 +72,13 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
     setLoading(true); setLoadError(false);
     const [p, m, s, b, c] = await Promise.all([
       getJson<{ products: RiceProduct[] }>("/api/product-list/rice-products", { products: [] }),
-      getJson<RiceMaster>("/api/product-list/rice-master", { byproducts: [], charges: [] }),
+      getJson<RiceMaster>("/api/product-list/rice-master", { byproducts: [], charges: [], bags: [] }),
       getJson<RiceSettings>("/api/product-list/rice-settings", { ...RICE_DEFAULT_SETTINGS }),
       getJson<{ brands: RiceBrand[] }>("/api/product-list/rice-brands", { brands: [] }),
       getJson<{ categories: RiceCategory[] }>("/api/product-list/rice-categories", { categories: [] }),
     ]);
     setProducts(p.products ?? []);
-    setMaster({ byproducts: m.byproducts ?? [], charges: m.charges ?? [] });
+    setMaster({ byproducts: m.byproducts ?? [], charges: m.charges ?? [], bags: m.bags ?? [] });
     setSettings(s);
     setBrands(b.brands ?? []);
     setCategories(c.categories ?? []);
@@ -100,7 +102,7 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
   }
 
   /* ─── master save/delete */
-  async function saveMasterItem(kind: "byproduct" | "charge", item: { id: string; name: string; rate: number; sortOrder: number }) {
+  async function saveMasterItem(kind: "byproduct" | "charge" | "bag", item: { id: string; name: string; rate: number; sortOrder: number }) {
     await fetch("/api/product-list/rice-master", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "upsert", item: { ...item, kind } }) });
     await load();
   }
@@ -224,7 +226,7 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
           {([
             { key: "products" as const, Icon: Package, label: "Products", desc: "Rice costing sheets — recovery %, purchase rate, by-products. Auto-calculates FOB per PMT.", count: products.length },
-            { key: "master" as const, Icon: List, label: "Master Prices", desc: "Shared milling & handling charges (per-kg). Update once — all rice products recalculate.", count: master.charges.length },
+            { key: "master" as const, Icon: List, label: "Master Prices", desc: "Shared milling & handling charges (per-kg) + bag-packaging surcharges (per-PMT). Update once — all rice products recalculate.", count: master.charges.length + master.bags.length },
             { key: "pricelist" as const, Icon: DollarSign, label: "Price List", desc: "Calculated rice price list, FOB per metric ton.", count: products.length },
             { key: "brands" as const, Icon: Tag, label: "Brands & Categories", desc: "Rice brands and categories. Tag each rice product to a brand and category.", count: brands.length + categories.length },
           ]).map(({ key, Icon, label, desc, count }) => (
@@ -285,10 +287,12 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
       {/* ── MASTER PRICES TAB ── */}
       {tab === "master" && (
         <div className="space-y-3">
-          <p className="text-[11px] text-muted">Milling &amp; handling charges are shared across all rice products (per-kg). By-product resale rates are set per-product when creating a product, since they vary by product.</p>
-          <div className="max-w-xl">
+          <p className="text-[11px] text-muted">Milling &amp; handling charges (per-kg) and bag-packaging surcharges (per-PMT) are shared across all rice products. By-product resale rates are set per-product when creating a product, since they vary by product.</p>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <MasterTable title="Milling & Handling Charges (PKR/kg)" kind="charge" items={master.charges}
               onSave={(it) => requireAuth(() => saveMasterItem("charge", it))} onDelete={(id) => requireAuth(() => deleteMasterItem(id))} />
+            <MasterTable title="Bag Packaging ($/PMT — added at CNF)" kind="bag" items={master.bags}
+              onSave={(it) => requireAuth(() => saveMasterItem("bag", it))} onDelete={(id) => requireAuth(() => deleteMasterItem(id))} />
           </div>
         </div>
       )}
@@ -404,7 +408,7 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
 
 /* ═══════════ Master rate table */
 function MasterTable({ title, kind, items, onSave, onDelete }: {
-  title: string; kind: "byproduct" | "charge";
+  title: string; kind: "byproduct" | "charge" | "bag";
   items: { id: string; name: string; rate: number; sortOrder: number }[];
   onSave: (it: { id: string; name: string; rate: number; sortOrder: number }) => void;
   onDelete: (id: string) => void;
