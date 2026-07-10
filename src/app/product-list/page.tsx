@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from "react";
 import { ArrowLeft, Plus, Trash2, Pencil, X, Save, Lock, Search, Package, List, LayoutGrid, DollarSign, Settings2, ChevronRight, ChevronDown, ExternalLink, Copy, Ship, Upload, Check, Tag } from "lucide-react";
 import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
+import RiceWorkspace from "./RiceWorkspace";
 
 /* ════════════════════════════════ TYPES */
 interface Material { id: string; name: string; unit: string; category: string; pricePerUnit: number; updatedAt: string; defaultUnitType: "PCS" | "CONTAINER" | "FIXED"; }
@@ -91,6 +92,10 @@ function calcCost(recipe: RecipeItem[], materials: Material[], product: Product,
 /* ════════════════════════════════ MAIN */
 export default function ProductListPage() {
   const router = useRouter();
+  // Which product division the workspace is showing. "food" = the original
+  // Food & Spices cards/data (untouched); "rice" = a fully separate module with
+  // its own cards, data and PMT-based costing (see RiceWorkspace).
+  const [division, setDivision] = useState<"food" | "rice">("food");
   const [tab, setTab] = useState<"master" | "products" | "pricelist" | "brands" | null>(null);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -673,6 +678,23 @@ export default function ProductListPage() {
         <div className="flex-1 overflow-y-auto p-4 md:p-6">
           <div className="max-w-7xl mx-auto space-y-5 animate-fade-in">
 
+            {/* Division selector — Food & Spices vs Rice. Rice keeps the same card
+                names but swaps in its own data and per-PMT costing. Only shown on
+                the landing screen (no section open). */}
+            {!tab && (
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-semibold text-muted uppercase tracking-wide">Division</span>
+                <select value={division} onChange={e => setDivision(e.target.value as "food" | "rice")}
+                  className="bg-surface border border-border rounded-xl px-3 py-2.5 text-sm font-semibold text-foreground focus:outline-none focus:border-green-500/50 cursor-pointer">
+                  <option value="food">Food &amp; Spices</option>
+                  <option value="rice">Rice</option>
+                </select>
+              </div>
+            )}
+
+            {division === "rice" && <RiceWorkspace requireAuth={requireAuth} />}
+
+            {division === "food" && (<>
             {/* Module cards — shown when no section selected */}
             {!tab && (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4 mt-4">
@@ -1034,6 +1056,7 @@ export default function ProductListPage() {
                 </div>
               </div>
             )}
+            </>)}
           </div>
         </div>
       )}

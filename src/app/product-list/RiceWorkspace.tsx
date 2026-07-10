@@ -1,0 +1,638 @@
+"use client";
+import { useState, useEffect, useCallback } from "react";
+import { ArrowLeft, Plus, Trash2, Pencil, X, Save, Search, Package, List, LayoutGrid, DollarSign, Settings2, Tag, Upload } from "lucide-react";
+import {
+  calcRice, RiceProduct, RiceMaster, RiceSettings, RiceProductByproduct,
+  RICE_DEFAULT_SETTINGS, RICE_DEFAULT_PRODUCT_BYPRODUCTS,
+} from "@/lib/rice-costing";
+
+/* ═══════════ types (brands/categories mirror Food & Spices) */
+interface RiceBrand { id: string; name: string; address: string; city: string; country: string; logoUrl: string; createdAt: string; contactPerson: string; website: string; email: string; }
+interface RiceCategory { id: string; name: string; createdAt: string; }
+
+const genId = () => Math.random().toString(36).slice(2, 10);
+const fmt2 = (n: number) => n.toFixed(2);
+
+type RiceTab = "products" | "master" | "brands" | "pricelist" | null;
+
+async function getJson<T>(url: string, fallback: T): Promise<T> {
+  try { const r = await fetch(url); const j = await r.json(); if (!r.ok || j?.error) return fallback; return j; }
+  catch { return fallback; }
+}
+
+async function uploadImage(file: File): Promise<string> {
+  const base64 = await new Promise<string>((res, rej) => {
+    const reader = new FileReader();
+    reader.onload = () => res((reader.result as string).split(",")[1] ?? "");
+    reader.onerror = rej;
+    reader.readAsDataURL(file);
+  });
+  const r = await fetch("/api/product-list/upload-image", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename: file.name, mimeType: file.type, base64 }),
+  });
+  const j = await r.json();
+  return j.thumbnailUrl || j.fullUrl || "";
+}
+
+const emptyProduct = (): RiceProduct => ({
+  id: genId(), sku: "", name: "", brandId: "", category: "", imageUrl: "", packagingDesc: "",
+  quantity: 1000, recoveryPct: 90, purchaseRate: 300, freight: 0,
+  byproducts: RICE_DEFAULT_PRODUCT_BYPRODUCTS.map(b => ({ ...b })), active: true,
+});
+
+export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () => void) => void }) {
+  const [tab, setTab] = useState<RiceTab>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+
+  const [products, setProducts] = useState<RiceProduct[]>([]);
+  const [master, setMaster] = useState<RiceMaster>({ byproducts: [], charges: [] });
+  const [settings, setSettings] = useState<RiceSettings>({ ...RICE_DEFAULT_SETTINGS });
+  const [brands, setBrands] = useState<RiceBrand[]>([]);
+  const [categories, setCategories] = useState<RiceCategory[]>([]);
+
+  const [search, setSearch] = useState("");
+  const [plView, setPlView] = useState<"grid" | "list">("grid");
+  const [plBrandFilter, setPlBrandFilter] = useState("");
+  const [plSort, setPlSort] = useState<"name-asc" | "name-desc" | "price-asc" | "price-desc">("name-asc");
+
+  // modals
+  const [editingProduct, setEditingProduct] = useState<RiceProduct | null>(null);
+  const [editingBrand, setEditingBrand] = useState<RiceBrand | null>(null);
+  const [showBrandForm, setShowBrandForm] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [newCategory, setNewCategory] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true); setLoadError(false);
+    const [p, m, s, b, c] = await Promise.all([
+      getJson<{ products: RiceProduct[] }>("/api/product-list/rice-products", { products: [] }),
+      getJson<RiceMaster>("/api/product-list/rice-master", { byproducts: [], charges: [] }),
+      getJson<RiceSettings>("/api/product-list/rice-settings", { ...RICE_DEFAULT_SETTINGS }),
+      getJson<{ brands: RiceBrand[] }>("/api/product-list/rice-brands", { brands: [] }),
+      getJson<{ categories: RiceCategory[] }>("/api/product-list/rice-categories", { categories: [] }),
+    ]);
+    setProducts(p.products ?? []);
+    setMaster({ byproducts: m.byproducts ?? [], charges: m.charges ?? [] });
+    setSettings(s);
+    setBrands(b.brands ?? []);
+    setCategories(c.categories ?? []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const brandName = (id: string) => brands.find(b => b.id === id)?.name || "—";
+  const calc = (p: RiceProduct) => calcRice(p, master, settings);
+
+  /* ─── product save/delete */
+  async function saveProduct(p: RiceProduct) {
+    setProducts(prev => prev.some(x => x.id === p.id) ? prev.map(x => x.id === p.id ? p : x) : [...prev, p]);
+    setEditingProduct(null);
+    await fetch("/api/product-list/rice-products", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "upsert", product: p }) });
+  }
+  async function deleteProduct(id: string) {
+    setProducts(prev => prev.filter(x => x.id !== id));
+    await fetch("/api/product-list/rice-products", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete", product: { id } }) });
+  }
+
+  /* ─── master save/delete */
+  async function saveMasterItem(kind: "byproduct" | "charge", item: { id: string; name: string; rate: number; sortOrder: number }) {
+    await fetch("/api/product-list/rice-master", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "upsert", item: { ...item, kind } }) });
+    await load();
+  }
+  async function deleteMasterItem(id: string) {
+    await fetch("/api/product-list/rice-master", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete", id }) });
+    await load();
+  }
+
+  /* ─── settings */
+  async function saveSettings(s: RiceSettings) {
+    setSettings(s); setShowSettings(false);
+    await fetch("/api/product-list/rice-settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(s) });
+  }
+
+  /* ─── brands */
+  async function saveBrand(b: RiceBrand) {
+    setBrands(prev => prev.some(x => x.id === b.id) ? prev.map(x => x.id === b.id ? b : x) : [...prev, b]);
+    setShowBrandForm(false); setEditingBrand(null);
+    await fetch("/api/product-list/rice-brands", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "upsert", brand: b }) });
+  }
+  async function deleteBrand(id: string) {
+    setBrands(prev => prev.filter(x => x.id !== id));
+    await fetch("/api/product-list/rice-brands", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete", brand: { id } }) });
+  }
+
+  /* ─── categories */
+  async function saveCategory(name: string) {
+    const n = name.trim(); if (!n) return;
+    const cat = { id: genId(), name: n, createdAt: new Date().toISOString() };
+    setCategories(prev => [...prev, cat]); setNewCategory("");
+    await fetch("/api/product-list/rice-categories", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "upsert", category: cat }) });
+  }
+  async function deleteCategory(id: string) {
+    setCategories(prev => prev.filter(c => c.id !== id));
+    await fetch("/api/product-list/rice-categories", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete", id }) });
+  }
+
+  const filteredProducts = products.filter(p => !search || p.name.toLowerCase().includes(search.toLowerCase()) || p.sku.toLowerCase().includes(search.toLowerCase()));
+  const filteredBrands = brands.filter(b => !search || b.name.toLowerCase().includes(search.toLowerCase()));
+
+  const pricelistRows = filteredProducts
+    .filter(p => !plBrandFilter || p.brandId === plBrandFilter)
+    .map(p => ({ p, c: calc(p) }))
+    .sort((a, b) => {
+      switch (plSort) {
+        case "name-desc": return b.p.name.localeCompare(a.p.name);
+        case "price-asc": return a.c.cnfPerPmt - b.c.cnfPerPmt;
+        case "price-desc": return b.c.cnfPerPmt - a.c.cnfPerPmt;
+        default: return a.p.name.localeCompare(b.p.name);
+      }
+    });
+
+  if (loading) return <div className="py-20 text-center text-muted text-sm">Loading Rice division…</div>;
+
+  return (
+    <div className="space-y-5">
+      {loadError && <div className="text-xs text-red-400">Couldn&apos;t load some rice data — try again.</div>}
+
+      {/* Section header */}
+      {tab && (
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <button onClick={() => { setTab(null); setSearch(""); }} className="flex items-center gap-2 text-sm text-muted hover:text-foreground cursor-pointer">
+            <ArrowLeft className="w-4 h-4" />
+            <span className="font-semibold">{tab === "products" ? "Rice Products" : tab === "master" ? "Rice Master Prices" : tab === "brands" ? "Rice Brands & Categories" : "Rice Price List"}</span>
+          </button>
+          <div className="flex items-center gap-2">
+            {tab === "master" && (
+              <button onClick={() => setShowSettings(true)} className="flex items-center gap-1.5 text-xs px-3 py-1.5 border border-border text-muted hover:text-foreground hover:border-amber-500/40 rounded-lg cursor-pointer">
+                <Settings2 className="w-3 h-3" /> Cost Settings (FC {settings.fcRate})
+              </button>
+            )}
+            {tab === "products" && (
+              <button onClick={() => requireAuth(() => setEditingProduct(emptyProduct()))} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-amber-500 hover:bg-amber-500/80 text-white rounded-lg cursor-pointer">
+                <Plus className="w-3 h-3" /> Add Rice Product
+              </button>
+            )}
+            {tab === "brands" && (
+              <button onClick={() => requireAuth(() => { setEditingBrand(null); setShowBrandForm(true); })} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-amber-500 hover:bg-amber-500/80 text-white rounded-lg cursor-pointer">
+                <Plus className="w-3 h-3" /> Add Brand
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Search bar */}
+      {tab && tab !== "master" && (
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="relative flex-1 max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted" />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search…"
+              className="w-full bg-surface border border-border rounded-xl pl-9 pr-4 py-2.5 text-sm text-foreground focus:outline-none focus:border-amber-500/50" />
+          </div>
+          {tab === "pricelist" && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <select value={plBrandFilter} onChange={e => setPlBrandFilter(e.target.value)} className="bg-surface border border-border rounded-xl px-3 py-2.5 text-sm text-foreground focus:outline-none focus:border-amber-500/50 cursor-pointer">
+                <option value="">All Brands</option>
+                {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+              <select value={plSort} onChange={e => setPlSort(e.target.value as typeof plSort)} className="bg-surface border border-border rounded-xl px-3 py-2.5 text-sm text-foreground focus:outline-none focus:border-amber-500/50 cursor-pointer">
+                <option value="name-asc">Product (A–Z)</option>
+                <option value="name-desc">Product (Z–A)</option>
+                <option value="price-asc">CNF/PMT (Low → High)</option>
+                <option value="price-desc">CNF/PMT (High → Low)</option>
+              </select>
+              <div className="flex items-center border border-border rounded-xl overflow-hidden">
+                <button onClick={() => setPlView("grid")} title="Grid" className={`p-2.5 cursor-pointer ${plView === "grid" ? "bg-amber-500/15 text-amber-500" : "text-muted hover:text-foreground"}`}><LayoutGrid className="w-4 h-4" /></button>
+                <button onClick={() => setPlView("list")} title="List" className={`p-2.5 cursor-pointer border-l border-border ${plView === "list" ? "bg-amber-500/15 text-amber-500" : "text-muted hover:text-foreground"}`}><List className="w-4 h-4" /></button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── LANDING CARDS ── */}
+      {!tab && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-4">
+          {([
+            { key: "products" as const, Icon: Package, label: "Products", desc: "Rice costing sheets — recovery %, purchase rate, by-products. Auto-calculates FOB / CNF per PMT.", count: products.length },
+            { key: "master" as const, Icon: List, label: "Master Prices", desc: "By-product resale rates & milling/handling charges. Update once — all rice products recalculate.", count: master.byproducts.length + master.charges.length },
+            { key: "pricelist" as const, Icon: DollarSign, label: "Price List", desc: "Calculated rice price list, FOB / CNF per metric ton.", count: products.length },
+            { key: "brands" as const, Icon: Tag, label: "Brands & Categories", desc: "Rice brands and categories. Tag each rice product to a brand and category.", count: brands.length + categories.length },
+          ]).map(({ key, Icon, label, desc, count }) => (
+            <button key={key} onClick={() => { setTab(key); setSearch(""); }}
+              className="group text-left p-5 bg-white/65 backdrop-blur-sm rounded-2xl border border-gray-200/80 hover:border-amber-400/60 hover:bg-white/95 hover:shadow-md cursor-pointer transition-all shadow-sm">
+              <div className="flex items-start justify-between mb-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-100/60 flex items-center justify-center"><Icon className="w-5 h-5 text-amber-500" /></div>
+                {count != null && <span className="text-xs font-mono text-muted">{count}</span>}
+              </div>
+              <p className="text-sm font-bold text-foreground">{label}</p>
+              <p className="text-[11px] text-muted mt-1 leading-relaxed">{desc}</p>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* ── PRODUCTS TAB ── */}
+      {tab === "products" && (
+        <div className="bg-surface rounded-2xl border border-border overflow-hidden">
+          <table className="w-full text-xs">
+            <thead><tr className="bg-amber-500/10 text-amber-600">
+              <th className="px-4 py-3 text-left font-semibold w-[40px]">#</th>
+              <th className="px-4 py-3 text-left font-semibold w-[110px]">SKU</th>
+              <th className="px-4 py-3 text-left font-semibold">Product Name</th>
+              <th className="px-4 py-3 text-left font-semibold w-[110px]">Brand</th>
+              <th className="px-4 py-3 text-right font-semibold w-[90px]">Recovery</th>
+              <th className="px-4 py-3 text-right font-semibold w-[120px]">FOB / PMT</th>
+              <th className="px-4 py-3 text-right font-semibold w-[120px]">CNF / PMT</th>
+              <th className="px-4 py-3 text-center w-[80px]">Actions</th>
+            </tr></thead>
+            <tbody>
+              {filteredProducts.length === 0 && <tr><td colSpan={8} className="px-4 py-10 text-center text-muted">No rice products yet. Click &quot;Add Rice Product&quot;.</td></tr>}
+              {filteredProducts.map((p, i) => {
+                const c = calc(p);
+                return (
+                  <tr key={p.id} className={`hover:bg-amber-500/5 transition-colors ${i % 2 ? "bg-surface-light/20" : ""}`}>
+                    <td className="px-4 py-3 text-muted">{i + 1}</td>
+                    <td className="px-4 py-3 font-mono text-[11px] text-muted">{p.sku || "—"}</td>
+                    <td className="px-4 py-3 font-semibold text-foreground">{p.name}</td>
+                    <td className="px-4 py-3">{p.brandId ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-400 font-semibold">{brandName(p.brandId)}</span> : <span className="text-[10px] text-red-400">Unassigned</span>}</td>
+                    <td className="px-4 py-3 text-right text-muted">{p.recoveryPct}%</td>
+                    <td className="px-4 py-3 text-right font-mono font-bold text-amber-600">${fmt2(c.fobPerPmt)}</td>
+                    <td className="px-4 py-3 text-right font-mono font-bold text-green-500">${fmt2(c.cnfPerPmt)}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-center gap-1">
+                        <button onClick={() => requireAuth(() => setEditingProduct({ ...p }))} className="p-1 text-muted hover:text-amber-500 cursor-pointer"><Pencil className="w-3.5 h-3.5" /></button>
+                        <button onClick={() => requireAuth(() => deleteProduct(p.id))} className="p-1 text-muted hover:text-red-400 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* ── MASTER PRICES TAB ── */}
+      {tab === "master" && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          <MasterTable title="By-product Resale Rates (PKR/kg)" kind="byproduct" items={master.byproducts}
+            onSave={(it) => requireAuth(() => saveMasterItem("byproduct", it))} onDelete={(id) => requireAuth(() => deleteMasterItem(id))} />
+          <MasterTable title="Milling & Handling Charges (PKR/kg)" kind="charge" items={master.charges}
+            onSave={(it) => requireAuth(() => saveMasterItem("charge", it))} onDelete={(id) => requireAuth(() => deleteMasterItem(id))} />
+        </div>
+      )}
+
+      {/* ── BRANDS & CATEGORIES TAB ── */}
+      {tab === "brands" && (
+        <div className="space-y-8">
+          <div>
+            <h3 className="text-xs font-semibold text-amber-600 uppercase tracking-wide mb-3">Brands</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredBrands.map(b => (
+                <div key={b.id} className="bg-surface rounded-2xl border border-border p-4">
+                  <div className="flex items-start gap-3">
+                    {b.logoUrl ? <img src={b.logoUrl} alt={b.name} className="w-14 h-14 rounded-lg object-cover border border-border shrink-0" />
+                      : <div className="w-14 h-14 rounded-lg border border-dashed border-border bg-surface-light/30 flex items-center justify-center shrink-0"><Tag className="w-5 h-5 text-muted/40" /></div>}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-foreground truncate">{b.name}</p>
+                      <p className="text-[11px] text-muted mt-0.5">{[b.city, b.country].filter(Boolean).join(", ") || "—"}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between mt-3 pt-3 border-t border-border/50">
+                    <span className="text-[10px] text-muted">{products.filter(p => p.brandId === b.id).length} product(s)</span>
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => requireAuth(() => { setEditingBrand(b); setShowBrandForm(true); })} className="p-1 text-muted hover:text-amber-500 cursor-pointer"><Pencil className="w-3.5 h-3.5" /></button>
+                      <button onClick={() => requireAuth(() => deleteBrand(b.id))} className="p-1 text-muted hover:text-red-400 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {filteredBrands.length === 0 && <div className="col-span-full py-8 text-center text-muted text-sm">No rice brands yet.</div>}
+            </div>
+          </div>
+          <div>
+            <h3 className="text-xs font-semibold text-amber-600 uppercase tracking-wide mb-3">Categories</h3>
+            <div className="bg-surface rounded-2xl border border-border p-4 max-w-2xl">
+              <div className="flex items-center gap-2 mb-4">
+                <input value={newCategory} onChange={e => setNewCategory(e.target.value)} onKeyDown={e => e.key === "Enter" && requireAuth(() => saveCategory(newCategory))}
+                  placeholder="New category (e.g. BASMATI)" className="flex-1 bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-amber-500/50" />
+                <button onClick={() => requireAuth(() => saveCategory(newCategory))} disabled={!newCategory.trim()} className="flex items-center gap-1.5 text-xs px-3 py-2 bg-amber-500 hover:bg-amber-500/80 disabled:opacity-40 text-white rounded-lg cursor-pointer"><Plus className="w-3 h-3" /> Add</button>
+              </div>
+              {categories.length === 0 ? <p className="text-sm text-muted text-center py-4">No categories yet.</p> : (
+                <div className="flex flex-wrap gap-2">
+                  {categories.map(c => (
+                    <span key={c.id} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-amber-500/10 text-amber-600 rounded-full">
+                      {c.name}<button onClick={() => requireAuth(() => deleteCategory(c.id))} className="text-muted hover:text-red-400 cursor-pointer"><X className="w-3 h-3" /></button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── PRICE LIST TAB ── */}
+      {tab === "pricelist" && plView === "grid" && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {pricelistRows.map(({ p, c }) => (
+            <div key={p.id} className="bg-surface rounded-2xl border border-border overflow-hidden">
+              {p.imageUrl ? <img src={p.imageUrl} alt={p.name} className="w-full h-40 object-cover" />
+                : <div className="w-full h-40 bg-amber-500/5 flex items-center justify-center"><Package className="w-12 h-12 text-amber-500/20" /></div>}
+              <div className="p-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-[10px] font-mono text-muted">{p.sku || "—"}</p>
+                  {p.brandId && <span className="text-[9px] px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-400 font-semibold">{brandName(p.brandId)}</span>}
+                </div>
+                <p className="text-sm font-bold text-foreground mt-0.5">{p.name}</p>
+                <div className="flex items-center justify-between mt-3">
+                  <div><p className="text-[10px] text-muted">FOB / PMT</p><p className="text-lg font-bold text-amber-600">${fmt2(c.fobPerPmt)}</p></div>
+                  <div className="text-right"><p className="text-[10px] text-muted">CNF / PMT</p><p className="text-lg font-bold text-green-500">${fmt2(c.cnfPerPmt)}</p></div>
+                </div>
+              </div>
+            </div>
+          ))}
+          {pricelistRows.length === 0 && <div className="col-span-3 py-12 text-center text-muted">No rice products match.</div>}
+        </div>
+      )}
+      {tab === "pricelist" && plView === "list" && (
+        <div className="bg-surface rounded-2xl border border-border overflow-hidden">
+          <table className="w-full text-xs">
+            <thead><tr className="bg-amber-500/10 text-amber-600">
+              <th className="px-4 py-3 text-left font-semibold w-[64px]">Image</th>
+              <th className="px-4 py-3 text-left font-semibold">Product Name</th>
+              <th className="px-4 py-3 text-left font-semibold w-[120px]">Brand</th>
+              <th className="px-4 py-3 text-right font-semibold w-[120px]">FOB / PMT</th>
+              <th className="px-4 py-3 text-right font-semibold w-[120px]">CNF / PMT</th>
+            </tr></thead>
+            <tbody>
+              {pricelistRows.length === 0 && <tr><td colSpan={5} className="px-4 py-10 text-center text-muted">No rice products match.</td></tr>}
+              {pricelistRows.map(({ p, c }, i) => (
+                <tr key={p.id} className={`hover:bg-amber-500/5 ${i % 2 ? "bg-surface-light/20" : ""}`}>
+                  <td className="px-4 py-2">{p.imageUrl ? <img src={p.imageUrl} alt={p.name} className="w-10 h-10 rounded-lg object-cover border border-border" /> : <div className="w-10 h-10 rounded-lg bg-amber-500/5 flex items-center justify-center"><Package className="w-4 h-4 text-amber-500/30" /></div>}</td>
+                  <td className="px-4 py-3 font-semibold text-foreground">{p.name}</td>
+                  <td className="px-4 py-3">{p.brandId ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-400 font-semibold">{brandName(p.brandId)}</span> : <span className="text-[10px] text-muted">—</span>}</td>
+                  <td className="px-4 py-3 text-right font-mono font-bold text-amber-600">${fmt2(c.fobPerPmt)}</td>
+                  <td className="px-4 py-3 text-right font-mono font-bold text-green-500">${fmt2(c.cnfPerPmt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* ── MODALS ── */}
+      {editingProduct && <ProductForm product={editingProduct} master={master} settings={settings} brands={brands} categories={categories}
+        onClose={() => setEditingProduct(null)} onSave={p => requireAuth(() => saveProduct(p))} />}
+      {showSettings && <SettingsForm settings={settings} onClose={() => setShowSettings(false)} onSave={saveSettings} />}
+      {showBrandForm && <BrandForm brand={editingBrand} onClose={() => { setShowBrandForm(false); setEditingBrand(null); }} onSave={saveBrand} />}
+    </div>
+  );
+}
+
+/* ═══════════ Master rate table */
+function MasterTable({ title, kind, items, onSave, onDelete }: {
+  title: string; kind: "byproduct" | "charge";
+  items: { id: string; name: string; rate: number; sortOrder: number }[];
+  onSave: (it: { id: string; name: string; rate: number; sortOrder: number }) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [newName, setNewName] = useState("");
+  const [newRate, setNewRate] = useState("");
+  return (
+    <div className="bg-surface rounded-2xl border border-border overflow-hidden">
+      <div className="px-4 py-3 border-b border-border"><h3 className="text-xs font-semibold text-amber-600 uppercase tracking-wide">{title}</h3></div>
+      <table className="w-full text-xs">
+        <thead><tr className="text-muted"><th className="px-4 py-2 text-left font-semibold">Name</th><th className="px-4 py-2 text-right font-semibold w-[110px]">Rate</th><th className="w-[50px]"></th></tr></thead>
+        <tbody>
+          {items.map((it, i) => (
+            <tr key={it.id} className={i % 2 ? "bg-surface-light/20" : ""}>
+              <td className="px-4 py-2">
+                <input defaultValue={it.name} onBlur={e => e.target.value !== it.name && onSave({ ...it, name: e.target.value })}
+                  className="w-full bg-transparent border border-transparent hover:border-border focus:border-amber-500/50 rounded px-1.5 py-1 text-foreground focus:outline-none" />
+              </td>
+              <td className="px-4 py-2 text-right">
+                <input type="number" step="0.01" defaultValue={it.rate} onBlur={e => parseFloat(e.target.value) !== it.rate && onSave({ ...it, rate: parseFloat(e.target.value) || 0 })}
+                  className="w-24 bg-transparent border border-transparent hover:border-border focus:border-amber-500/50 rounded px-1.5 py-1 text-right font-mono text-foreground focus:outline-none" />
+              </td>
+              <td className="px-2 py-2 text-center"><button onClick={() => onDelete(it.id)} className="p-1 text-muted hover:text-red-400 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="flex items-center gap-2 p-3 border-t border-border">
+        <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="New name"
+          className="flex-1 bg-background border border-border rounded-lg px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:border-amber-500/50" />
+        <input type="number" step="0.01" value={newRate} onChange={e => setNewRate(e.target.value)} placeholder="Rate"
+          className="w-20 bg-background border border-border rounded-lg px-2.5 py-1.5 text-xs text-right font-mono text-foreground focus:outline-none focus:border-amber-500/50" />
+        <button disabled={!newName.trim()} onClick={() => { onSave({ id: genId(), name: newName.trim(), rate: parseFloat(newRate) || 0, sortOrder: items.length }); setNewName(""); setNewRate(""); }}
+          className="flex items-center gap-1 text-xs px-3 py-1.5 bg-amber-500 hover:bg-amber-500/80 disabled:opacity-40 text-white rounded-lg cursor-pointer"><Plus className="w-3 h-3" /> Add</button>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════ Product costing form (the ERP sheet) */
+function ProductForm({ product, master, settings, brands, categories, onClose, onSave }: {
+  product: RiceProduct; master: RiceMaster; settings: RiceSettings; brands: RiceBrand[]; categories: RiceCategory[];
+  onClose: () => void; onSave: (p: RiceProduct) => void;
+}) {
+  // Merge product by-products with master by-product names so every master row
+  // shows up (percent 0 if this product hasn't set it).
+  const mergedByproducts = (): RiceProductByproduct[] => {
+    const byName = new Map(product.byproducts.map(b => [b.name, b.percent]));
+    return master.byproducts.map(m => ({ name: m.name, percent: byName.get(m.name) ?? 0 }));
+  };
+  const [draft, setDraft] = useState<RiceProduct>({ ...product, byproducts: mergedByproducts() });
+  const [uploading, setUploading] = useState(false);
+  const upd = (k: keyof RiceProduct, v: unknown) => setDraft(d => ({ ...d, [k]: v }));
+  const setBp = (name: string, percent: number) => setDraft(d => ({ ...d, byproducts: d.byproducts.map(b => b.name === name ? { ...b, percent } : b) }));
+  const c = calcRice(draft, master, settings);
+
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0]; if (!f) return;
+    setUploading(true);
+    try { const url = await uploadImage(f); if (url) upd("imageUrl", url); } finally { setUploading(false); }
+  }
+
+  const Row = ({ label, val, bold, color }: { label: string; val: string; bold?: boolean; color?: string }) => (
+    <div className="flex items-center justify-between py-1 border-b border-border/40">
+      <span className="text-[11px] text-muted">{label}</span>
+      <span className={`text-xs font-mono ${bold ? "font-bold" : ""} ${color ?? "text-foreground"}`}>{val}</span>
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-surface rounded-2xl border border-border w-full max-w-5xl max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-3 border-b border-border sticky top-0 bg-surface z-10">
+          <h3 className="text-sm font-semibold text-foreground">{product.name ? "Edit" : "New"} Rice Product</h3>
+          <div className="flex items-center gap-2">
+            <button onClick={() => onSave(draft)} disabled={!draft.name.trim()} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-amber-500 hover:bg-amber-500/80 disabled:opacity-40 text-white rounded-lg cursor-pointer"><Save className="w-3 h-3" /> Save</button>
+            <button onClick={onClose} className="p-1.5 text-muted hover:text-foreground cursor-pointer"><X className="w-4 h-4" /></button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 p-5">
+          {/* Left: inputs */}
+          <div className="lg:col-span-2 space-y-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <Field className="col-span-2" label="Product Name"><input value={draft.name} onChange={e => upd("name", e.target.value)} className={inp} /></Field>
+              <Field label="SKU"><input value={draft.sku} onChange={e => upd("sku", e.target.value)} className={inp} /></Field>
+              <Field label="Brand">
+                <select value={draft.brandId} onChange={e => upd("brandId", e.target.value)} className={inp}>
+                  <option value="">—</option>{brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+              </Field>
+              <Field label="Category">
+                <select value={draft.category} onChange={e => upd("category", e.target.value)} className={inp}>
+                  <option value="">—</option>{categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                </select>
+              </Field>
+              <Field className="col-span-3" label="Packaging Description"><input value={draft.packagingDesc} onChange={e => upd("packagingDesc", e.target.value)} placeholder="10 KG X 2 NON WOVEN BAGS…" className={inp} /></Field>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+              <Field label="Quantity (kg)"><input type="number" step="1" value={draft.quantity} onChange={e => upd("quantity", parseFloat(e.target.value) || 0)} className={inp} /></Field>
+              <Field label="Recovery %"><input type="number" step="0.01" value={draft.recoveryPct} onChange={e => upd("recoveryPct", parseFloat(e.target.value) || 0)} className={inp} /></Field>
+              <Field label="Purchase Rate"><input type="number" step="0.01" value={draft.purchaseRate} onChange={e => upd("purchaseRate", parseFloat(e.target.value) || 0)} className={inp} /></Field>
+              <Field label="Freight (USD)"><input type="number" step="0.01" value={draft.freight} onChange={e => upd("freight", parseFloat(e.target.value) || 0)} className={inp} /></Field>
+              <Field label="Image">
+                <label className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 border border-border rounded-lg cursor-pointer text-muted hover:text-foreground hover:border-amber-500/40">
+                  <Upload className="w-3 h-3" /> {uploading ? "…" : draft.imageUrl ? "Change" : "Upload"}
+                  <input type="file" accept="image/*" onChange={onFile} className="hidden" />
+                </label>
+              </Field>
+            </div>
+
+            {/* By-products */}
+            <div className="bg-background/50 rounded-xl border border-border overflow-hidden">
+              <div className="px-4 py-2 border-b border-border flex items-center justify-between">
+                <h4 className="text-[11px] font-semibold text-muted uppercase tracking-wide">By-product Recovery (% of raw input)</h4>
+                <span className="text-[10px] text-muted">rates from Master Prices</span>
+              </div>
+              <table className="w-full text-xs">
+                <thead><tr className="text-muted"><th className="px-4 py-1.5 text-left font-semibold">By-product</th><th className="px-4 py-1.5 text-right font-semibold w-[90px]">%</th><th className="px-4 py-1.5 text-right font-semibold w-[90px]">Rate</th><th className="px-4 py-1.5 text-right font-semibold w-[110px]">Value (PKR)</th></tr></thead>
+                <tbody>
+                  {draft.byproducts.map(bp => {
+                    const rate = master.byproducts.find(m => m.name === bp.name)?.rate ?? 0;
+                    const kg = Math.round((bp.percent / 100) * c.rawInput * 100) / 100;
+                    return (
+                      <tr key={bp.name}>
+                        <td className="px-4 py-1 text-foreground">{bp.name}</td>
+                        <td className="px-4 py-1 text-right"><input type="number" step="0.01" value={bp.percent} onChange={e => setBp(bp.name, parseFloat(e.target.value) || 0)} className="w-20 bg-transparent border border-transparent hover:border-border focus:border-amber-500/50 rounded px-1 py-0.5 text-right font-mono text-foreground focus:outline-none" /></td>
+                        <td className="px-4 py-1 text-right font-mono text-muted">{fmt2(rate)}</td>
+                        <td className="px-4 py-1 text-right font-mono text-muted">{fmt2(kg * rate)}</td>
+                      </tr>
+                    );
+                  })}
+                  {draft.byproducts.length === 0 && <tr><td colSpan={4} className="px-4 py-4 text-center text-muted">Add by-products in Master Prices first.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Right: live calculation */}
+          <div className="bg-surface-light/30 rounded-2xl border border-border p-4 h-fit sticky top-16">
+            <h4 className="text-[11px] font-semibold text-amber-600 uppercase tracking-wide mb-3">Costing (per PMT)</h4>
+            <Row label="Raw input needed" val={`${fmt2(c.rawInput)} kg`} />
+            <Row label="Raw cost" val={`PKR ${fmt2(c.rawCost)}`} />
+            <Row label="By-product credit" val={`− PKR ${fmt2(c.byproductCredit)}`} color="text-green-500" />
+            <Row label="Net head cost" val={`PKR ${fmt2(c.netHead)}`} />
+            <Row label="Net head / kg" val={`PKR ${fmt2(c.netHeadPerKg)}`} />
+            <Row label="Milling & charges / kg" val={`PKR ${fmt2(c.chargePerKg)}`} />
+            <Row label="Total cost / kg" val={`PKR ${fmt2(c.totalPerKg)}`} bold />
+            <div className="h-2" />
+            <Row label="USD total (÷ FC rate)" val={`$ ${fmt2(c.usdTotal)}`} />
+            <Row label={`Finance charges (${fmt2(c.financePct)}%)`} val={`$ ${fmt2(c.bankCharges)}`} />
+            <Row label="Profit + packaging" val={`$ ${fmt2(settings.profit + settings.packagingMaterial)}`} />
+            <div className="flex items-center justify-between pt-3 mt-1">
+              <div><p className="text-xs font-bold text-foreground">FOB / PMT</p></div>
+              <span className="text-lg font-bold text-amber-600">$ {fmt2(c.fobPerPmt)}</span>
+            </div>
+            <div className="flex items-center justify-between pt-1">
+              <div><p className="text-xs font-bold text-foreground">CNF / PMT</p><p className="text-[10px] text-muted">incl. freight ${fmt2(draft.freight)}</p></div>
+              <span className="text-lg font-bold text-green-500">$ {fmt2(c.cnfPerPmt)}</span>
+            </div>
+            <p className="text-[10px] text-muted mt-3">FC rate, finance %, profit &amp; packaging are shared — edit in Master Prices → Cost Settings.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════ Settings form */
+function SettingsForm({ settings, onClose, onSave }: { settings: RiceSettings; onClose: () => void; onSave: (s: RiceSettings) => void }) {
+  const [d, setD] = useState<RiceSettings>({ ...settings });
+  const upd = (k: keyof RiceSettings, v: number) => setD(s => ({ ...s, [k]: v }));
+  const fields: [keyof RiceSettings, string][] = [
+    ["fcRate", "FC Rate (PKR→USD)"], ["whtPct", "W.H.T %"], ["servicePct", "Service Charges %"],
+    ["edsPct", "EDS %"], ["courierPct", "Courier %"], ["interestPct", "Interest %"],
+    ["profit", "Profit (USD/shipment)"], ["packagingMaterial", "Packaging Material (USD)"], ["defaultFreight", "Default Freight (USD)"],
+  ];
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-surface rounded-2xl border border-border w-full max-w-lg p-5" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4"><h3 className="text-sm font-semibold text-foreground">Rice Cost Settings</h3><button onClick={onClose} className="p-1.5 text-muted hover:text-foreground cursor-pointer"><X className="w-4 h-4" /></button></div>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+          {fields.map(([k, l]) => (
+            <Field key={k} label={l}><input type="number" step="0.01" value={d[k]} onChange={e => upd(k, parseFloat(e.target.value) || 0)} className={inp} /></Field>
+          ))}
+        </div>
+        <p className="text-[10px] text-muted mt-3">W.H.T + Service + EDS + Courier + Interest are summed and applied as a % of the USD total (finance charges).</p>
+        <div className="flex justify-end gap-2 mt-4"><button onClick={onClose} className="px-4 py-2 text-sm text-muted hover:text-foreground cursor-pointer">Cancel</button><button onClick={() => onSave(d)} className="flex items-center gap-1.5 px-4 py-2 bg-amber-500 hover:bg-amber-500/80 text-white text-sm font-semibold rounded-lg cursor-pointer"><Save className="w-3.5 h-3.5" /> Save</button></div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════ Brand form */
+function BrandForm({ brand, onClose, onSave }: { brand: RiceBrand | null; onClose: () => void; onSave: (b: RiceBrand) => void }) {
+  const [d, setD] = useState<RiceBrand>(brand ?? { id: genId(), name: "", address: "", city: "", country: "", logoUrl: "", createdAt: "", contactPerson: "", website: "", email: "" });
+  const [uploading, setUploading] = useState(false);
+  const upd = (k: keyof RiceBrand, v: string) => setD(s => ({ ...s, [k]: v }));
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0]; if (!f) return;
+    setUploading(true);
+    try { const url = await uploadImage(f); if (url) upd("logoUrl", url); } finally { setUploading(false); }
+  }
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-surface rounded-2xl border border-border w-full max-w-lg p-5" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4"><h3 className="text-sm font-semibold text-foreground">{brand ? "Edit" : "New"} Brand</h3><button onClick={onClose} className="p-1.5 text-muted hover:text-foreground cursor-pointer"><X className="w-4 h-4" /></button></div>
+        <div className="grid grid-cols-2 gap-3">
+          <Field className="col-span-2" label="Brand Name"><input value={d.name} onChange={e => upd("name", e.target.value)} className={inp} /></Field>
+          <Field label="City"><input value={d.city} onChange={e => upd("city", e.target.value)} className={inp} /></Field>
+          <Field label="Country"><input value={d.country} onChange={e => upd("country", e.target.value)} className={inp} /></Field>
+          <Field className="col-span-2" label="Address"><input value={d.address} onChange={e => upd("address", e.target.value)} className={inp} /></Field>
+          <Field label="Contact Person"><input value={d.contactPerson} onChange={e => upd("contactPerson", e.target.value)} className={inp} /></Field>
+          <Field label="Website"><input value={d.website} onChange={e => upd("website", e.target.value)} className={inp} /></Field>
+          <Field label="Email"><input value={d.email} onChange={e => upd("email", e.target.value)} className={inp} /></Field>
+          <Field label="Logo">
+            <label className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 border border-border rounded-lg cursor-pointer text-muted hover:text-foreground hover:border-amber-500/40">
+              <Upload className="w-3 h-3" /> {uploading ? "…" : d.logoUrl ? "Change" : "Upload"}
+              <input type="file" accept="image/*" onChange={onFile} className="hidden" />
+            </label>
+          </Field>
+        </div>
+        <div className="flex justify-end gap-2 mt-4"><button onClick={onClose} className="px-4 py-2 text-sm text-muted hover:text-foreground cursor-pointer">Cancel</button><button onClick={() => onSave(d)} disabled={!d.name.trim()} className="flex items-center gap-1.5 px-4 py-2 bg-amber-500 hover:bg-amber-500/80 disabled:opacity-40 text-white text-sm font-semibold rounded-lg cursor-pointer"><Save className="w-3.5 h-3.5" /> Save</button></div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════ small helpers */
+const inp = "w-full bg-background border border-border rounded-lg px-2.5 py-1.5 text-sm text-foreground focus:outline-none focus:border-amber-500/50";
+function Field({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
+  return (
+    <div className={className}>
+      <label className="text-[10px] text-muted uppercase tracking-wide block mb-1">{label}</label>
+      {children}
+    </div>
+  );
+}
