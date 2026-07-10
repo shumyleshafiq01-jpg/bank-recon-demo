@@ -5,6 +5,7 @@ import {
   calcRice, RiceProduct, RiceMaster, RiceSettings, RiceProductByproduct,
   RICE_DEFAULT_SETTINGS, RICE_DEFAULT_PRODUCT_BYPRODUCTS,
 } from "@/lib/rice-costing";
+import CnfCards from "./CnfCards";
 
 /* ═══════════ types (brands/categories mirror Food & Spices) */
 interface RiceBrand { id: string; name: string; address: string; city: string; country: string; logoUrl: string; createdAt: string; contactPerson: string; website: string; email: string; }
@@ -220,11 +221,11 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
 
       {/* ── LANDING CARDS ── */}
       {!tab && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
           {([
-            { key: "products" as const, Icon: Package, label: "Products", desc: "Rice costing sheets — recovery %, purchase rate, by-products. Auto-calculates FOB / CNF per PMT.", count: products.length },
+            { key: "products" as const, Icon: Package, label: "Products", desc: "Rice costing sheets — recovery %, purchase rate, by-products. Auto-calculates FOB per PMT.", count: products.length },
             { key: "master" as const, Icon: List, label: "Master Prices", desc: "Shared milling & handling charges (per-kg). Update once — all rice products recalculate.", count: master.charges.length },
-            { key: "pricelist" as const, Icon: DollarSign, label: "Price List", desc: "Calculated rice price list, FOB / CNF per metric ton.", count: products.length },
+            { key: "pricelist" as const, Icon: DollarSign, label: "Price List", desc: "Calculated rice price list, FOB per metric ton.", count: products.length },
             { key: "brands" as const, Icon: Tag, label: "Brands & Categories", desc: "Rice brands and categories. Tag each rice product to a brand and category.", count: brands.length + categories.length },
           ]).map(({ key, Icon, label, desc, count }) => (
             <button key={key} onClick={() => { setTab(key); setSearch(""); }}
@@ -237,6 +238,8 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
               <p className="text-[11px] text-muted mt-1 leading-relaxed">{desc}</p>
             </button>
           ))}
+          {/* CNF builder + client list are shared across all divisions */}
+          <CnfCards />
         </div>
       )}
 
