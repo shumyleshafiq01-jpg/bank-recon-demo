@@ -6,7 +6,7 @@ const HEADERS = ["key", "value"];
 
 async function init() { await ensureSheet(SHEET, HEADERS); }
 
-const KEYS = ["fcRate", "whtPct", "servicePct", "edsPct", "courierPct", "interestPct", "profit", "packagingMaterial", "defaultFreight"] as const;
+const KEYS = ["fcRate", "whtPct", "servicePct", "edsPct", "courierPct", "interestPct", "profit", "packagingMaterial", "defaultFreight", "bagDollarRate", "bagOverheadPct"] as const;
 
 export async function GET() {
   try {
@@ -25,6 +25,8 @@ export async function GET() {
       profit: num("profit", RICE_DEFAULT_SETTINGS.profit),
       packagingMaterial: num("packagingMaterial", RICE_DEFAULT_SETTINGS.packagingMaterial),
       defaultFreight: num("defaultFreight", RICE_DEFAULT_SETTINGS.defaultFreight),
+      bagDollarRate: num("bagDollarRate", RICE_DEFAULT_SETTINGS.bagDollarRate),
+      bagOverheadPct: num("bagOverheadPct", RICE_DEFAULT_SETTINGS.bagOverheadPct),
     });
   } catch {
     return Response.json(RICE_DEFAULT_SETTINGS);

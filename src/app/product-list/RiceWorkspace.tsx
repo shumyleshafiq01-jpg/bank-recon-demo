@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { ArrowLeft, Plus, Trash2, Pencil, X, Save, Search, Package, List, LayoutGrid, DollarSign, Settings2, Tag, Upload } from "lucide-react";
 import {
-  calcRice, RiceProduct, RiceMaster, RiceSettings, RiceProductByproduct,
+  calcRice, calcBagRate, RiceProduct, RiceMaster, RiceSettings, RiceProductByproduct, RiceBag,
   RICE_DEFAULT_SETTINGS, RICE_DEFAULT_PRODUCT_BYPRODUCTS,
 } from "@/lib/rice-costing";
 import CnfCards from "./CnfCards";
@@ -50,7 +50,8 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
   const [loadError, setLoadError] = useState(false);
 
   const [products, setProducts] = useState<RiceProduct[]>([]);
-  const [master, setMaster] = useState<RiceMaster>({ byproducts: [], charges: [], bags: [] });
+  const [master, setMaster] = useState<RiceMaster>({ byproducts: [], charges: [] });
+  const [bags, setBags] = useState<RiceBag[]>([]);
   const [settings, setSettings] = useState<RiceSettings>({ ...RICE_DEFAULT_SETTINGS });
   const [brands, setBrands] = useState<RiceBrand[]>([]);
   const [categories, setCategories] = useState<RiceCategory[]>([]);
@@ -70,18 +71,20 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
 
   const load = useCallback(async () => {
     setLoading(true); setLoadError(false);
-    const [p, m, s, b, c] = await Promise.all([
+    const [p, m, s, b, c, bg] = await Promise.all([
       getJson<{ products: RiceProduct[] }>("/api/product-list/rice-products", { products: [] }),
-      getJson<RiceMaster>("/api/product-list/rice-master", { byproducts: [], charges: [], bags: [] }),
+      getJson<RiceMaster>("/api/product-list/rice-master", { byproducts: [], charges: [] }),
       getJson<RiceSettings>("/api/product-list/rice-settings", { ...RICE_DEFAULT_SETTINGS }),
       getJson<{ brands: RiceBrand[] }>("/api/product-list/rice-brands", { brands: [] }),
       getJson<{ categories: RiceCategory[] }>("/api/product-list/rice-categories", { categories: [] }),
+      getJson<{ bags: RiceBag[] }>("/api/product-list/rice-bags", { bags: [] }),
     ]);
     setProducts(p.products ?? []);
-    setMaster({ byproducts: m.byproducts ?? [], charges: m.charges ?? [], bags: m.bags ?? [] });
+    setMaster({ byproducts: m.byproducts ?? [], charges: m.charges ?? [] });
     setSettings(s);
     setBrands(b.brands ?? []);
     setCategories(c.categories ?? []);
+    setBags(bg.bags ?? []);
     setLoading(false);
   }, []);
 
@@ -111,10 +114,26 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
     await load();
   }
 
+  /* ─── bags (calculator) — optimistic local update, persist in background */
+  async function saveBag(b: RiceBag) {
+    setBags(prev => prev.some(x => x.id === b.id) ? prev.map(x => x.id === b.id ? b : x) : [...prev, b]);
+    await fetch("/api/product-list/rice-bags", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "upsert", bag: b }) });
+  }
+  async function deleteBag(id: string) {
+    setBags(prev => prev.filter(x => x.id !== id));
+    await fetch("/api/product-list/rice-bags", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete", id }) });
+  }
+
   /* ─── settings */
   async function saveSettings(s: RiceSettings) {
     setSettings(s); setShowSettings(false);
     await fetch("/api/product-list/rice-settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(s) });
+  }
+  // Persist just the bag-calculator settings (dollar rate / overhead) inline.
+  async function saveBagSettings(patch: Partial<RiceSettings>) {
+    const next = { ...settings, ...patch };
+    setSettings(next);
+    await fetch("/api/product-list/rice-settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(next) });
   }
 
   /* ─── brands */
@@ -226,7 +245,7 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
           {([
             { key: "products" as const, Icon: Package, label: "Products", desc: "Rice costing sheets — recovery %, purchase rate, by-products. Auto-calculates FOB per PMT.", count: products.length },
-            { key: "master" as const, Icon: List, label: "Master Prices", desc: "Shared milling & handling charges (per-kg) + bag-packaging surcharges (per-PMT). Update once — all rice products recalculate.", count: master.charges.length + master.bags.length },
+            { key: "master" as const, Icon: List, label: "Master Prices", desc: "Milling & handling charges (per-kg) + bag packaging calculator ($/PMT). Update once — all rice pricing recalculates.", count: master.charges.length + bags.length },
             { key: "pricelist" as const, Icon: DollarSign, label: "Price List", desc: "Calculated rice price list, FOB per metric ton.", count: products.length },
             { key: "brands" as const, Icon: Tag, label: "Brands & Categories", desc: "Rice brands and categories. Tag each rice product to a brand and category.", count: brands.length + categories.length },
           ]).map(({ key, Icon, label, desc, count }) => (
@@ -286,14 +305,15 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
 
       {/* ── MASTER PRICES TAB ── */}
       {tab === "master" && (
-        <div className="space-y-3">
-          <p className="text-[11px] text-muted">Milling &amp; handling charges (per-kg) and bag-packaging surcharges (per-PMT) are shared across all rice products. By-product resale rates are set per-product when creating a product, since they vary by product.</p>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div className="space-y-6">
+          <p className="text-[11px] text-muted">Milling &amp; handling charges (per-kg) are shared across all rice products. By-product resale rates are set per-product. Bag packaging $/PMT is calculated from component prices below and added at CNF.</p>
+          <div className="max-w-xl">
             <MasterTable title="Milling & Handling Charges (PKR/kg)" kind="charge" items={master.charges}
               onSave={(it) => requireAuth(() => saveMasterItem("charge", it))} onDelete={(id) => requireAuth(() => deleteMasterItem(id))} />
-            <MasterTable title="Bag Packaging ($/PMT — added at CNF)" kind="bag" items={master.bags}
-              onSave={(it) => requireAuth(() => saveMasterItem("bag", it))} onDelete={(id) => requireAuth(() => deleteMasterItem(id))} />
           </div>
+          <BagCalculator bags={bags} dollarRate={settings.bagDollarRate} overheadPct={settings.bagOverheadPct}
+            onSave={(b) => requireAuth(() => saveBag(b))} onDelete={(id) => requireAuth(() => deleteBag(id))}
+            onSaveSettings={(p) => requireAuth(() => saveBagSettings(p))} />
         </div>
       )}
 
@@ -448,6 +468,92 @@ function MasterTable({ title, kind, items, onSave, onDelete }: {
   );
 }
 
+/* ═══════════ Bag packaging calculator */
+function BagCalculator({ bags, dollarRate, overheadPct, onSave, onDelete, onSaveSettings }: {
+  bags: RiceBag[]; dollarRate: number; overheadPct: number;
+  onSave: (b: RiceBag) => void; onDelete: (id: string) => void; onSaveSettings: (patch: Partial<RiceSettings>) => void;
+}) {
+  const [rows, setRows] = useState<RiceBag[]>(bags);
+  useEffect(() => setRows(bags), [bags]);
+  const [dr, setDr] = useState(dollarRate);
+  const [oh, setOh] = useState(overheadPct);
+  useEffect(() => { setDr(dollarRate); setOh(overheadPct); }, [dollarRate, overheadPct]);
+
+  const patch = (i: number, p: Partial<RiceBag>) => setRows(rs => rs.map((b, j) => j === i ? { ...b, ...p } : b));
+  const addRow = () => {
+    const type = rows.length ? rows[rows.length - 1].type : "NON WOVEN";
+    const nb: RiceBag = { id: genId(), type, sizeLabel: "", outerQty: 0, outerPKR: 0, innerQty: 0, innerPKR: 0, masterQty: 0, masterPKR: 0, labourPKR: 30, sortOrder: rows.length };
+    setRows(rs => [...rs, nb]);
+    onSave(nb);
+  };
+  const numCell = (i: number, key: keyof RiceBag, val: number, w = "w-16") => (
+    <input type="number" step="0.01" value={val}
+      onChange={e => patch(i, { [key]: parseFloat(e.target.value) || 0 } as Partial<RiceBag>)}
+      onBlur={() => onSave(rows[i])}
+      className={`${w} bg-transparent border border-transparent hover:border-border focus:border-amber-500/50 rounded px-1 py-0.5 text-right font-mono text-foreground focus:outline-none`} />
+  );
+
+  return (
+    <div className="bg-surface rounded-2xl border border-border overflow-hidden">
+      <div className="px-4 py-3 border-b border-border flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h3 className="text-xs font-semibold text-amber-600 uppercase tracking-wide">Bag Packaging Calculator ($/PMT)</h3>
+          <p className="text-[10px] text-muted mt-0.5">$/PMT = material + {oh}% overhead + labour, converted at the bag dollar rate. Added at CNF. Add PP / PLASTIC / BOPP types here as needed.</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-1.5 text-[11px] text-muted">Dollar rate
+            <input type="number" step="0.01" value={dr} onChange={e => setDr(parseFloat(e.target.value) || 0)} onBlur={() => dr !== dollarRate && onSaveSettings({ bagDollarRate: dr })}
+              className="w-16 bg-background border border-border rounded px-1.5 py-1 text-right font-mono text-foreground focus:outline-none focus:border-amber-500/50" />
+          </label>
+          <label className="flex items-center gap-1.5 text-[11px] text-muted">Overhead %
+            <input type="number" step="0.01" value={oh} onChange={e => setOh(parseFloat(e.target.value) || 0)} onBlur={() => oh !== overheadPct && onSaveSettings({ bagOverheadPct: oh })}
+              className="w-14 bg-background border border-border rounded px-1.5 py-1 text-right font-mono text-foreground focus:outline-none focus:border-amber-500/50" />
+          </label>
+          <button onClick={addRow} className="flex items-center gap-1 text-xs px-3 py-1.5 bg-amber-500 hover:bg-amber-500/80 text-white rounded-lg cursor-pointer"><Plus className="w-3 h-3" /> Add bag</button>
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs whitespace-nowrap">
+          <thead><tr className="text-muted bg-surface-light/20">
+            <th className="px-3 py-2 text-left font-semibold">Type</th>
+            <th className="px-3 py-2 text-left font-semibold">Size</th>
+            <th className="px-3 py-2 text-right font-semibold">Outer qty</th>
+            <th className="px-3 py-2 text-right font-semibold">Outer PKR</th>
+            <th className="px-3 py-2 text-right font-semibold">Inner qty</th>
+            <th className="px-3 py-2 text-right font-semibold">Inner PKR</th>
+            <th className="px-3 py-2 text-right font-semibold">Master qty</th>
+            <th className="px-3 py-2 text-right font-semibold">Master PKR</th>
+            <th className="px-3 py-2 text-right font-semibold">Labour PKR</th>
+            <th className="px-3 py-2 text-right font-semibold">$/PMT</th>
+            <th className="w-[40px]"></th>
+          </tr></thead>
+          <tbody>
+            {rows.length === 0 && <tr><td colSpan={11} className="px-4 py-6 text-center text-muted">No bags yet. Click &quot;Add bag&quot;.</td></tr>}
+            {rows.map((b, i) => {
+              const c = calcBagRate(b, dr, oh);
+              return (
+                <tr key={b.id} className={i % 2 ? "bg-surface-light/10" : ""}>
+                  <td className="px-3 py-1"><input value={b.type} onChange={e => patch(i, { type: e.target.value })} onBlur={() => onSave(rows[i])} className="w-28 bg-transparent border border-transparent hover:border-border focus:border-amber-500/50 rounded px-1 py-0.5 text-foreground focus:outline-none" /></td>
+                  <td className="px-3 py-1"><input value={b.sizeLabel} onChange={e => patch(i, { sizeLabel: e.target.value })} onBlur={() => onSave(rows[i])} placeholder="5 KG X 4" className="w-24 bg-transparent border border-transparent hover:border-border focus:border-amber-500/50 rounded px-1 py-0.5 text-foreground focus:outline-none" /></td>
+                  <td className="px-3 py-1 text-right">{numCell(i, "outerQty", b.outerQty)}</td>
+                  <td className="px-3 py-1 text-right">{numCell(i, "outerPKR", b.outerPKR)}</td>
+                  <td className="px-3 py-1 text-right">{numCell(i, "innerQty", b.innerQty)}</td>
+                  <td className="px-3 py-1 text-right">{numCell(i, "innerPKR", b.innerPKR)}</td>
+                  <td className="px-3 py-1 text-right">{numCell(i, "masterQty", b.masterQty)}</td>
+                  <td className="px-3 py-1 text-right">{numCell(i, "masterPKR", b.masterPKR)}</td>
+                  <td className="px-3 py-1 text-right">{numCell(i, "labourPKR", b.labourPKR, "w-14")}</td>
+                  <td className="px-3 py-1 text-right font-mono font-bold text-amber-600">${fmt2(c.finalPmt)}</td>
+                  <td className="px-2 py-1 text-center"><button onClick={() => onDelete(b.id)} className="p-1 text-muted hover:text-red-400 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 /* ═══════════ Product costing form (the ERP sheet) */
 function ProductForm({ product, master, settings, brands, categories, onClose, onSave }: {
   product: RiceProduct; master: RiceMaster; settings: RiceSettings; brands: RiceBrand[]; categories: RiceCategory[];
@@ -575,6 +681,7 @@ function SettingsForm({ settings, onClose, onSave }: { settings: RiceSettings; o
     ["fcRate", "FC Rate (PKR→USD)"], ["whtPct", "W.H.T %"], ["servicePct", "Service Charges %"],
     ["edsPct", "EDS %"], ["courierPct", "Courier %"], ["interestPct", "Interest %"],
     ["profit", "Profit (USD/shipment)"], ["packagingMaterial", "Packaging Material (USD)"], ["defaultFreight", "Default Freight (USD)"],
+    ["bagDollarRate", "Bag Dollar Rate (PKR)"], ["bagOverheadPct", "Bag Overhead %"],
   ];
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>

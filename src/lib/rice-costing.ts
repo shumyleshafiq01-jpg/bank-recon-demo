@@ -28,16 +28,44 @@
 export interface RiceByproductRate { id: string; name: string; rate: number; sortOrder: number; }   // PKR/kg resale value (master)
 export interface RiceChargeRate    { id: string; name: string; rate: number; sortOrder: number; }   // PKR/kg milling/handling (master)
 
-// A bag-packaging option — the extra USD-per-metric-ton charged for packing the
-// rice into this bag type (e.g. 5KG bag = +$61/PMT, 10KG bag = +$30/PMT). Added
-// at CNF time, on top of freight. Some of these are derived by a formula and
-// some are hard-coded by the accountant — stored here as an editable $/PMT.
-export interface RiceBagRate { id: string; name: string; rate: number; sortOrder: number; }
-
 export interface RiceMaster {
   byproducts: RiceByproductRate[];
   charges: RiceChargeRate[];
-  bags: RiceBagRate[];
+}
+
+// A bag-packaging option. Its $/PMT surcharge is CALCULATED from component costs
+// (outer bag + inner bag + master outer + labour, + overhead%) — see
+// calcBagRate. Added at CNF time on top of freight. Bag types (NON WOVEN, PP,
+// PLASTIC, BOPP…) and sizes are all maintained in the bag calculator; new types
+// can be added freely.
+export interface RiceBag {
+  id: string;
+  type: string;        // NON WOVEN, PP, PLASTIC, BOPP…
+  sizeLabel: string;   // e.g. "5 KG X 4"
+  outerQty: number;    // outer bags per PMT
+  outerPKR: number;    // PKR per outer bag
+  innerQty: number;    // inner bags per PMT
+  innerPKR: number;    // PKR per inner bag
+  masterQty: number;   // master-outer bags per PMT
+  masterPKR: number;   // PKR per master-outer bag
+  labourPKR: number;   // PKR labour per master-outer bag
+  sortOrder: number;
+}
+
+export interface RiceBagCalc { material: number; labour: number; overhead: number; finalPmt: number; }
+
+// Reproduces Hafeez's "Rice Bags Rates" sheet exactly:
+//   material = (outerQty·outerPKR + innerQty·innerPKR + masterQty·masterPKR) / $rate
+//   labour   = labourPKR · masterQty / $rate
+//   overhead = material · overhead%
+//   FINAL $/PMT = material + overhead + labour
+export function calcBagRate(bag: RiceBag, dollarRate: number, overheadPct: number): RiceBagCalc {
+  const dr = dollarRate || 275;
+  const material = (bag.outerQty * bag.outerPKR + bag.innerQty * bag.innerPKR + bag.masterQty * bag.masterPKR) / dr;
+  const labour = (bag.labourPKR * bag.masterQty) / dr;
+  const overhead = material * ((overheadPct || 0) / 100);
+  const r = (n: number) => Math.round(n * 100) / 100;
+  return { material: r(material), labour: r(labour), overhead: r(overhead), finalPmt: r(material + overhead + labour) };
 }
 
 export interface RiceSettings {
@@ -50,6 +78,8 @@ export interface RiceSettings {
   profit: number;          // flat USD per shipment
   packagingMaterial: number; // flat USD per shipment
   defaultFreight: number;  // USD, for CNF
+  bagDollarRate: number;   // PKR→USD used in the bag calculator (editable; ~280 today)
+  bagOverheadPct: number;  // overhead % applied to bag material cost (15% on the sheet)
 }
 
 // A rice product's own by-product breakdown line. By-products vary per product,
@@ -161,11 +191,18 @@ export const RICE_DEFAULT_BYPRODUCTS: { name: string; rate: number }[] = [
   { name: "WEIGHT LOSS", rate: -300 },
 ];
 
-// Bag packaging surcharges ($/PMT). Seeded with the two known from the sheet;
-// the accountant maintains the rest (and the formula behind them) here.
-export const RICE_DEFAULT_BAGS: { name: string; rate: number }[] = [
-  { name: "5KG BAG", rate: 61 },
-  { name: "10KG BAG", rate: 30 },
+// Bag component prices — seeded from Hafeez's "Rice Bags Rates" sheet (NON WOVEN,
+// all 8 sizes). The accountant maintains these and adds other types (PP/PLASTIC/
+// BOPP) later; the $/PMT is computed from them via calcBagRate.
+export const RICE_DEFAULT_BAGS: Omit<RiceBag, "id" | "sortOrder">[] = [
+  { type: "NON WOVEN", sizeLabel: "40 KG X 1", outerQty: 25,  outerPKR: 120, innerQty: 25,  innerPKR: 25,    masterQty: 25, masterPKR: 35,   labourPKR: 30 },
+  { type: "NON WOVEN", sizeLabel: "35 KG X 1", outerQty: 29,  outerPKR: 104, innerQty: 25,  innerPKR: 22.5,  masterQty: 25, masterPKR: 33,   labourPKR: 30 },
+  { type: "NON WOVEN", sizeLabel: "30 KG X 1", outerQty: 34,  outerPKR: 92,  innerQty: 34,  innerPKR: 20,    masterQty: 34, masterPKR: 28.5, labourPKR: 30 },
+  { type: "NON WOVEN", sizeLabel: "25 KG X 1", outerQty: 40,  outerPKR: 85,  innerQty: 40,  innerPKR: 20,    masterQty: 34, masterPKR: 28.5, labourPKR: 30 },
+  { type: "NON WOVEN", sizeLabel: "20 KG X 1", outerQty: 50,  outerPKR: 80,  innerQty: 50,  innerPKR: 19.55, masterQty: 50, masterPKR: 25,   labourPKR: 30 },
+  { type: "NON WOVEN", sizeLabel: "10 KG X 2", outerQty: 100, outerPKR: 70,  innerQty: 100, innerPKR: 15.52, masterQty: 50, masterPKR: 25,   labourPKR: 30 },
+  { type: "NON WOVEN", sizeLabel: "5 KG X 4",  outerQty: 200, outerPKR: 45,  innerQty: 200, innerPKR: 14.37, masterQty: 50, masterPKR: 25,   labourPKR: 30 },
+  { type: "NON WOVEN", sizeLabel: "2.5 KG X 8", outerQty: 400, outerPKR: 35, innerQty: 400, innerPKR: 8.5,   masterQty: 25, masterPKR: 35,   labourPKR: 30 },
 ];
 
 export const RICE_DEFAULT_CHARGES: { name: string; rate: number }[] = [
@@ -207,4 +244,6 @@ export const RICE_DEFAULT_SETTINGS: RiceSettings = {
   profit: 50,
   packagingMaterial: 6,
   defaultFreight: 0,
+  bagDollarRate: 280,
+  bagOverheadPct: 15,
 };
