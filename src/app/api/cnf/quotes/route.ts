@@ -1,4 +1,4 @@
-import { ensureSheet, readSheet, updateRow, writeRows, deleteRow } from "@/lib/google-sheets";
+import { ensureSheet, readSheet, updateRow, writeRows, deleteRow, clearAndWrite } from "@/lib/google-sheets";
 
 const SHEET = "CNF_Quotes";
 const HEADERS = [
@@ -59,9 +59,10 @@ export async function POST(request: Request) {
   try {
     await init();
     const body = await request.json() as {
-      action: "create" | "archive" | "unarchive" | "delete";
+      action: "create" | "archive" | "unarchive" | "delete" | "deleteMany";
       quote?: Record<string, unknown>;
       id?: string;
+      ids?: string[];
     };
 
     if (body.action === "create" && body.quote) {
@@ -99,6 +100,21 @@ export async function POST(request: Request) {
       const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.id);
       if (idx > 0) await deleteRow(SHEET, idx + 1);
       return Response.json({ deleted: true });
+    }
+
+    // Bulk delete — rewrite the sheet with only the rows we're keeping. Doing it
+    // in one atomic write (rather than N deleteRow calls) avoids row-index shift
+    // bugs and is far faster for "delete all".
+    if (body.action === "deleteMany" && Array.isArray(body.ids)) {
+      const ids = new Set(body.ids);
+      if (ids.size === 0) return Response.json({ deleted: 0 });
+      const rows = await readSheet(SHEET);
+      if (rows.length === 0) return Response.json({ deleted: 0 });
+      const header = rows[0];
+      const kept = rows.slice(1).filter(r => r[0] && !ids.has(r[0]));
+      const removed = (rows.length - 1) - kept.length;
+      await clearAndWrite(SHEET, [header, ...kept]);
+      return Response.json({ deleted: removed });
     }
 
     return Response.json({ error: "Unknown action" }, { status: 400 });

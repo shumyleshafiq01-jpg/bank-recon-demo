@@ -45,9 +45,10 @@ export interface RiceSettings {
   defaultFreight: number;  // USD, for CNF
 }
 
-// A rice product's own by-product breakdown line — references a master
-// by-product by name, carries this product's own recovery percentage for it.
-export interface RiceProductByproduct { name: string; percent: number; }
+// A rice product's own by-product breakdown line. By-products vary per product,
+// so each line carries its own name, recovery percentage AND resale rate
+// (PKR/kg) — there is no shared master by-product table.
+export interface RiceProductByproduct { name: string; percent: number; rate: number; }
 
 export interface RiceProduct {
   id: string;
@@ -91,15 +92,13 @@ export function calcRice(product: RiceProduct, master: RiceMaster, settings: Ric
   const rawInput = qty / (recovery / 100);
   const rawCost = rawInput * (product.purchaseRate || 0);
 
-  const rateByName = new Map(master.byproducts.map(b => [b.name, b.rate]));
   let byproductCredit = 0;
   for (const bp of product.byproducts) {
-    const rate = rateByName.get(bp.name) ?? 0;
     // The ERP rounds each by-product's input quantity to 2 decimals (as shown
     // in its INPUT QUANTITY column) before multiplying by the rate — replicate
     // that so our totals tie out to the accountant's sheet to the paisa.
     const kg = r2((bp.percent / 100) * rawInput);
-    byproductCredit += kg * rate;
+    byproductCredit += kg * (bp.rate || 0);
   }
 
   const netHead = rawCost - byproductCredit;
@@ -167,19 +166,21 @@ export const RICE_DEFAULT_CHARGES: { name: string; rate: number }[] = [
   { name: "ADMINISTRATIVE EXPENSE", rate: 0.75 },
 ];
 
-// Default per-product by-product percentages from the sample sheet.
+// Default per-product by-product breakdown from the sample sheet (name, %, rate).
+// A fresh rice product is pre-filled with these; the accountant then edits,
+// adds or removes lines to match that specific product's actual by-products.
 export const RICE_DEFAULT_PRODUCT_BYPRODUCTS: RiceProductByproduct[] = [
-  { name: "BROKEN/B2", percent: 1.65 },
-  { name: "CSR", percent: 1.50 },
-  { name: "PADDY", percent: 0.00 },
-  { name: "PONIA", percent: 1.00 },
-  { name: "CHOBA", percent: 0.00 },
-  { name: "NIKO", percent: 0.05 },
-  { name: "POWDER", percent: 2.04 },
-  { name: "STONE + RICE", percent: 0.05 },
-  { name: "SWEEPING", percent: 1.67 },
-  { name: "SHORT GRAIN", percent: 1.49 },
-  { name: "WEIGHT LOSS", percent: 0.55 },
+  { name: "BROKEN/B2", percent: 1.65, rate: 90 },
+  { name: "CSR", percent: 1.50, rate: 140 },
+  { name: "PADDY", percent: 0.00, rate: 80 },
+  { name: "PONIA", percent: 1.00, rate: 110 },
+  { name: "CHOBA", percent: 0.00, rate: 0 },
+  { name: "NIKO", percent: 0.05, rate: 50 },
+  { name: "POWDER", percent: 2.04, rate: 35 },
+  { name: "STONE + RICE", percent: 0.05, rate: 50 },
+  { name: "SWEEPING", percent: 1.67, rate: 145 },
+  { name: "SHORT GRAIN", percent: 1.49, rate: 140 },
+  { name: "WEIGHT LOSS", percent: 0.55, rate: -300 },
 ];
 
 export const RICE_DEFAULT_SETTINGS: RiceSettings = {

@@ -247,7 +247,7 @@ export default async function CNFSharePage({ params }: { params: Promise<{ id: s
                                   <span>$</span><span>{fmtUSD(discounted)}</span>
                                 </div>
                                 <div style={{ textAlign: "center", fontSize: 16, fontWeight: 700, color: "#dc2626", marginTop: 3 }}>
-                                  -{pct}% (${fmtUSD(original - discounted)})
+                                  Discount {pct}% applied
                                 </div>
                               </div>
                             );

@@ -55,6 +55,7 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
   const [search, setSearch] = useState("");
   const [plView, setPlView] = useState<"grid" | "list">("grid");
   const [plBrandFilter, setPlBrandFilter] = useState("");
+  const [plCategoryFilter, setPlCategoryFilter] = useState("");
   const [plSort, setPlSort] = useState<"name-asc" | "name-desc" | "price-asc" | "price-desc">("name-asc");
 
   // modals
@@ -140,13 +141,13 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
   const filteredBrands = brands.filter(b => !search || b.name.toLowerCase().includes(search.toLowerCase()));
 
   const pricelistRows = filteredProducts
-    .filter(p => !plBrandFilter || p.brandId === plBrandFilter)
+    .filter(p => (!plBrandFilter || p.brandId === plBrandFilter) && (!plCategoryFilter || p.category === plCategoryFilter))
     .map(p => ({ p, c: calc(p) }))
     .sort((a, b) => {
       switch (plSort) {
         case "name-desc": return b.p.name.localeCompare(a.p.name);
-        case "price-asc": return a.c.cnfPerPmt - b.c.cnfPerPmt;
-        case "price-desc": return b.c.cnfPerPmt - a.c.cnfPerPmt;
+        case "price-asc": return a.c.fobPerPmt - b.c.fobPerPmt;
+        case "price-desc": return b.c.fobPerPmt - a.c.fobPerPmt;
         default: return a.p.name.localeCompare(b.p.name);
       }
     });
@@ -198,11 +199,15 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
                 <option value="">All Brands</option>
                 {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
               </select>
+              <select value={plCategoryFilter} onChange={e => setPlCategoryFilter(e.target.value)} className="bg-surface border border-border rounded-xl px-3 py-2.5 text-sm text-foreground focus:outline-none focus:border-amber-500/50 cursor-pointer">
+                <option value="">All Categories</option>
+                {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+              </select>
               <select value={plSort} onChange={e => setPlSort(e.target.value as typeof plSort)} className="bg-surface border border-border rounded-xl px-3 py-2.5 text-sm text-foreground focus:outline-none focus:border-amber-500/50 cursor-pointer">
                 <option value="name-asc">Product (A–Z)</option>
                 <option value="name-desc">Product (Z–A)</option>
-                <option value="price-asc">CNF/PMT (Low → High)</option>
-                <option value="price-desc">CNF/PMT (High → Low)</option>
+                <option value="price-asc">FOB/PMT (Low → High)</option>
+                <option value="price-desc">FOB/PMT (High → Low)</option>
               </select>
               <div className="flex items-center border border-border rounded-xl overflow-hidden">
                 <button onClick={() => setPlView("grid")} title="Grid" className={`p-2.5 cursor-pointer ${plView === "grid" ? "bg-amber-500/15 text-amber-500" : "text-muted hover:text-foreground"}`}><LayoutGrid className="w-4 h-4" /></button>
@@ -218,7 +223,7 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-4">
           {([
             { key: "products" as const, Icon: Package, label: "Products", desc: "Rice costing sheets — recovery %, purchase rate, by-products. Auto-calculates FOB / CNF per PMT.", count: products.length },
-            { key: "master" as const, Icon: List, label: "Master Prices", desc: "By-product resale rates & milling/handling charges. Update once — all rice products recalculate.", count: master.byproducts.length + master.charges.length },
+            { key: "master" as const, Icon: List, label: "Master Prices", desc: "Shared milling & handling charges (per-kg). Update once — all rice products recalculate.", count: master.charges.length },
             { key: "pricelist" as const, Icon: DollarSign, label: "Price List", desc: "Calculated rice price list, FOB / CNF per metric ton.", count: products.length },
             { key: "brands" as const, Icon: Tag, label: "Brands & Categories", desc: "Rice brands and categories. Tag each rice product to a brand and category.", count: brands.length + categories.length },
           ]).map(({ key, Icon, label, desc, count }) => (
@@ -245,12 +250,11 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
               <th className="px-4 py-3 text-left font-semibold">Product Name</th>
               <th className="px-4 py-3 text-left font-semibold w-[110px]">Brand</th>
               <th className="px-4 py-3 text-right font-semibold w-[90px]">Recovery</th>
-              <th className="px-4 py-3 text-right font-semibold w-[120px]">FOB / PMT</th>
-              <th className="px-4 py-3 text-right font-semibold w-[120px]">CNF / PMT</th>
+              <th className="px-4 py-3 text-right font-semibold w-[140px]">FOB / PMT</th>
               <th className="px-4 py-3 text-center w-[80px]">Actions</th>
             </tr></thead>
             <tbody>
-              {filteredProducts.length === 0 && <tr><td colSpan={8} className="px-4 py-10 text-center text-muted">No rice products yet. Click &quot;Add Rice Product&quot;.</td></tr>}
+              {filteredProducts.length === 0 && <tr><td colSpan={7} className="px-4 py-10 text-center text-muted">No rice products yet. Click &quot;Add Rice Product&quot;.</td></tr>}
               {filteredProducts.map((p, i) => {
                 const c = calc(p);
                 return (
@@ -261,7 +265,6 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
                     <td className="px-4 py-3">{p.brandId ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-400 font-semibold">{brandName(p.brandId)}</span> : <span className="text-[10px] text-red-400">Unassigned</span>}</td>
                     <td className="px-4 py-3 text-right text-muted">{p.recoveryPct}%</td>
                     <td className="px-4 py-3 text-right font-mono font-bold text-amber-600">${fmt2(c.fobPerPmt)}</td>
-                    <td className="px-4 py-3 text-right font-mono font-bold text-green-500">${fmt2(c.cnfPerPmt)}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-center gap-1">
                         <button onClick={() => requireAuth(() => setEditingProduct({ ...p }))} className="p-1 text-muted hover:text-amber-500 cursor-pointer"><Pencil className="w-3.5 h-3.5" /></button>
@@ -278,11 +281,12 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
 
       {/* ── MASTER PRICES TAB ── */}
       {tab === "master" && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          <MasterTable title="By-product Resale Rates (PKR/kg)" kind="byproduct" items={master.byproducts}
-            onSave={(it) => requireAuth(() => saveMasterItem("byproduct", it))} onDelete={(id) => requireAuth(() => deleteMasterItem(id))} />
-          <MasterTable title="Milling & Handling Charges (PKR/kg)" kind="charge" items={master.charges}
-            onSave={(it) => requireAuth(() => saveMasterItem("charge", it))} onDelete={(id) => requireAuth(() => deleteMasterItem(id))} />
+        <div className="space-y-3">
+          <p className="text-[11px] text-muted">Milling &amp; handling charges are shared across all rice products (per-kg). By-product resale rates are set per-product when creating a product, since they vary by product.</p>
+          <div className="max-w-xl">
+            <MasterTable title="Milling & Handling Charges (PKR/kg)" kind="charge" items={master.charges}
+              onSave={(it) => requireAuth(() => saveMasterItem("charge", it))} onDelete={(id) => requireAuth(() => deleteMasterItem(id))} />
+          </div>
         </div>
       )}
 
@@ -349,9 +353,10 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
                   {p.brandId && <span className="text-[9px] px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-400 font-semibold">{brandName(p.brandId)}</span>}
                 </div>
                 <p className="text-sm font-bold text-foreground mt-0.5">{p.name}</p>
+                {p.category && <p className="text-[10px] text-muted mt-0.5">{p.category}</p>}
                 <div className="flex items-center justify-between mt-3">
-                  <div><p className="text-[10px] text-muted">FOB / PMT</p><p className="text-lg font-bold text-amber-600">${fmt2(c.fobPerPmt)}</p></div>
-                  <div className="text-right"><p className="text-[10px] text-muted">CNF / PMT</p><p className="text-lg font-bold text-green-500">${fmt2(c.cnfPerPmt)}</p></div>
+                  <div><p className="text-[10px] text-muted">FOB / PMT</p><p className="text-xl font-bold text-amber-600">${fmt2(c.fobPerPmt)}</p></div>
+                  <div className="text-right"><p className="text-[10px] text-muted">Recovery</p><p className="text-sm font-semibold text-muted">{p.recoveryPct}%</p></div>
                 </div>
               </div>
             </div>
@@ -363,21 +368,21 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
         <div className="bg-surface rounded-2xl border border-border overflow-hidden">
           <table className="w-full text-xs">
             <thead><tr className="bg-amber-500/10 text-amber-600">
-              <th className="px-4 py-3 text-left font-semibold w-[64px]">Image</th>
               <th className="px-4 py-3 text-left font-semibold">Product Name</th>
               <th className="px-4 py-3 text-left font-semibold w-[120px]">Brand</th>
-              <th className="px-4 py-3 text-right font-semibold w-[120px]">FOB / PMT</th>
-              <th className="px-4 py-3 text-right font-semibold w-[120px]">CNF / PMT</th>
+              <th className="px-4 py-3 text-left font-semibold w-[120px]">Category</th>
+              <th className="px-4 py-3 text-right font-semibold w-[90px]">Recovery</th>
+              <th className="px-4 py-3 text-right font-semibold w-[130px]">FOB / PMT</th>
             </tr></thead>
             <tbody>
               {pricelistRows.length === 0 && <tr><td colSpan={5} className="px-4 py-10 text-center text-muted">No rice products match.</td></tr>}
               {pricelistRows.map(({ p, c }, i) => (
                 <tr key={p.id} className={`hover:bg-amber-500/5 ${i % 2 ? "bg-surface-light/20" : ""}`}>
-                  <td className="px-4 py-2">{p.imageUrl ? <img src={p.imageUrl} alt={p.name} className="w-10 h-10 rounded-lg object-cover border border-border" /> : <div className="w-10 h-10 rounded-lg bg-amber-500/5 flex items-center justify-center"><Package className="w-4 h-4 text-amber-500/30" /></div>}</td>
                   <td className="px-4 py-3 font-semibold text-foreground">{p.name}</td>
                   <td className="px-4 py-3">{p.brandId ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-400 font-semibold">{brandName(p.brandId)}</span> : <span className="text-[10px] text-muted">—</span>}</td>
+                  <td className="px-4 py-3 text-muted">{p.category || "—"}</td>
+                  <td className="px-4 py-3 text-right text-muted">{p.recoveryPct}%</td>
                   <td className="px-4 py-3 text-right font-mono font-bold text-amber-600">${fmt2(c.fobPerPmt)}</td>
-                  <td className="px-4 py-3 text-right font-mono font-bold text-green-500">${fmt2(c.cnfPerPmt)}</td>
                 </tr>
               ))}
             </tbody>
@@ -441,23 +446,15 @@ function ProductForm({ product, master, settings, brands, categories, onClose, o
   product: RiceProduct; master: RiceMaster; settings: RiceSettings; brands: RiceBrand[]; categories: RiceCategory[];
   onClose: () => void; onSave: (p: RiceProduct) => void;
 }) {
-  // Merge product by-products with master by-product names so every master row
-  // shows up (percent 0 if this product hasn't set it).
-  const mergedByproducts = (): RiceProductByproduct[] => {
-    const byName = new Map(product.byproducts.map(b => [b.name, b.percent]));
-    return master.byproducts.map(m => ({ name: m.name, percent: byName.get(m.name) ?? 0 }));
-  };
-  const [draft, setDraft] = useState<RiceProduct>({ ...product, byproducts: mergedByproducts() });
-  const [uploading, setUploading] = useState(false);
+  // By-products are entered per-product (they vary by product), so the form owns
+  // the full list — name, %, and rate — with free add/edit/delete.
+  const [draft, setDraft] = useState<RiceProduct>({ ...product, byproducts: product.byproducts.map(b => ({ ...b })) });
   const upd = (k: keyof RiceProduct, v: unknown) => setDraft(d => ({ ...d, [k]: v }));
-  const setBp = (name: string, percent: number) => setDraft(d => ({ ...d, byproducts: d.byproducts.map(b => b.name === name ? { ...b, percent } : b) }));
+  const setBp = (i: number, patch: Partial<RiceProductByproduct>) => setDraft(d => ({ ...d, byproducts: d.byproducts.map((b, j) => j === i ? { ...b, ...patch } : b) }));
+  const addBp = () => setDraft(d => ({ ...d, byproducts: [...d.byproducts, { name: "", percent: 0, rate: 0 }] }));
+  const removeBp = (i: number) => setDraft(d => ({ ...d, byproducts: d.byproducts.filter((_, j) => j !== i) }));
   const c = calcRice(draft, master, settings);
-
-  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0]; if (!f) return;
-    setUploading(true);
-    try { const url = await uploadImage(f); if (url) upd("imageUrl", url); } finally { setUploading(false); }
-  }
+  const totalBpPct = Math.round(draft.byproducts.reduce((s, b) => s + (b.percent || 0), 0) * 100) / 100;
 
   const Row = ({ label, val, bold, color }: { label: string; val: string; bold?: boolean; color?: string }) => (
     <div className="flex items-center justify-between py-1 border-b border-border/40">
@@ -493,45 +490,46 @@ function ProductForm({ product, master, settings, brands, categories, onClose, o
                   <option value="">—</option>{categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
                 </select>
               </Field>
-              <Field className="col-span-3" label="Packaging Description"><input value={draft.packagingDesc} onChange={e => upd("packagingDesc", e.target.value)} placeholder="10 KG X 2 NON WOVEN BAGS…" className={inp} /></Field>
             </div>
 
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               <Field label="Quantity (kg)"><input type="number" step="1" value={draft.quantity} onChange={e => upd("quantity", parseFloat(e.target.value) || 0)} className={inp} /></Field>
               <Field label="Recovery %"><input type="number" step="0.01" value={draft.recoveryPct} onChange={e => upd("recoveryPct", parseFloat(e.target.value) || 0)} className={inp} /></Field>
-              <Field label="Purchase Rate"><input type="number" step="0.01" value={draft.purchaseRate} onChange={e => upd("purchaseRate", parseFloat(e.target.value) || 0)} className={inp} /></Field>
-              <Field label="Freight (USD)"><input type="number" step="0.01" value={draft.freight} onChange={e => upd("freight", parseFloat(e.target.value) || 0)} className={inp} /></Field>
-              <Field label="Image">
-                <label className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 border border-border rounded-lg cursor-pointer text-muted hover:text-foreground hover:border-amber-500/40">
-                  <Upload className="w-3 h-3" /> {uploading ? "…" : draft.imageUrl ? "Change" : "Upload"}
-                  <input type="file" accept="image/*" onChange={onFile} className="hidden" />
-                </label>
-              </Field>
+              <Field label="Purchase Rate (PKR/kg)"><input type="number" step="0.01" value={draft.purchaseRate} onChange={e => upd("purchaseRate", parseFloat(e.target.value) || 0)} className={inp} /></Field>
             </div>
 
-            {/* By-products */}
+            {/* By-products — entered per product (vary by product) */}
             <div className="bg-background/50 rounded-xl border border-border overflow-hidden">
               <div className="px-4 py-2 border-b border-border flex items-center justify-between">
-                <h4 className="text-[11px] font-semibold text-muted uppercase tracking-wide">By-product Recovery (% of raw input)</h4>
-                <span className="text-[10px] text-muted">rates from Master Prices</span>
+                <h4 className="text-[11px] font-semibold text-muted uppercase tracking-wide">By-products (% of raw input · resale rate)</h4>
+                <button onClick={addBp} className="flex items-center gap-1 text-[11px] text-amber-500 hover:text-amber-400 cursor-pointer"><Plus className="w-3 h-3" /> Add by-product</button>
               </div>
               <table className="w-full text-xs">
-                <thead><tr className="text-muted"><th className="px-4 py-1.5 text-left font-semibold">By-product</th><th className="px-4 py-1.5 text-right font-semibold w-[90px]">%</th><th className="px-4 py-1.5 text-right font-semibold w-[90px]">Rate</th><th className="px-4 py-1.5 text-right font-semibold w-[110px]">Value (PKR)</th></tr></thead>
+                <thead><tr className="text-muted"><th className="px-4 py-1.5 text-left font-semibold">By-product</th><th className="px-4 py-1.5 text-right font-semibold w-[80px]">%</th><th className="px-4 py-1.5 text-right font-semibold w-[90px]">Rate</th><th className="px-4 py-1.5 text-right font-semibold w-[110px]">Value (PKR)</th><th className="w-[40px]"></th></tr></thead>
                 <tbody>
-                  {draft.byproducts.map(bp => {
-                    const rate = master.byproducts.find(m => m.name === bp.name)?.rate ?? 0;
+                  {draft.byproducts.map((bp, i) => {
                     const kg = Math.round((bp.percent / 100) * c.rawInput * 100) / 100;
                     return (
-                      <tr key={bp.name}>
-                        <td className="px-4 py-1 text-foreground">{bp.name}</td>
-                        <td className="px-4 py-1 text-right"><input type="number" step="0.01" value={bp.percent} onChange={e => setBp(bp.name, parseFloat(e.target.value) || 0)} className="w-20 bg-transparent border border-transparent hover:border-border focus:border-amber-500/50 rounded px-1 py-0.5 text-right font-mono text-foreground focus:outline-none" /></td>
-                        <td className="px-4 py-1 text-right font-mono text-muted">{fmt2(rate)}</td>
-                        <td className="px-4 py-1 text-right font-mono text-muted">{fmt2(kg * rate)}</td>
+                      <tr key={i}>
+                        <td className="px-4 py-1"><input value={bp.name} onChange={e => setBp(i, { name: e.target.value })} placeholder="name" className="w-full bg-transparent border border-transparent hover:border-border focus:border-amber-500/50 rounded px-1 py-0.5 text-foreground focus:outline-none" /></td>
+                        <td className="px-4 py-1 text-right"><input type="number" step="0.01" value={bp.percent} onChange={e => setBp(i, { percent: parseFloat(e.target.value) || 0 })} className="w-16 bg-transparent border border-transparent hover:border-border focus:border-amber-500/50 rounded px-1 py-0.5 text-right font-mono text-foreground focus:outline-none" /></td>
+                        <td className="px-4 py-1 text-right"><input type="number" step="0.01" value={bp.rate} onChange={e => setBp(i, { rate: parseFloat(e.target.value) || 0 })} className="w-20 bg-transparent border border-transparent hover:border-border focus:border-amber-500/50 rounded px-1 py-0.5 text-right font-mono text-foreground focus:outline-none" /></td>
+                        <td className="px-4 py-1 text-right font-mono text-muted">{fmt2(kg * bp.rate)}</td>
+                        <td className="px-2 py-1 text-center"><button onClick={() => removeBp(i)} className="p-0.5 text-muted hover:text-red-400 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button></td>
                       </tr>
                     );
                   })}
-                  {draft.byproducts.length === 0 && <tr><td colSpan={4} className="px-4 py-4 text-center text-muted">Add by-products in Master Prices first.</td></tr>}
+                  {draft.byproducts.length === 0 && <tr><td colSpan={5} className="px-4 py-4 text-center text-muted">No by-products yet. Click &quot;Add by-product&quot;.</td></tr>}
                 </tbody>
+                <tfoot>
+                  <tr className="border-t border-border font-semibold">
+                    <td className="px-4 py-1.5 text-foreground">Total</td>
+                    <td className={`px-4 py-1.5 text-right font-mono ${totalBpPct > 100 ? "text-red-400" : "text-amber-600"}`}>{fmt2(totalBpPct)}%</td>
+                    <td></td>
+                    <td className="px-4 py-1.5 text-right font-mono text-muted">{fmt2(c.byproductCredit)}</td>
+                    <td></td>
+                  </tr>
+                </tfoot>
               </table>
             </div>
           </div>
@@ -550,13 +548,9 @@ function ProductForm({ product, master, settings, brands, categories, onClose, o
             <Row label="USD total (÷ FC rate)" val={`$ ${fmt2(c.usdTotal)}`} />
             <Row label={`Finance charges (${fmt2(c.financePct)}%)`} val={`$ ${fmt2(c.bankCharges)}`} />
             <Row label="Profit + packaging" val={`$ ${fmt2(settings.profit + settings.packagingMaterial)}`} />
-            <div className="flex items-center justify-between pt-3 mt-1">
-              <div><p className="text-xs font-bold text-foreground">FOB / PMT</p></div>
-              <span className="text-lg font-bold text-amber-600">$ {fmt2(c.fobPerPmt)}</span>
-            </div>
-            <div className="flex items-center justify-between pt-1">
-              <div><p className="text-xs font-bold text-foreground">CNF / PMT</p><p className="text-[10px] text-muted">incl. freight ${fmt2(draft.freight)}</p></div>
-              <span className="text-lg font-bold text-green-500">$ {fmt2(c.cnfPerPmt)}</span>
+            <div className="flex items-center justify-between pt-3 mt-1 border-t border-border">
+              <div><p className="text-sm font-bold text-foreground">FOB / PMT</p><p className="text-[10px] text-muted">freight added at CNF quotation</p></div>
+              <span className="text-xl font-bold text-amber-600">$ {fmt2(c.fobPerPmt)}</span>
             </div>
             <p className="text-[10px] text-muted mt-3">FC rate, finance %, profit &amp; packaging are shared — edit in Master Prices → Cost Settings.</p>
           </div>

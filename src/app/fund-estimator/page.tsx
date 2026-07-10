@@ -953,7 +953,19 @@ export default function FundEstimatorPage() {
                           </td>
                           <td className={`px-2 py-1.5 text-right font-mono font-semibold ${balance < 0 ? "text-red-400" : "text-foreground"}`}>
                             {fmt(balance)}
-                            {hasPdc && <span className="text-[9px] text-red-400 block">PDC</span>}
+                            {hasPdc && (
+                              <button
+                                onClick={() => requireAuth(["accountant"], () => {
+                                  if (confirm("Confirm this post-dated cheque has cleared at the bank?\n\nThis removes the PDC flag and drops it from the PDC reminder note. The transaction itself stays in the ledger.")) {
+                                    updateRow(row.id, "pdcDate", "");
+                                  }
+                                })}
+                                title="Cheque deposited/cleared? Click to remove the PDC flag"
+                                className="text-[9px] text-red-400 hover:text-emerald-400 underline decoration-dotted cursor-pointer block w-full text-right"
+                              >
+                                PDC ✓
+                              </button>
+                            )}
                           </td>
                           {/* AA1 — tick for credit or IBFT entries */}
                           <td className="px-2 py-1.5 text-center">

@@ -765,6 +765,9 @@ export default function CNFPage() {
   const [sortBy, setSortBy] = useState<"date-desc" | "date-asc" | "price-desc" | "price-asc">("date-desc");
   const [showFilters, setShowFilters] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  // Bulk-delete selection (accountant/admin only)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   // A failed/empty-looking load should never be silently indistinguishable
   // from "there really are zero quotes" — that's what caused real panic when
@@ -837,7 +840,29 @@ export default function CNFPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "delete", id: q.id }),
     });
+    setSelectedIds(prev => { const n = new Set(prev); n.delete(q.id); return n; });
     load();
+  }
+
+  function toggleSelect(id: string) {
+    setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  }
+
+  async function deleteSelected(idsToDelete: string[]) {
+    if (idsToDelete.length === 0) return;
+    if (!window.confirm(`Permanently delete ${idsToDelete.length} quotation${idsToDelete.length > 1 ? "s" : ""}? This cannot be undone.`)) return;
+    setBulkDeleting(true);
+    try {
+      await fetch("/api/cnf/quotes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "deleteMany", ids: idsToDelete }),
+      });
+      setSelectedIds(new Set());
+      await load();
+    } finally {
+      setBulkDeleting(false);
+    }
   }
 
   function submitPin() {
@@ -902,7 +927,7 @@ export default function CNFPage() {
       {/* Header */}
       <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between sticky top-0 z-20 shadow-sm">
         <div className="flex items-center gap-3">
-          <button onClick={() => router.push("/dashboard")} className="p-1.5 text-gray-400 hover:text-gray-600 cursor-pointer transition-colors">
+          <button onClick={() => router.push("/product-list")} className="p-1.5 text-gray-400 hover:text-gray-600 cursor-pointer transition-colors">
             <ArrowLeft className="w-4 h-4" />
           </button>
           <div className="flex items-center gap-2">
@@ -997,10 +1022,30 @@ export default function CNFPage() {
               {quotes.length === 0 ? "No quotes yet. Click \"New Quote\" to generate your first CNF quotation." : "No quotes match the current filters."}
             </div>
           ) : (
+            <>
+            {isAdmin && (
+              <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-gray-100 bg-gray-50/60">
+                <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer select-none">
+                  <input type="checkbox"
+                    checked={filtered.length > 0 && filtered.every(q => selectedIds.has(q.id))}
+                    onChange={e => setSelectedIds(e.target.checked ? new Set(filtered.map(q => q.id)) : new Set())}
+                    className="cursor-pointer w-3.5 h-3.5 accent-red-600" />
+                  Select all ({filtered.length})
+                </label>
+                {selectedIds.size > 0 && (
+                  <button onClick={() => deleteSelected([...selectedIds])} disabled={bulkDeleting}
+                    className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white rounded-lg cursor-pointer transition-colors">
+                    {bulkDeleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                    Delete selected ({selectedIds.size})
+                  </button>
+                )}
+              </div>
+            )}
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-100">
+                    {isAdmin && <th className="px-4 py-3 w-8" />}
                     <th className="text-left px-4 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Quote #</th>
                     <th className="text-center px-4 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Type</th>
                     <th className="text-left px-4 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Client</th>
@@ -1019,7 +1064,12 @@ export default function CNFPage() {
                     const total = subtotal - (q.discountAmount || 0);
                     const isArchived = q.status === "archived";
                     return (
-                      <tr key={q.id} className={`border-b border-gray-50 hover:bg-gray-50/50 transition-colors ${isArchived ? "opacity-60" : ""}`}>
+                      <tr key={q.id} className={`border-b border-gray-50 hover:bg-gray-50/50 transition-colors ${isArchived ? "opacity-60" : ""} ${selectedIds.has(q.id) ? "bg-red-50/40" : ""}`}>
+                        {isAdmin && (
+                          <td className="px-4 py-3">
+                            <input type="checkbox" checked={selectedIds.has(q.id)} onChange={() => toggleSelect(q.id)} className="cursor-pointer w-3.5 h-3.5 accent-red-600" />
+                          </td>
+                        )}
                         <td className="px-4 py-3">
                           <span className="font-mono text-xs font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">{q.quoteNo}</span>
                         </td>
@@ -1086,6 +1136,7 @@ export default function CNFPage() {
                 </tbody>
               </table>
             </div>
+            </>
           )}
         </div>
 

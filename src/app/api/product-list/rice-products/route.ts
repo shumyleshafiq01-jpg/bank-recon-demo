@@ -6,7 +6,7 @@ const SHEET = "RICE_Products";
 const HEADERS = ["id", "sku", "name", "brandId", "category", "imageUrl", "packagingDesc", "quantity", "recoveryPct", "purchaseRate", "freight", "byproducts", "active"];
 
 function parseRow(r: string[]) {
-  let byproducts: { name: string; percent: number }[] = [];
+  let byproducts: { name: string; percent: number; rate: number }[] = [];
   try { byproducts = JSON.parse(r[11] || "[]"); } catch { byproducts = []; }
   return {
     id: r[0] ?? "", sku: r[1] ?? "", name: r[2] ?? "", brandId: r[3] ?? "", category: r[4] ?? "",
