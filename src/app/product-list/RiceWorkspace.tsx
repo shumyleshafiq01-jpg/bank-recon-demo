@@ -255,8 +255,8 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
                 <div className="w-10 h-10 rounded-xl bg-amber-100/60 flex items-center justify-center"><Icon className="w-5 h-5 text-amber-500" /></div>
                 {count != null && <span className="text-xs font-mono text-muted">{count}</span>}
               </div>
-              <p className="text-sm font-bold text-foreground">{label}</p>
-              <p className="text-[11px] text-muted mt-1 leading-relaxed">{desc}</p>
+              <p className="text-base font-bold text-foreground">{label}</p>
+              <p className="text-xs text-muted mt-1 leading-relaxed">{desc}</p>
             </button>
           ))}
           {/* CNF builder + client list are shared across all divisions */}
@@ -267,15 +267,15 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
       {/* ── PRODUCTS TAB ── */}
       {tab === "products" && (
         <div className="bg-surface rounded-2xl border border-border overflow-hidden">
-          <table className="w-full text-xs">
+          <table className="w-full text-sm">
             <thead><tr className="bg-amber-500/10 text-amber-600">
               <th className="px-4 py-3 text-left font-semibold w-[40px]">#</th>
-              <th className="px-4 py-3 text-left font-semibold w-[110px]">SKU</th>
+              <th className="px-4 py-3 text-left font-semibold w-[120px]">SKU</th>
               <th className="px-4 py-3 text-left font-semibold">Product Name</th>
-              <th className="px-4 py-3 text-left font-semibold w-[110px]">Brand</th>
-              <th className="px-4 py-3 text-right font-semibold w-[90px]">Recovery</th>
-              <th className="px-4 py-3 text-right font-semibold w-[140px]">FOB / PMT</th>
-              <th className="px-4 py-3 text-center w-[80px]">Actions</th>
+              <th className="px-4 py-3 text-left font-semibold w-[120px]">Brand</th>
+              <th className="px-4 py-3 text-right font-semibold w-[100px]">Recovery</th>
+              <th className="px-4 py-3 text-right font-semibold w-[150px]">FOB / PMT</th>
+              <th className="px-4 py-3 text-center w-[90px]">Actions</th>
             </tr></thead>
             <tbody>
               {filteredProducts.length === 0 && <tr><td colSpan={7} className="px-4 py-10 text-center text-muted">No rice products yet. Click &quot;Add Rice Product&quot;.</td></tr>}
@@ -284,9 +284,9 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
                 return (
                   <tr key={p.id} className={`hover:bg-amber-500/5 transition-colors ${i % 2 ? "bg-surface-light/20" : ""}`}>
                     <td className="px-4 py-3 text-muted">{i + 1}</td>
-                    <td className="px-4 py-3 font-mono text-[11px] text-muted">{p.sku || "—"}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-muted">{p.sku || "—"}</td>
                     <td className="px-4 py-3 font-semibold text-foreground">{p.name}</td>
-                    <td className="px-4 py-3">{p.brandId ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-400 font-semibold">{brandName(p.brandId)}</span> : <span className="text-[10px] text-red-400">Unassigned</span>}</td>
+                    <td className="px-4 py-3">{p.brandId ? <span className="text-xs px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-400 font-semibold">{brandName(p.brandId)}</span> : <span className="text-xs text-red-400">Unassigned</span>}</td>
                     <td className="px-4 py-3 text-right text-muted">{p.recoveryPct}%</td>
                     <td className="px-4 py-3 text-right font-mono font-bold text-amber-600">${fmt2(c.fobPerPmt)}</td>
                     <td className="px-4 py-3">
@@ -570,24 +570,24 @@ function ProductForm({ product, master, settings, brands, categories, onClose, o
   const totalBpPct = Math.round(draft.byproducts.reduce((s, b) => s + (b.percent || 0), 0) * 100) / 100;
 
   const Row = ({ label, val, bold, color }: { label: string; val: string; bold?: boolean; color?: string }) => (
-    <div className="flex items-center justify-between py-1 border-b border-border/40">
-      <span className="text-[11px] text-muted">{label}</span>
-      <span className={`text-xs font-mono ${bold ? "font-bold" : ""} ${color ?? "text-foreground"}`}>{val}</span>
+    <div className="flex items-center justify-between py-1.5 border-b border-border/40">
+      <span className="text-xs text-muted">{label}</span>
+      <span className={`text-sm font-mono ${bold ? "font-bold" : ""} ${color ?? "text-foreground"}`}>{val}</span>
     </div>
   );
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-surface rounded-2xl border border-border w-full max-w-5xl max-h-[92vh] overflow-y-auto">
-        <div className="flex items-center justify-between px-5 py-3 border-b border-border sticky top-0 bg-surface z-10">
-          <h3 className="text-sm font-semibold text-foreground">{product.name ? "Edit" : "New"} Rice Product</h3>
+      <div className="bg-surface rounded-2xl border border-border w-full max-w-7xl max-h-[92vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border sticky top-0 bg-surface z-10">
+          <h3 className="text-base font-semibold text-foreground">{product.name ? "Edit" : "New"} Rice Product</h3>
           <div className="flex items-center gap-2">
-            <button onClick={() => onSave(draft)} disabled={!draft.name.trim()} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-amber-500 hover:bg-amber-500/80 disabled:opacity-40 text-white rounded-lg cursor-pointer"><Save className="w-3 h-3" /> Save</button>
+            <button onClick={() => onSave(draft)} disabled={!draft.name.trim()} className="flex items-center gap-1.5 text-sm px-4 py-2 bg-amber-500 hover:bg-amber-500/80 disabled:opacity-40 text-white rounded-lg cursor-pointer"><Save className="w-4 h-4" /> Save</button>
             <button onClick={onClose} className="p-1.5 text-muted hover:text-foreground cursor-pointer"><X className="w-4 h-4" /></button>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 p-5">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 p-6">
           {/* Left: inputs */}
           <div className="lg:col-span-2 space-y-4">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -614,21 +614,21 @@ function ProductForm({ product, master, settings, brands, categories, onClose, o
             {/* By-products — entered per product (vary by product) */}
             <div className="bg-background/50 rounded-xl border border-border overflow-hidden">
               <div className="px-4 py-2 border-b border-border flex items-center justify-between">
-                <h4 className="text-[11px] font-semibold text-muted uppercase tracking-wide">By-products (% of raw input · resale rate)</h4>
-                <button onClick={addBp} className="flex items-center gap-1 text-[11px] text-amber-500 hover:text-amber-400 cursor-pointer"><Plus className="w-3 h-3" /> Add by-product</button>
+                <h4 className="text-xs font-semibold text-muted uppercase tracking-wide">By-products (% of raw input · resale rate)</h4>
+                <button onClick={addBp} className="flex items-center gap-1 text-xs text-amber-500 hover:text-amber-400 cursor-pointer"><Plus className="w-3.5 h-3.5" /> Add by-product</button>
               </div>
-              <table className="w-full text-xs">
-                <thead><tr className="text-muted"><th className="px-4 py-1.5 text-left font-semibold">By-product</th><th className="px-4 py-1.5 text-right font-semibold w-[80px]">%</th><th className="px-4 py-1.5 text-right font-semibold w-[90px]">Rate</th><th className="px-4 py-1.5 text-right font-semibold w-[110px]">Value (PKR)</th><th className="w-[40px]"></th></tr></thead>
+              <table className="w-full text-sm">
+                <thead><tr className="text-muted"><th className="px-4 py-2 text-left font-semibold">By-product</th><th className="px-4 py-2 text-right font-semibold w-[80px]">%</th><th className="px-4 py-2 text-right font-semibold w-[90px]">Rate</th><th className="px-4 py-2 text-right font-semibold w-[120px]">Value (PKR)</th><th className="w-[40px]"></th></tr></thead>
                 <tbody>
                   {draft.byproducts.map((bp, i) => {
                     const kg = Math.round((bp.percent / 100) * c.rawInput * 100) / 100;
                     return (
                       <tr key={i}>
-                        <td className="px-4 py-1"><input value={bp.name} onChange={e => setBp(i, { name: e.target.value })} placeholder="name" className="w-full bg-transparent border border-transparent hover:border-border focus:border-amber-500/50 rounded px-1 py-0.5 text-foreground focus:outline-none" /></td>
-                        <td className="px-4 py-1 text-right"><input type="number" step="0.01" value={bp.percent} onChange={e => setBp(i, { percent: parseFloat(e.target.value) || 0 })} className="w-16 bg-transparent border border-transparent hover:border-border focus:border-amber-500/50 rounded px-1 py-0.5 text-right font-mono text-foreground focus:outline-none" /></td>
-                        <td className="px-4 py-1 text-right"><input type="number" step="0.01" value={bp.rate} onChange={e => setBp(i, { rate: parseFloat(e.target.value) || 0 })} className="w-20 bg-transparent border border-transparent hover:border-border focus:border-amber-500/50 rounded px-1 py-0.5 text-right font-mono text-foreground focus:outline-none" /></td>
-                        <td className="px-4 py-1 text-right font-mono text-muted">{fmt2(kg * bp.rate)}</td>
-                        <td className="px-2 py-1 text-center"><button onClick={() => removeBp(i)} className="p-0.5 text-muted hover:text-red-400 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button></td>
+                        <td className="px-4 py-1.5"><input value={bp.name} onChange={e => setBp(i, { name: e.target.value })} placeholder="name" className="w-full bg-transparent border border-transparent hover:border-border focus:border-amber-500/50 rounded px-1.5 py-1 text-foreground focus:outline-none" /></td>
+                        <td className="px-4 py-1.5 text-right"><input type="number" step="0.01" value={bp.percent} onChange={e => setBp(i, { percent: parseFloat(e.target.value) || 0 })} className="w-20 bg-transparent border border-transparent hover:border-border focus:border-amber-500/50 rounded px-1.5 py-1 text-right font-mono text-foreground focus:outline-none" /></td>
+                        <td className="px-4 py-1.5 text-right"><input type="number" step="0.01" value={bp.rate} onChange={e => setBp(i, { rate: parseFloat(e.target.value) || 0 })} className="w-24 bg-transparent border border-transparent hover:border-border focus:border-amber-500/50 rounded px-1.5 py-1 text-right font-mono text-foreground focus:outline-none" /></td>
+                        <td className="px-4 py-1.5 text-right font-mono text-muted">{fmt2(kg * bp.rate)}</td>
+                        <td className="px-2 py-1.5 text-center"><button onClick={() => removeBp(i)} className="p-0.5 text-muted hover:text-red-400 cursor-pointer"><Trash2 className="w-4 h-4" /></button></td>
                       </tr>
                     );
                   })}
@@ -649,7 +649,7 @@ function ProductForm({ product, master, settings, brands, categories, onClose, o
 
           {/* Right: live calculation */}
           <div className="bg-surface-light/30 rounded-2xl border border-border p-4 h-fit sticky top-16">
-            <h4 className="text-[11px] font-semibold text-amber-600 uppercase tracking-wide mb-3">Costing (per PMT)</h4>
+            <h4 className="text-xs font-semibold text-amber-600 uppercase tracking-wide mb-3">Costing (per PMT)</h4>
             <Row label="Raw input needed" val={`${fmt2(c.rawInput)} kg`} />
             <Row label="Raw cost" val={`PKR ${fmt2(c.rawCost)}`} />
             <Row label="By-product credit" val={`− PKR ${fmt2(c.byproductCredit)}`} color="text-green-500" />
@@ -662,10 +662,10 @@ function ProductForm({ product, master, settings, brands, categories, onClose, o
             <Row label={`Finance charges (${fmt2(c.financePct)}%)`} val={`$ ${fmt2(c.bankCharges)}`} />
             <Row label="Profit + packaging" val={`$ ${fmt2(settings.profit + settings.packagingMaterial)}`} />
             <div className="flex items-center justify-between pt-3 mt-1 border-t border-border">
-              <div><p className="text-sm font-bold text-foreground">FOB / PMT</p><p className="text-[10px] text-muted">freight added at CNF quotation</p></div>
-              <span className="text-xl font-bold text-amber-600">$ {fmt2(c.fobPerPmt)}</span>
+              <div><p className="text-base font-bold text-foreground">FOB / PMT</p><p className="text-xs text-muted">freight added at CNF quotation</p></div>
+              <span className="text-2xl font-bold text-amber-600">$ {fmt2(c.fobPerPmt)}</span>
             </div>
-            <p className="text-[10px] text-muted mt-3">FC rate, finance %, profit &amp; packaging are shared — edit in Master Prices → Cost Settings.</p>
+            <p className="text-xs text-muted mt-3">FC rate, finance %, profit &amp; packaging are shared — edit in Master Prices → Cost Settings.</p>
           </div>
         </div>
       </div>
@@ -686,7 +686,7 @@ function SettingsForm({ settings, onClose, onSave }: { settings: RiceSettings; o
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-surface rounded-2xl border border-border w-full max-w-lg p-5">
-        <div className="flex items-center justify-between mb-4"><h3 className="text-sm font-semibold text-foreground">Rice Cost Settings</h3><button onClick={onClose} className="p-1.5 text-muted hover:text-foreground cursor-pointer"><X className="w-4 h-4" /></button></div>
+        <div className="flex items-center justify-between mb-4"><h3 className="text-base font-semibold text-foreground">Rice Cost Settings</h3><button onClick={onClose} className="p-1.5 text-muted hover:text-foreground cursor-pointer"><X className="w-4 h-4" /></button></div>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           {fields.map(([k, l]) => (
             <Field key={k} label={l}><input type="number" step="0.01" value={d[k]} onChange={e => upd(k, parseFloat(e.target.value) || 0)} className={inp} /></Field>
@@ -735,11 +735,11 @@ function BrandForm({ brand, onClose, onSave }: { brand: RiceBrand | null; onClos
 }
 
 /* ═══════════ small helpers */
-const inp = "w-full bg-background border border-border rounded-lg px-2.5 py-1.5 text-sm text-foreground focus:outline-none focus:border-amber-500/50";
+const inp = "w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-amber-500/50";
 function Field({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
   return (
     <div className={className}>
-      <label className="text-[10px] text-muted uppercase tracking-wide block mb-1">{label}</label>
+      <label className="text-xs text-muted uppercase tracking-wide block mb-1">{label}</label>
       {children}
     </div>
   );
