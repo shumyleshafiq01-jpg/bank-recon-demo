@@ -7,6 +7,7 @@ function toClient(row: Record<string, unknown>) {
     destination: row.destination ?? "",
     country: row.country ?? "",
     freightPerCarton: row.freight_per_carton ?? 0,
+    freightPerTon: row.freight_per_ton ?? 0,
     currency: row.currency ?? "USD",
     updatedAt: row.updated_at ?? "",
   };
@@ -35,6 +36,7 @@ export async function POST(request: Request) {
         destination: String(c.destination ?? ""),
         country: String(c.country ?? ""),
         freight_per_carton: Number(c.freightPerCarton ?? 0),
+        freight_per_ton: Number(c.freightPerTon ?? 0),
         currency: String(c.currency ?? "USD"),
         updated_at: now,
       }));

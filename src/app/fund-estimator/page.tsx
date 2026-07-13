@@ -832,9 +832,9 @@ export default function FundEstimatorPage() {
                       <th className="px-2 py-2.5 text-left font-semibold w-[36px]">#</th>
                       <th className="px-2 py-2.5 text-left font-semibold w-[110px]">Date</th>
                       <th className="px-2 py-2.5 text-left font-semibold w-[110px]">PDC Date</th>
-                      <th className="px-2 py-2.5 text-left font-semibold w-[115px]">IBFT #</th>
+                      <th className="px-2 py-2.5 text-left font-semibold w-[150px]">IBFT #</th>
                       <th className="px-2 py-2.5 text-left font-semibold w-[100px]">Cheque No.</th>
-                      <th className="px-2 py-2.5 text-left font-semibold max-w-[220px]">Description</th>
+                      <th className="px-2 py-2.5 text-left font-semibold max-w-[190px]">Description</th>
                       <th className="px-2 py-2.5 text-right font-semibold w-[120px]">Debit</th>
                       <th className="px-2 py-2.5 text-right font-semibold w-[120px]">Credit</th>
                       <th className="px-2 py-2.5 text-right font-semibold w-[130px]">Balance</th>
@@ -901,7 +901,7 @@ export default function FundEstimatorPage() {
                               className={`w-full bg-transparent rounded px-1.5 py-1 text-foreground focus:outline-none text-xs ${editMode ? "border border-transparent hover:border-border focus:border-indigo-500/50" : "border border-transparent cursor-default"}`}
                             />
                           </td>
-                          <td className="px-2 py-1.5 max-w-[220px]">
+                          <td className="px-2 py-1.5 max-w-[190px]">
                             {editMode ? (
                               <input
                                 type="text"
