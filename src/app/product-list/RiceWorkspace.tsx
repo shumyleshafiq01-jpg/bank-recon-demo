@@ -577,8 +577,8 @@ function ProductForm({ product, master, settings, brands, categories, onClose, o
   );
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-surface rounded-2xl border border-border w-full max-w-5xl max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-surface rounded-2xl border border-border w-full max-w-5xl max-h-[92vh] overflow-y-auto">
         <div className="flex items-center justify-between px-5 py-3 border-b border-border sticky top-0 bg-surface z-10">
           <h3 className="text-sm font-semibold text-foreground">{product.name ? "Edit" : "New"} Rice Product</h3>
           <div className="flex items-center gap-2">
@@ -684,8 +684,8 @@ function SettingsForm({ settings, onClose, onSave }: { settings: RiceSettings; o
     ["bagDollarRate", "Bag Dollar Rate (PKR)"], ["bagOverheadPct", "Bag Overhead %"],
   ];
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-surface rounded-2xl border border-border w-full max-w-lg p-5" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-surface rounded-2xl border border-border w-full max-w-lg p-5">
         <div className="flex items-center justify-between mb-4"><h3 className="text-sm font-semibold text-foreground">Rice Cost Settings</h3><button onClick={onClose} className="p-1.5 text-muted hover:text-foreground cursor-pointer"><X className="w-4 h-4" /></button></div>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           {fields.map(([k, l]) => (
@@ -710,8 +710,8 @@ function BrandForm({ brand, onClose, onSave }: { brand: RiceBrand | null; onClos
     try { const url = await uploadImage(f); if (url) upd("logoUrl", url); } finally { setUploading(false); }
   }
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-surface rounded-2xl border border-border w-full max-w-lg p-5" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-surface rounded-2xl border border-border w-full max-w-lg p-5">
         <div className="flex items-center justify-between mb-4"><h3 className="text-sm font-semibold text-foreground">{brand ? "Edit" : "New"} Brand</h3><button onClick={onClose} className="p-1.5 text-muted hover:text-foreground cursor-pointer"><X className="w-4 h-4" /></button></div>
         <div className="grid grid-cols-2 gap-3">
           <Field className="col-span-2" label="Brand Name"><input value={d.name} onChange={e => upd("name", e.target.value)} className={inp} /></Field>

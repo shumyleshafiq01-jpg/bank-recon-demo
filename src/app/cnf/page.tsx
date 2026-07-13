@@ -542,8 +542,8 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
 
       {/* Add-by-category picker */}
       {showCatPicker && (
-        <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4" onClick={() => setShowCatPicker(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
               <h3 className="text-base font-semibold text-gray-900">Add Products by Category</h3>
               <button onClick={() => setShowCatPicker(false)} className="p-1.5 text-gray-400 hover:text-gray-600 cursor-pointer"><X className="w-5 h-5" /></button>
