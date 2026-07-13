@@ -1,34 +1,65 @@
-import { ensureSheet, readSheet, updateRow, writeRows, deleteRow } from "@/lib/google-sheets";
+import { supabase } from "@/lib/supabase";
 import { RICE_DEFAULT_CHARGES } from "@/lib/rice-costing";
 
 // Rice "Master Prices": the shared milling & handling charges (PKR/kg).
-// (By-product resale rates are per-product; bag packaging lives in RICE_Bags.
-//  Any legacy "byproduct"/"bag" rows in this sheet are ignored.)
-const SHEET = "RICE_Master";
-const HEADERS = ["id", "kind", "name", "rate", "sortOrder"];
+// (By-product resale rates are per-product; bag packaging lives in rice_bags.
+//  Any legacy "byproduct"/"bag" rows in this table are ignored.)
 
 const genId = () => Math.random().toString(36).slice(2, 10);
 
-async function init() { await ensureSheet(SHEET, HEADERS); }
+/* ── snake_case DB row → camelCase frontend object ── */
+function toClient(row: Record<string, unknown>) {
+  return {
+    id: row.id ?? "",
+    kind: (row.kind ?? "charge") as "byproduct" | "charge" | "bag",
+    name: row.name ?? "",
+    rate: Number(row.rate) || 0,
+    sortOrder: Number(row.sort_order) || 0,
+  };
+}
 
-function parseRow(r: string[]) {
-  return { id: r[0] ?? "", kind: (r[1] ?? "charge") as "byproduct" | "charge" | "bag", name: r[2] ?? "", rate: parseFloat(r[3]) || 0, sortOrder: parseInt(r[4]) || 0 };
+/* ── camelCase frontend object → snake_case DB row ── */
+function toRow(it: Record<string, unknown>) {
+  return {
+    id: String(it.id ?? genId()),
+    kind: String(it.kind ?? "charge"),
+    name: String(it.name ?? ""),
+    rate: Number(it.rate) || 0,
+    sort_order: Number(it.sortOrder) || 0,
+  };
 }
 
 async function ensureSeeded() {
-  const rows = await readSheet(SHEET);
-  const existing = rows.slice(1).filter(r => r[0]).map(parseRow);
-  if (existing.some(i => i.kind === "charge")) return;
-  const seed = RICE_DEFAULT_CHARGES.map((c, i) => [genId(), "charge", c.name, String(c.rate), String(i)]);
-  if (seed.length) await writeRows(SHEET, seed);
+  const { data, error } = await supabase
+    .from("rice_master")
+    .select("id, kind")
+    .eq("kind", "charge")
+    .limit(1);
+  if (error) throw error;
+  if (data && data.length > 0) return;
+
+  const seed = RICE_DEFAULT_CHARGES.map((c, i) => ({
+    id: genId(),
+    kind: "charge",
+    name: c.name,
+    rate: c.rate,
+    sort_order: i,
+  }));
+  if (seed.length) {
+    const { error: insertErr } = await supabase.from("rice_master").insert(seed);
+    if (insertErr) throw insertErr;
+  }
 }
 
 export async function GET() {
   try {
-    await init();
     await ensureSeeded();
-    const rows = await readSheet(SHEET);
-    const items = rows.slice(1).filter(r => r[0]).map(parseRow).sort((a, b) => a.sortOrder - b.sortOrder);
+    const { data, error } = await supabase
+      .from("rice_master")
+      .select("*")
+      .order("sort_order", { ascending: true });
+    if (error) throw error;
+    const items = (data ?? []).map(toClient);
     return Response.json({
       byproducts: items.filter(i => i.kind === "byproduct"),
       charges: items.filter(i => i.kind === "charge"),
@@ -40,23 +71,18 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    await init();
     const body = await request.json() as { action: string; item?: Record<string, unknown>; id?: string };
 
     if (body.action === "upsert" && body.item) {
-      const it = body.item;
-      const rows = await readSheet(SHEET);
-      const idx = rows.findIndex((r, i) => i > 0 && r[0] === it.id);
-      const row = [String(it.id ?? genId()), String(it.kind ?? "charge"), String(it.name ?? ""), String(it.rate ?? 0), String(it.sortOrder ?? 0)];
-      if (idx > 0) await updateRow(SHEET, idx + 1, row);
-      else await writeRows(SHEET, [row]);
+      const row = toRow(body.item);
+      const { error } = await supabase.from("rice_master").upsert(row, { onConflict: "id" });
+      if (error) throw error;
       return Response.json({ saved: true });
     }
 
     if (body.action === "delete" && body.id) {
-      const rows = await readSheet(SHEET);
-      const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.id);
-      if (idx > 0) await deleteRow(SHEET, idx + 1);
+      const { error } = await supabase.from("rice_master").delete().eq("id", body.id);
+      if (error) throw error;
       return Response.json({ deleted: true });
     }
 

@@ -1,23 +1,48 @@
-import { ensureSheet, readSheet, updateRow, writeRows, deleteRow } from "@/lib/google-sheets";
+import { supabase } from "@/lib/supabase";
 
-// Rice division brands — separate sheet from Food & Spices (PL_Brands) so the
+// Rice division brands — separate table from Food & Spices (pl_brands) so the
 // two divisions never mix.
-const SHEET = "RICE_Brands";
-const HEADERS = ["id", "name", "address", "city", "country", "logoUrl", "createdAt", "contactPerson", "website", "email"];
 
-async function init() { await ensureSheet(SHEET, HEADERS); }
+/* ── snake_case DB row → camelCase frontend object ── */
+function toClient(row: Record<string, unknown>) {
+  return {
+    id: row.id ?? "",
+    name: row.name ?? "",
+    address: row.address ?? "",
+    city: row.city ?? "",
+    country: row.country ?? "",
+    logoUrl: row.logo_url ?? "",
+    createdAt: row.created_at ?? "",
+    contactPerson: row.contact_person ?? "",
+    website: row.website ?? "",
+    email: row.email ?? "",
+  };
+}
 
-function parseRow(r: string[]) {
-  return { id: r[0] ?? "", name: r[1] ?? "", address: r[2] ?? "", city: r[3] ?? "",
-    country: r[4] ?? "", logoUrl: r[5] ?? "", createdAt: r[6] ?? "",
-    contactPerson: r[7] ?? "", website: r[8] ?? "", email: r[9] ?? "" };
+/* ── camelCase frontend object → snake_case DB row ── */
+function toRow(b: Record<string, unknown>, isNew: boolean) {
+  const row: Record<string, unknown> = {
+    id: String(b.id ?? ""),
+    name: String(b.name ?? ""),
+    address: String(b.address ?? ""),
+    city: String(b.city ?? ""),
+    country: String(b.country ?? ""),
+    logo_url: String(b.logoUrl ?? ""),
+    contact_person: String(b.contactPerson ?? ""),
+    website: String(b.website ?? ""),
+    email: String(b.email ?? ""),
+  };
+  if (isNew) {
+    row.created_at = new Date().toISOString();
+  }
+  return row;
 }
 
 export async function GET() {
   try {
-    await init();
-    const rows = await readSheet(SHEET);
-    return Response.json({ brands: rows.slice(1).filter(r => r[0]).map(parseRow) });
+    const { data, error } = await supabase.from("rice_brands").select("*");
+    if (error) throw error;
+    return Response.json({ brands: (data ?? []).map(toClient) });
   } catch (err) {
     return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
@@ -25,25 +50,25 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    await init();
     const body = await request.json() as { action: string; brand?: Record<string, unknown> };
 
     if (body.action === "upsert" && body.brand) {
       const b = body.brand;
-      const rows = await readSheet(SHEET);
-      const idx = rows.findIndex((r, i) => i > 0 && r[0] === b.id);
-      const row = [String(b.id ?? ""), String(b.name ?? ""), String(b.address ?? ""), String(b.city ?? ""),
-        String(b.country ?? ""), String(b.logoUrl ?? ""), idx > 0 ? rows[idx][6] : new Date().toISOString(),
-        String(b.contactPerson ?? ""), String(b.website ?? ""), String(b.email ?? "")];
-      if (idx > 0) await updateRow(SHEET, idx + 1, row);
-      else await writeRows(SHEET, [row]);
+      // Check if this is a new brand or an update
+      let isNew = true;
+      if (b.id) {
+        const { data: existing } = await supabase.from("rice_brands").select("id").eq("id", b.id).limit(1);
+        isNew = !existing || existing.length === 0;
+      }
+      const row = toRow(b, isNew);
+      const { error } = await supabase.from("rice_brands").upsert(row, { onConflict: "id" });
+      if (error) throw error;
       return Response.json({ saved: true });
     }
 
     if (body.action === "delete" && body.brand) {
-      const rows = await readSheet(SHEET);
-      const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.brand!.id);
-      if (idx > 0) await deleteRow(SHEET, idx + 1);
+      const { error } = await supabase.from("rice_brands").delete().eq("id", body.brand.id);
+      if (error) throw error;
       return Response.json({ deleted: true });
     }
 

@@ -1,23 +1,22 @@
-import { ensureSheet, readSheet, updateRow, writeRows, deleteRow } from "@/lib/google-sheets";
+import { supabase } from "@/lib/supabase";
 
-const SHEET = "CNF_MasterFreight";
-const HEADERS = ["id", "destination", "country", "freightPerCarton", "currency", "updatedAt"];
-
-async function init() { await ensureSheet(SHEET, HEADERS); }
-
-function parseRow(r: string[]) {
+/** Map a Supabase snake_case row to the camelCase shape the frontend expects. */
+function toClient(row: Record<string, unknown>) {
   return {
-    id: r[0] ?? "", destination: r[1] ?? "", country: r[2] ?? "",
-    freightPerCarton: parseFloat(r[3]) || 0, currency: r[4] ?? "USD",
-    updatedAt: r[5] ?? "",
+    id: row.id ?? "",
+    destination: row.destination ?? "",
+    country: row.country ?? "",
+    freightPerCarton: row.freight_per_carton ?? 0,
+    currency: row.currency ?? "USD",
+    updatedAt: row.updated_at ?? "",
   };
 }
 
 export async function GET() {
   try {
-    await init();
-    const rows = await readSheet(SHEET);
-    return Response.json({ freightCards: rows.slice(1).filter(r => r[0]).map(parseRow) });
+    const { data, error } = await supabase.from("cnf_master_freight").select("*");
+    if (error) throw error;
+    return Response.json({ freightCards: (data ?? []).map(toClient) });
   } catch (err) {
     return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
@@ -25,30 +24,43 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    await init();
     const { freightCards } = await request.json() as { freightCards: Record<string, unknown>[] };
     const now = new Date().toISOString();
 
-    // Reconcile per-row instead of wiping the sheet: upsert each provided card,
-    // then delete only the cards that were removed. No clearAndWrite, so a
-    // concurrent read can never catch the sheet mid-wipe.
-    const rows = await readSheet(SHEET);
-    const existing = new Map<string, number>();
-    rows.forEach((r, i) => { if (i > 0 && r[0]) existing.set(r[0], i + 1); });
-    const providedIds = new Set(freightCards.map(c => String(c.id ?? "")));
+    // Upsert all provided cards
+    const upsertRows = freightCards
+      .filter((c) => c.id)
+      .map((c) => ({
+        id: String(c.id),
+        destination: String(c.destination ?? ""),
+        country: String(c.country ?? ""),
+        freight_per_carton: Number(c.freightPerCarton ?? 0),
+        currency: String(c.currency ?? "USD"),
+        updated_at: now,
+      }));
 
-    for (const c of freightCards) {
-      const id = String(c.id ?? "");
-      if (!id) continue;
-      const row = [id, String(c.destination ?? ""), String(c.country ?? ""),
-        String(c.freightPerCarton ?? 0), String(c.currency ?? "USD"), now];
-      const ri = existing.get(id);
-      if (ri) await updateRow(SHEET, ri, row);
-      else await writeRows(SHEET, [row]);
+    if (upsertRows.length > 0) {
+      const { error } = await supabase
+        .from("cnf_master_freight")
+        .upsert(upsertRows, { onConflict: "id" });
+      if (error) throw error;
     }
-    // Delete removed cards bottom-up so earlier row indices stay valid.
-    const toDelete = [...existing.entries()].filter(([id]) => !providedIds.has(id)).map(([, ri]) => ri).sort((a, b) => b - a);
-    for (const ri of toDelete) await deleteRow(SHEET, ri);
+
+    // Delete cards that were removed: fetch current IDs, remove any not in provided set
+    const providedIds = new Set(upsertRows.map((r) => r.id));
+    const { data: existing, error: fetchErr } = await supabase
+      .from("cnf_master_freight")
+      .select("id");
+    if (fetchErr) throw fetchErr;
+
+    const toDelete = (existing ?? []).map((r) => r.id).filter((id: string) => !providedIds.has(id));
+    if (toDelete.length > 0) {
+      const { error: delErr } = await supabase
+        .from("cnf_master_freight")
+        .delete()
+        .in("id", toDelete);
+      if (delErr) throw delErr;
+    }
 
     return Response.json({ saved: true });
   } catch (err) {

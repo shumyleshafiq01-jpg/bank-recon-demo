@@ -1,10 +1,4 @@
-import { ensureSheet, readSheet, clearAndWrite, updateRow, writeRows, deleteRow } from "@/lib/google-sheets";
-
-const LEDGER_SHEET = "PC_Ledger";
-const CONFIG_SHEET = "PC_Config";
-
-const LEDGER_HEADERS = ["id", "date", "acHead", "txnNo", "purpose", "approvedBy", "cashOut", "cashIn", "holder"];
-const CONFIG_HEADERS = ["key", "value"];
+import { supabase } from "@/lib/supabase";
 
 type LedgerEntry = {
   id: string; date: string; acHead: string; txnNo: string;
@@ -13,45 +7,51 @@ type LedgerEntry = {
   holder?: "main" | "aa1" | "aa2";
 };
 
-function serializeEntry(e: LedgerEntry): string[] {
-  return [
-    String(e.id ?? ""), String(e.date ?? ""), String(e.acHead ?? ""), String(e.txnNo ?? ""),
-    String(e.purpose ?? ""), String(e.approvedBy ?? ""),
-    e.cashOut === null || e.cashOut === undefined ? "" : String(e.cashOut),
-    e.cashIn === null || e.cashIn === undefined ? "" : String(e.cashIn),
-    e.holder ?? "main",
-  ];
+// snake_case DB row → camelCase frontend
+function toFrontend(r: Record<string, unknown>): LedgerEntry {
+  return {
+    id: (r.id as string) ?? "",
+    date: (r.date as string) ?? "",
+    acHead: (r.ac_head as string) ?? "",
+    txnNo: (r.txn_no as string) ?? "",
+    purpose: (r.purpose as string) ?? "",
+    approvedBy: (r.approved_by as string) ?? "",
+    cashOut: r.cash_out === null || r.cash_out === undefined ? null : Number(r.cash_out) || 0,
+    cashIn: r.cash_in === null || r.cash_in === undefined ? null : Number(r.cash_in) || 0,
+    holder: ((r.holder as string) || "main") as "main" | "aa1" | "aa2",
+  };
 }
 
-async function init() {
-  await ensureSheet(LEDGER_SHEET, LEDGER_HEADERS);
-  await ensureSheet(CONFIG_SHEET, CONFIG_HEADERS);
+// camelCase frontend → snake_case DB row
+function toDb(e: LedgerEntry) {
+  return {
+    id: e.id,
+    date: e.date ?? "",
+    ac_head: e.acHead ?? "",
+    txn_no: e.txnNo ?? "",
+    purpose: e.purpose ?? "",
+    approved_by: e.approvedBy ?? "",
+    cash_out: e.cashOut ?? null,
+    cash_in: e.cashIn ?? null,
+    holder: e.holder ?? "main",
+  };
 }
 
 export async function GET() {
   try {
-    await init();
+    const [ledgerRes, configRes] = await Promise.all([
+      supabase.from("pc_ledger").select("*"),
+      supabase.from("pc_config").select("*"),
+    ]);
 
-    const ledgerRows = await readSheet(LEDGER_SHEET);
-    const configRows = await readSheet(CONFIG_SHEET);
+    if (ledgerRes.error) throw new Error(ledgerRes.error.message);
+    if (configRes.error) throw new Error(configRes.error.message);
 
-    const entries = ledgerRows.slice(1)
-      .filter((r) => r[0])
-      .map((r) => ({
-        id: r[0] ?? "",
-        date: r[1] ?? "",
-        acHead: r[2] ?? "",
-        txnNo: r[3] ?? "",
-        purpose: r[4] ?? "",
-        approvedBy: r[5] ?? "",
-        cashOut: r[6] === "" || r[6] === undefined ? null : parseFloat(r[6]) || 0,
-        cashIn: r[7] === "" || r[7] === undefined ? null : parseFloat(r[7]) || 0,
-        holder: (r[8] || "main") as "main" | "aa1" | "aa2",
-      }));
+    const entries = (ledgerRes.data ?? []).map(toFrontend);
 
     const config: Record<string, string> = {};
-    for (const row of configRows.slice(1)) {
-      if (row[0]) config[row[0]] = row[1] ?? "";
+    for (const row of configRes.data ?? []) {
+      if (row.key) config[row.key] = row.value ?? "";
     }
 
     return Response.json({
@@ -66,16 +66,17 @@ export async function GET() {
 }
 
 async function saveConfig(openingBalance: unknown, openingDate: unknown) {
-  await clearAndWrite(CONFIG_SHEET, [
-    CONFIG_HEADERS,
-    ["openingBalance", String(openingBalance ?? 0)],
-    ["openingDate", String(openingDate ?? "")],
-  ]);
+  // Upsert both config keys
+  const rows = [
+    { key: "openingBalance", value: String(openingBalance ?? 0) },
+    { key: "openingDate", value: String(openingDate ?? "") },
+  ];
+  const { error } = await supabase.from("pc_config").upsert(rows, { onConflict: "key" });
+  if (error) throw new Error(error.message);
 }
 
 export async function POST(request: Request) {
   try {
-    await init();
     const body = await request.json() as {
       action?: string;
       entry?: LedgerEntry;
@@ -85,45 +86,39 @@ export async function POST(request: Request) {
       openingDate?: string;
     };
 
-    // ── Per-row upsert: touches ONLY this entry's row. No full-sheet rewrite,
-    //    so concurrent edits from other tabs can never clobber each other. ──
+    // ── Per-row upsert ──
     if (body.action === "upsert-entry" && body.entry) {
-      const rows = await readSheet(LEDGER_SHEET);
-      const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.entry!.id);
-      const row = serializeEntry(body.entry);
-      if (idx > 0) await updateRow(LEDGER_SHEET, idx + 1, row);
-      else await writeRows(LEDGER_SHEET, [row]);
+      const { error } = await supabase
+        .from("pc_ledger")
+        .upsert(toDb(body.entry), { onConflict: "id" });
+      if (error) throw new Error(error.message);
       return Response.json({ saved: true });
     }
 
-    // ── Per-row delete: removes ONLY this entry's row. ──
+    // ── Per-row delete ──
     if (body.action === "delete-entry" && body.id) {
-      const rows = await readSheet(LEDGER_SHEET);
-      const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.id);
-      if (idx > 0) await deleteRow(LEDGER_SHEET, idx + 1);
+      const { error } = await supabase
+        .from("pc_ledger")
+        .delete()
+        .eq("id", body.id);
+      if (error) throw new Error(error.message);
       return Response.json({ deleted: true });
     }
 
-    // ── Config (opening balance/date): a fixed 2-cell sheet, safe to rewrite. ──
+    // ── Config (opening balance/date) ──
     if (body.action === "save-config") {
       await saveConfig(body.openingBalance, body.openingDate);
       return Response.json({ saved: true });
     }
 
-    // ── Legacy whole-array path (older cached tabs). MADE NON-DESTRUCTIVE:
-    //    merge/upsert each entry, NEVER clear the sheet — so a stale tab can
-    //    no longer wipe the ledger. Deletions from such tabs simply won't
-    //    propagate (acceptable trade for safety). ──
+    // ── Legacy whole-array path — merge/upsert each entry ──
     if (body.entries) {
-      const rows = await readSheet(LEDGER_SHEET);
-      const idById = new Map<string, number>();
-      rows.forEach((r, i) => { if (i > 0 && r[0]) idById.set(r[0], i + 1); });
-      for (const e of body.entries) {
-        if (!e.id) continue;
-        const row = serializeEntry(e);
-        const sheetRow = idById.get(e.id);
-        if (sheetRow) await updateRow(LEDGER_SHEET, sheetRow, row);
-        else await writeRows(LEDGER_SHEET, [row]);
+      const dbRows = body.entries.filter((e) => e.id).map(toDb);
+      if (dbRows.length > 0) {
+        const { error } = await supabase
+          .from("pc_ledger")
+          .upsert(dbRows, { onConflict: "id" });
+        if (error) throw new Error(error.message);
       }
       if (body.openingBalance !== undefined) await saveConfig(body.openingBalance, body.openingDate);
       return Response.json({ saved: true, merged: true });

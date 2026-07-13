@@ -1,7 +1,7 @@
 import { readLog, logUsage } from "@/lib/usage-tracker";
 
 export async function GET() {
-  const entries = readLog();
+  const entries = await readLog();
   const totalCost = entries.reduce((s, e) => s + e.cost_usd, 0);
   const totalInput = entries.reduce((s, e) => s + e.input_tokens, 0);
   const totalOutput = entries.reduce((s, e) => s + e.output_tokens, 0);

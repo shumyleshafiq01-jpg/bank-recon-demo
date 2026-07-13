@@ -1,45 +1,44 @@
-import { ensureSheet, readSheet, writeRows, clearAndWrite } from "@/lib/google-sheets";
+import { supabase } from "@/lib/supabase";
 
-const NOTIF_SHEET = "FE_Notifications";
-const DONE_SHEET = "FE_NotifDone";
+/** Map a Supabase notification row to the camelCase shape the frontend expects. */
+function notifToClient(row: Record<string, unknown>) {
+  return {
+    id: row.id ?? "",
+    message: row.message ?? "",
+    target: row.target ?? "",
+    createdAt: row.created_at ?? "",
+    active: row.active ?? true,
+  };
+}
 
-const NOTIF_HEADERS = ["id", "message", "target", "createdAt", "active"];
-const DONE_HEADERS = ["notifId", "role", "markedAt"];
-
-async function init() {
-  await ensureSheet(NOTIF_SHEET, NOTIF_HEADERS);
-  await ensureSheet(DONE_SHEET, DONE_HEADERS);
+/** Map a Supabase done row to the camelCase shape the frontend expects. */
+function doneToClient(row: Record<string, unknown>) {
+  return {
+    notifId: row.notif_id ?? "",
+    role: row.role ?? "",
+    markedAt: row.marked_at ?? "",
+  };
 }
 
 export async function GET(request: Request) {
   try {
-    await init();
     const { searchParams } = new URL(request.url);
     const role = searchParams.get("role");
 
-    const notifRows = await readSheet(NOTIF_SHEET);
-    const doneRows = await readSheet(DONE_SHEET);
+    const [notifRes, doneRes] = await Promise.all([
+      supabase.from("fe_notifications").select("*").eq("active", true),
+      supabase.from("fe_notif_done").select("*"),
+    ]);
+    if (notifRes.error) throw notifRes.error;
+    if (doneRes.error) throw doneRes.error;
 
-    const notifications = notifRows.slice(1)
-      .filter((r) => r[4] === "true")
-      .map((r) => ({
-        id: r[0] ?? "",
-        message: r[1] ?? "",
-        target: r[2] ?? "",
-        createdAt: r[3] ?? "",
-        active: true,
-      }));
-
-    const done = doneRows.slice(1).map((r) => ({
-      notifId: r[0] ?? "",
-      role: r[1] ?? "",
-      markedAt: r[2] ?? "",
-    }));
+    const notifications = (notifRes.data ?? []).map(notifToClient);
+    const done = (doneRes.data ?? []).map(doneToClient);
 
     if (role === "aa1" || role === "aa2") {
       const doneIds = new Set(done.filter((d) => d.role === role).map((d) => d.notifId));
       const pending = notifications.filter(
-        (n) => (n.target === role || n.target === "both") && !doneIds.has(n.id)
+        (n) => (n.target === role || n.target === "both") && !doneIds.has(n.id as string),
       );
       return Response.json({ notifications: pending });
     }
@@ -54,11 +53,18 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    await init();
     const body = await request.json() as { message: string; target: string };
     const id = Math.random().toString(36).slice(2, 10);
     const createdAt = new Date().toISOString();
-    await writeRows(NOTIF_SHEET, [[id, body.message, body.target, createdAt, "true"]]);
+
+    const { error } = await supabase.from("fe_notifications").insert({
+      id,
+      message: body.message,
+      target: body.target,
+      created_at: createdAt,
+      active: true,
+    });
+    if (error) throw error;
     return Response.json({ created: true, id });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -68,27 +74,33 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    await init();
     const body = await request.json() as { action: string; notifId: string; role?: string };
 
     if (body.action === "done") {
-      await writeRows(DONE_SHEET, [[body.notifId, body.role ?? "", new Date().toISOString()]]);
+      const { error } = await supabase.from("fe_notif_done").insert({
+        notif_id: body.notifId,
+        role: body.role ?? "",
+        marked_at: new Date().toISOString(),
+      });
+      if (error) throw error;
       return Response.json({ marked: true });
     }
 
     if (body.action === "reset") {
-      const rows = await readSheet(DONE_SHEET);
-      const filtered = [rows[0], ...rows.slice(1).filter((r) => r[0] !== body.notifId)].filter(Boolean);
-      await clearAndWrite(DONE_SHEET, filtered as string[][]);
+      const { error } = await supabase
+        .from("fe_notif_done")
+        .delete()
+        .eq("notif_id", body.notifId);
+      if (error) throw error;
       return Response.json({ reset: true });
     }
 
     if (body.action === "deactivate") {
-      const rows = await readSheet(NOTIF_SHEET);
-      for (let i = 1; i < rows.length; i++) {
-        if (rows[i][0] === body.notifId) { rows[i][4] = "false"; break; }
-      }
-      await clearAndWrite(NOTIF_SHEET, rows);
+      const { error } = await supabase
+        .from("fe_notifications")
+        .update({ active: false })
+        .eq("id", body.notifId);
+      if (error) throw error;
       return Response.json({ deactivated: true });
     }
 
@@ -101,16 +113,20 @@ export async function PATCH(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
-    await init();
     const body = await request.json() as { notifId: string };
 
-    const rows = await readSheet(NOTIF_SHEET);
-    const filtered = [rows[0], ...rows.slice(1).filter((r) => r[0] !== body.notifId)].filter(Boolean);
-    await clearAndWrite(NOTIF_SHEET, filtered as string[][]);
+    // Delete done records first, then the notification
+    const { error: doneErr } = await supabase
+      .from("fe_notif_done")
+      .delete()
+      .eq("notif_id", body.notifId);
+    if (doneErr) throw doneErr;
 
-    const doneRows = await readSheet(DONE_SHEET);
-    const filteredDone = [doneRows[0], ...doneRows.slice(1).filter((r) => r[0] !== body.notifId)].filter(Boolean);
-    await clearAndWrite(DONE_SHEET, filteredDone as string[][]);
+    const { error } = await supabase
+      .from("fe_notifications")
+      .delete()
+      .eq("id", body.notifId);
+    if (error) throw error;
 
     return Response.json({ deleted: true });
   } catch (err) {

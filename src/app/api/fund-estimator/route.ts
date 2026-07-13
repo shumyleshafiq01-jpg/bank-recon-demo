@@ -1,62 +1,120 @@
-import { ensureSheet, readSheet, clearAndWrite, updateRow, writeRows, deleteRow } from "@/lib/google-sheets";
+import { supabase } from "@/lib/supabase";
 
-const BANKS_SHEET = "FE_Banks";
-const LEDGER_SHEET = "FE_Ledger";
+// camelCase field → snake_case column mapping for the ledger table
+const LEDGER_FIELD_MAP: Record<string, string> = {
+  accountId: "account_id",
+  id: "id",
+  date: "date",
+  pdcDate: "pdc_date",
+  ibftNo: "ibft_no",
+  chequeNo: "cheque_no",
+  description: "description",
+  debit: "debit",
+  credit: "credit",
+  aa1Tick: "aa1_tick",
+  aa1At: "aa1_at",
+  aa2Tick: "aa2_tick",
+  aa2At: "aa2_at",
+};
 
-const BANK_HEADERS = [
-  "id", "bankName", "branch", "acTitle", "accountNo", "iban",
-  "accountType", "branchCode", "notes", "internetBanking", "stamp",
-  "signatureAuthority", "mandateHolder", "maintainBalance", "openingBalance", "openingDate",
-];
-
-const LEDGER_HEADERS = [
-  "accountId", "id", "date", "pdcDate", "ibftNo", "chequeNo",
-  "description", "debit", "credit", "aa1Tick", "aa1At", "aa2Tick", "aa2At",
-];
-
-async function init() {
-  await ensureSheet(BANKS_SHEET, BANK_HEADERS);
-  await ensureSheet(LEDGER_SHEET, LEDGER_HEADERS);
+/** Map a Supabase bank row to the camelCase shape the frontend expects. */
+function bankToClient(row: Record<string, unknown>) {
+  return {
+    id: row.id ?? "",
+    bankName: row.bank_name ?? "",
+    branch: row.branch ?? "",
+    acTitle: row.ac_title ?? "",
+    accountNo: row.account_no ?? "",
+    iban: row.iban ?? "",
+    accountType: row.account_type ?? "",
+    branchCode: row.branch_code ?? "",
+    notes: row.notes ?? "",
+    internetBanking: row.internet_banking ?? "",
+    stamp: row.stamp ?? "",
+    signatureAuthority: row.signature_authority ?? "",
+    mandateHolder: row.mandate_holder ?? "",
+    maintainBalance: row.maintain_balance ?? "",
+    openingBalance: parseFloat(String(row.opening_balance)) || 0,
+    openingDate: row.opening_date ?? "",
+  };
 }
 
-function serializeBank(b: Record<string, unknown>): string[] {
-  return BANK_HEADERS.map((h) => String(b[h] ?? ""));
+/** Map a Supabase ledger row to the camelCase shape the frontend expects. */
+function entryToClient(row: Record<string, unknown>) {
+  return {
+    id: row.id ?? "",
+    date: row.date ?? "",
+    pdcDate: row.pdc_date ?? "",
+    ibftNo: row.ibft_no ?? "",
+    chequeNo: row.cheque_no ?? "",
+    description: row.description ?? "",
+    debit: row.debit == null ? null : Number(row.debit) || 0,
+    credit: row.credit == null ? null : Number(row.credit) || 0,
+    aa1Tick: row.aa1_tick ?? false,
+    aa1At: row.aa1_at ?? "",
+    aa2Tick: row.aa2_tick ?? false,
+    aa2At: row.aa2_at ?? "",
+  };
 }
 
-function serializeEntry(accountId: string, e: Record<string, unknown>): string[] {
-  return [accountId, ...LEDGER_HEADERS.slice(1).map((h) => String(e[h] ?? ""))];
+/** Convert a camelCase bank object from the frontend to snake_case for Supabase. */
+function bankToDb(b: Record<string, unknown>) {
+  return {
+    id: b.id ?? "",
+    bank_name: b.bankName ?? "",
+    branch: b.branch ?? "",
+    ac_title: b.acTitle ?? "",
+    account_no: b.accountNo ?? "",
+    iban: b.iban ?? "",
+    account_type: b.accountType ?? "",
+    branch_code: b.branchCode ?? "",
+    notes: b.notes ?? "",
+    internet_banking: b.internetBanking ?? "",
+    stamp: b.stamp ?? "",
+    signature_authority: b.signatureAuthority ?? "",
+    mandate_holder: b.mandateHolder ?? "",
+    maintain_balance: b.maintainBalance ?? "",
+    opening_balance: parseFloat(String(b.openingBalance)) || 0,
+    opening_date: b.openingDate ?? "",
+  };
+}
+
+/** Convert a camelCase ledger entry from the frontend to snake_case for Supabase. */
+function entryToDb(accountId: string, e: Record<string, unknown>) {
+  return {
+    account_id: accountId,
+    id: e.id ?? "",
+    date: e.date ?? "",
+    pdc_date: e.pdcDate ?? "",
+    ibft_no: e.ibftNo ?? "",
+    cheque_no: e.chequeNo ?? "",
+    description: e.description ?? "",
+    debit: e.debit === "" || e.debit == null ? null : parseFloat(String(e.debit)) || 0,
+    credit: e.credit === "" || e.credit == null ? null : parseFloat(String(e.credit)) || 0,
+    aa1_tick: e.aa1Tick === true || e.aa1Tick === "true",
+    aa1_at: e.aa1At ?? "",
+    aa2_tick: e.aa2Tick === true || e.aa2Tick === "true",
+    aa2_at: e.aa2At ?? "",
+  };
 }
 
 export async function GET() {
   try {
-    await init();
+    const [bankRes, ledgerRes] = await Promise.all([
+      supabase.from("fe_banks").select("*"),
+      supabase.from("fe_ledger").select("*"),
+    ]);
+    if (bankRes.error) throw bankRes.error;
+    if (ledgerRes.error) throw ledgerRes.error;
 
-    const bankRows = await readSheet(BANKS_SHEET);
-    const ledgerRows = await readSheet(LEDGER_SHEET);
-
-    const banks = bankRows.slice(1).map((row) => {
-      const obj: Record<string, string | number> = {};
-      BANK_HEADERS.forEach((h, i) => {
-        obj[h] = row[i] ?? "";
-      });
-      obj.openingBalance = parseFloat(String(obj.openingBalance)) || 0;
-      return obj;
-    });
+    const banks = (bankRes.data ?? []).map(bankToClient);
 
     const ledger: Record<string, Record<string, unknown>[]> = {};
-    for (const row of ledgerRows.slice(1)) {
-      const accountId = row[0] ?? "";
+    for (const row of ledgerRes.data ?? []) {
+      const accountId = String(row.account_id ?? "");
       if (!accountId) continue;
       if (!ledger[accountId]) ledger[accountId] = [];
-      const entry: Record<string, unknown> = {};
-      LEDGER_HEADERS.slice(1).forEach((h, i) => {
-        entry[h] = row[i + 1] ?? "";
-      });
-      entry.debit = entry.debit === "" ? null : parseFloat(String(entry.debit)) || 0;
-      entry.credit = entry.credit === "" ? null : parseFloat(String(entry.credit)) || 0;
-      entry.aa1Tick = entry.aa1Tick === "true";
-      entry.aa2Tick = entry.aa2Tick === "true";
-      ledger[accountId].push(entry);
+      ledger[accountId].push(entryToClient(row));
     }
 
     return Response.json({ banks, ledger });
@@ -68,7 +126,6 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    await init();
     const body = await request.json() as {
       action?: string;
       bank?: Record<string, unknown>;
@@ -80,70 +137,71 @@ export async function POST(request: Request) {
       ledger?: Record<string, Record<string, unknown>[]>;
     };
 
-    // ── Per-row bank upsert: touches only this bank's row. ──
+    // ── Per-row bank upsert ──
     if (body.action === "upsert-bank" && body.bank) {
-      const rows = await readSheet(BANKS_SHEET);
-      const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.bank!.id);
-      const row = serializeBank(body.bank);
-      if (idx > 0) await updateRow(BANKS_SHEET, idx + 1, row);
-      else await writeRows(BANKS_SHEET, [row]);
+      const row = bankToDb(body.bank);
+      const { error } = await supabase
+        .from("fe_banks")
+        .upsert(row, { onConflict: "id" });
+      if (error) throw error;
       return Response.json({ saved: true });
     }
 
-    // ── Per-row bank delete. (The client removes the account's ledger rows too,
-    //    which arrive as their own delete-entry calls — no cascade needed here.) ──
+    // ── Per-row bank delete (also cascade-delete its ledger entries) ──
     if (body.action === "delete-bank" && body.id) {
-      const rows = await readSheet(BANKS_SHEET);
-      const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.id);
-      if (idx > 0) await deleteRow(BANKS_SHEET, idx + 1);
+      const { error: ledgerErr } = await supabase
+        .from("fe_ledger")
+        .delete()
+        .eq("account_id", body.id);
+      if (ledgerErr) throw ledgerErr;
+      const { error } = await supabase
+        .from("fe_banks")
+        .delete()
+        .eq("id", body.id);
+      if (error) throw error;
       return Response.json({ deleted: true });
     }
 
-    // ── Per-row ledger entry upsert: keyed by (accountId, entry id). ──
+    // ── Per-row ledger entry upsert ──
     if (body.action === "upsert-entry" && body.accountId && body.entry) {
-      const rows = await readSheet(LEDGER_SHEET);
-      const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.accountId && r[1] === body.entry!.id);
-      const row = serializeEntry(body.accountId, body.entry);
-      if (idx > 0) await updateRow(LEDGER_SHEET, idx + 1, row);
-      else await writeRows(LEDGER_SHEET, [row]);
+      const row = entryToDb(body.accountId, body.entry);
+      const { error } = await supabase
+        .from("fe_ledger")
+        .upsert(row, { onConflict: "account_id,id" });
+      if (error) throw error;
       return Response.json({ saved: true });
     }
 
-    // ── Per-row ledger entry delete. ──
+    // ── Per-row ledger entry delete ──
     if (body.action === "delete-entry" && body.accountId && body.rowId) {
-      const rows = await readSheet(LEDGER_SHEET);
-      const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.accountId && r[1] === body.rowId);
-      if (idx > 0) await deleteRow(LEDGER_SHEET, idx + 1);
+      const { error } = await supabase
+        .from("fe_ledger")
+        .delete()
+        .eq("account_id", body.accountId)
+        .eq("id", body.rowId);
+      if (error) throw error;
       return Response.json({ deleted: true });
     }
 
-    // ── Legacy whole-state path (older cached tabs). MADE NON-DESTRUCTIVE:
-    //    merge/upsert each bank + ledger row, NEVER clear a sheet — so a stale
-    //    tab can no longer wipe the ledger. ──
+    // ── Legacy whole-state merge (older cached tabs) ──
     if (body.banks || body.ledger) {
       if (body.banks) {
-        const rows = await readSheet(BANKS_SHEET);
-        const idById = new Map<string, number>();
-        rows.forEach((r, i) => { if (i > 0 && r[0]) idById.set(r[0], i + 1); });
-        for (const bank of body.banks) {
-          if (!bank.id) continue;
-          const row = serializeBank(bank);
-          const sheetRow = idById.get(String(bank.id));
-          if (sheetRow) await updateRow(BANKS_SHEET, sheetRow, row);
-          else await writeRows(BANKS_SHEET, [row]);
+        const rows = body.banks.filter((b) => b.id).map((b) => bankToDb(b));
+        if (rows.length > 0) {
+          const { error } = await supabase
+            .from("fe_banks")
+            .upsert(rows, { onConflict: "id" });
+          if (error) throw error;
         }
       }
       if (body.ledger) {
-        const rows = await readSheet(LEDGER_SHEET);
-        const keyToRow = new Map<string, number>();
-        rows.forEach((r, i) => { if (i > 0 && r[0]) keyToRow.set(`${r[0]}::${r[1]}`, i + 1); });
         for (const [accountId, entries] of Object.entries(body.ledger)) {
-          for (const e of entries) {
-            if (!e.id) continue;
-            const row = serializeEntry(accountId, e);
-            const sheetRow = keyToRow.get(`${accountId}::${e.id}`);
-            if (sheetRow) await updateRow(LEDGER_SHEET, sheetRow, row);
-            else await writeRows(LEDGER_SHEET, [row]);
+          const rows = entries.filter((e) => e.id).map((e) => entryToDb(accountId, e));
+          if (rows.length > 0) {
+            const { error } = await supabase
+              .from("fe_ledger")
+              .upsert(rows, { onConflict: "account_id,id" });
+            if (error) throw error;
           }
         }
       }
@@ -159,8 +217,6 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    await init();
-
     const body = await request.json() as {
       accountId: string;
       rowId: string;
@@ -168,27 +224,23 @@ export async function PATCH(request: Request) {
       value: string | number | boolean | null;
     };
 
-    const rows = await readSheet(LEDGER_SHEET);
-    const fieldIdx = LEDGER_HEADERS.indexOf(body.field);
-    if (fieldIdx === -1) {
+    // Convert camelCase field name to snake_case column name
+    const snakeField = LEDGER_FIELD_MAP[body.field];
+    if (!snakeField) {
       return Response.json({ error: `Unknown field: ${body.field}` }, { status: 400 });
     }
 
-    let updatedRowIdx = -1;
-    for (let i = 1; i < rows.length; i++) {
-      if (rows[i][0] === body.accountId && rows[i][1] === body.rowId) {
-        rows[i][fieldIdx] = String(body.value ?? "");
-        updatedRowIdx = i;
-        break;
-      }
-    }
+    const { error, count } = await supabase
+      .from("fe_ledger")
+      .update({ [snakeField]: body.value }, { count: "exact" })
+      .eq("account_id", body.accountId)
+      .eq("id", body.rowId);
 
-    if (updatedRowIdx === -1) {
+    if (error) throw error;
+    if (count === 0) {
       return Response.json({ error: "Row not found" }, { status: 404 });
     }
 
-    // Write only the one changed row — no full-sheet rewrite.
-    await updateRow(LEDGER_SHEET, updatedRowIdx + 1, rows[updatedRowIdx]);
     return Response.json({ updated: true });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

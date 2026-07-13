@@ -1,30 +1,26 @@
-import { ensureSheet, readSheet, writeRows, clearAndWrite } from "@/lib/google-sheets";
-
-const KEYS_SHEET  = "DeptAPIKeys";
-const USAGE_SHEET = "APIUsageLogs";
-
-const KEYS_HEADERS  = ["id", "deptName", "apiKey", "createdAt", "active"];
-const USAGE_HEADERS = ["timestamp", "deptId", "deptName", "module", "model", "inputTokens", "outputTokens", "costUSD"];
-
-async function init() {
-  await ensureSheet(KEYS_SHEET, KEYS_HEADERS);
-  await ensureSheet(USAGE_SHEET, USAGE_HEADERS);
-}
-
-// ── Dept Keys ─────────────────────────────────────────────────────────────────
+import { supabase } from "@/lib/supabase";
 
 export async function GET(request: Request) {
   try {
-    await init();
     const { searchParams } = new URL(request.url);
     const type = searchParams.get("type");
 
     if (type === "usage") {
-      const rows = await readSheet(USAGE_SHEET);
-      const logs = rows.slice(1).filter(r => r[0]).map(r => ({
-        timestamp: r[0], deptId: r[1], deptName: r[2], module: r[3],
-        model: r[4], inputTokens: Number(r[5]) || 0, outputTokens: Number(r[6]) || 0,
-        costUSD: parseFloat(r[7]) || 0,
+      const { data, error } = await supabase
+        .from("api_usage_logs")
+        .select("*")
+        .order("timestamp", { ascending: true });
+      if (error) throw new Error(error.message);
+
+      const logs = (data ?? []).map((r) => ({
+        timestamp: r.timestamp,
+        deptId: r.dept_id ?? "",
+        deptName: r.dept_name ?? "",
+        module: r.module ?? "",
+        model: r.model ?? "",
+        inputTokens: Number(r.input_tokens) || 0,
+        outputTokens: Number(r.output_tokens) || 0,
+        costUSD: Number(r.cost_usd) || 0,
       }));
 
       // Aggregate per dept
@@ -53,11 +49,17 @@ export async function GET(request: Request) {
     }
 
     // Return dept keys (with key masked for display)
-    const rows = await readSheet(KEYS_SHEET);
-    const depts = rows.slice(1).filter(r => r[0] && r[4] === "true").map(r => ({
-      id: r[0], deptName: r[1],
-      maskedKey: r[2] ? `${r[2].slice(0, 8)}...${r[2].slice(-4)}` : "",
-      createdAt: r[3],
+    const { data, error } = await supabase
+      .from("dept_api_keys")
+      .select("*")
+      .eq("active", true);
+    if (error) throw new Error(error.message);
+
+    const depts = (data ?? []).map((r) => ({
+      id: r.id,
+      deptName: r.dept_name ?? "",
+      maskedKey: r.api_key ? `${r.api_key.slice(0, 8)}...${r.api_key.slice(-4)}` : "",
+      createdAt: r.created_at ?? "",
     }));
     return Response.json({ depts });
   } catch (err) {
@@ -67,35 +69,56 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    await init();
     const body = await request.json() as { action: string; deptName?: string; apiKey?: string; deptId?: string; usage?: Record<string, unknown> };
 
     if (body.action === "add-dept") {
       const id = Math.random().toString(36).slice(2, 10);
-      await writeRows(KEYS_SHEET, [[id, body.deptName ?? "", body.apiKey ?? "", new Date().toISOString(), "true"]]);
+      const { error } = await supabase.from("dept_api_keys").insert({
+        id,
+        dept_name: body.deptName ?? "",
+        api_key: body.apiKey ?? "",
+        created_at: new Date().toISOString(),
+        active: true,
+      });
+      if (error) throw new Error(error.message);
       return Response.json({ created: true, id });
     }
 
     if (body.action === "delete-dept") {
-      const rows = await readSheet(KEYS_SHEET);
-      for (let i = 1; i < rows.length; i++) {
-        if (rows[i][0] === body.deptId) { rows[i][4] = "false"; break; }
-      }
-      await clearAndWrite(KEYS_SHEET, rows);
+      const { error } = await supabase
+        .from("dept_api_keys")
+        .update({ active: false })
+        .eq("id", body.deptId);
+      if (error) throw new Error(error.message);
       return Response.json({ deleted: true });
     }
 
     if (body.action === "log-usage") {
       const u = body.usage as { deptId: string; deptName: string; module: string; model: string; inputTokens: number; outputTokens: number; costUSD: number };
-      await writeRows(USAGE_SHEET, [[new Date().toISOString(), u.deptId, u.deptName, u.module, u.model, String(u.inputTokens), String(u.outputTokens), String(u.costUSD)]]);
+      const { error } = await supabase.from("api_usage_logs").insert({
+        timestamp: new Date().toISOString(),
+        dept_id: u.deptId,
+        dept_name: u.deptName,
+        module: u.module,
+        model: u.model,
+        input_tokens: u.inputTokens,
+        output_tokens: u.outputTokens,
+        cost_usd: u.costUSD,
+      });
+      if (error) throw new Error(error.message);
       return Response.json({ logged: true });
     }
 
     if (body.action === "get-key") {
       // Return actual API key for a dept (server-side only, used by AI routes)
-      const rows = await readSheet(KEYS_SHEET);
-      const row = rows.slice(1).find(r => r[0] === body.deptId && r[4] === "true");
-      return Response.json({ apiKey: row ? row[2] : null });
+      const { data, error } = await supabase
+        .from("dept_api_keys")
+        .select("api_key")
+        .eq("id", body.deptId)
+        .eq("active", true)
+        .single();
+      if (error && error.code !== "PGRST116") throw new Error(error.message);
+      return Response.json({ apiKey: data ? data.api_key : null });
     }
 
     return Response.json({ error: "Unknown action" }, { status: 400 });

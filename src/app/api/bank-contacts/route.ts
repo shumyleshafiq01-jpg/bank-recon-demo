@@ -1,60 +1,69 @@
-import { ensureSheet, readSheet, updateRow, writeRows, deleteRow } from "@/lib/google-sheets";
+import { supabase } from "@/lib/supabase";
 
-const SHEET = "BankContacts";
-const HEADERS = ["id","name","designation","phone","ptcl","email","bankBranch","notes"];
+function toFrontend(r: Record<string, unknown>) {
+  return {
+    id: (r.id as string) ?? "",
+    name: (r.name as string) ?? "",
+    designation: (r.designation as string) ?? "",
+    phone: (r.phone as string) ?? "",
+    ptcl: (r.ptcl as string) ?? "",
+    email: (r.email as string) ?? "",
+    bankBranch: (r.bank_branch as string) ?? "",
+    notes: (r.notes as string) ?? "",
+  };
+}
 
-async function init() { await ensureSheet(SHEET, HEADERS); }
-
-function parseRow(r: string[]) {
-  return { id: r[0]??"", name: r[1]??"", designation: r[2]??"", phone: r[3]??"",
-    ptcl: r[4]??"", email: r[5]??"", bankBranch: r[6]??"", notes: r[7]??"" };
+function toDb(c: Record<string, string>) {
+  return {
+    id: c.id ?? "",
+    name: c.name ?? "",
+    designation: c.designation ?? "",
+    phone: c.phone ?? "",
+    ptcl: c.ptcl ?? "",
+    email: c.email ?? "",
+    bank_branch: c.bankBranch ?? "",
+    notes: c.notes ?? "",
+  };
 }
 
 export async function GET() {
   try {
-    await init();
-    const rows = await readSheet(SHEET);
-    return Response.json({ contacts: rows.slice(1).filter(r => r[0]).map(parseRow) });
+    const { data, error } = await supabase.from("bank_contacts").select("*");
+    if (error) throw new Error(error.message);
+    return Response.json({ contacts: (data ?? []).map(toFrontend) });
   } catch (err) {
     return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
 
-function serializeRow(c: Record<string, string>): string[] {
-  return HEADERS.map(h => String(c[h] ?? ""));
-}
-
 export async function POST(request: Request) {
   try {
-    await init();
-    const body = await request.json() as { action?: string; contact?: Record<string,string>; id?: string; contacts?: Record<string,string>[] };
+    const body = await request.json() as { action?: string; contact?: Record<string, string>; id?: string; contacts?: Record<string, string>[] };
 
     if (body.action === "upsert" && body.contact) {
-      const rows = await readSheet(SHEET);
-      const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.contact!.id);
-      const row = serializeRow(body.contact);
-      if (idx > 0) await updateRow(SHEET, idx + 1, row);
-      else await writeRows(SHEET, [row]);
+      const { error } = await supabase
+        .from("bank_contacts")
+        .upsert(toDb(body.contact), { onConflict: "id" });
+      if (error) throw new Error(error.message);
       return Response.json({ saved: true });
     }
 
     if (body.action === "delete" && body.id) {
-      const rows = await readSheet(SHEET);
-      const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.id);
-      if (idx > 0) await deleteRow(SHEET, idx + 1);
+      const { error } = await supabase
+        .from("bank_contacts")
+        .delete()
+        .eq("id", body.id);
+      if (error) throw new Error(error.message);
       return Response.json({ deleted: true });
     }
 
     if (body.contacts) {
-      const rows = await readSheet(SHEET);
-      const idById = new Map<string, number>();
-      rows.forEach((r, i) => { if (i > 0 && r[0]) idById.set(r[0], i + 1); });
-      for (const c of body.contacts) {
-        if (!c.id) continue;
-        const row = serializeRow(c);
-        const sr = idById.get(c.id);
-        if (sr) await updateRow(SHEET, sr, row);
-        else await writeRows(SHEET, [row]);
+      const dbRows = body.contacts.filter((c) => c.id).map(toDb);
+      if (dbRows.length > 0) {
+        const { error } = await supabase
+          .from("bank_contacts")
+          .upsert(dbRows, { onConflict: "id" });
+        if (error) throw new Error(error.message);
       }
       return Response.json({ saved: true, merged: true });
     }

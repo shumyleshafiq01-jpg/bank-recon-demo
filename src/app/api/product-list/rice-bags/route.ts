@@ -1,49 +1,69 @@
-import { ensureSheet, readSheet, updateRow, writeRows, deleteRow } from "@/lib/google-sheets";
+import { supabase } from "@/lib/supabase";
 import { RICE_DEFAULT_BAGS } from "@/lib/rice-costing";
 
 // Rice bag packaging — the component prices per bag type & size. The $/PMT
 // surcharge (added at CNF) is CALCULATED from these via calcBagRate, so updating
 // a bag's PKR prices or the dollar rate re-prices every quote automatically.
-const SHEET = "RICE_Bags";
-const HEADERS = ["id", "type", "sizeLabel", "outerQty", "outerPKR", "innerQty", "innerPKR", "masterQty", "masterPKR", "labourPKR", "sortOrder"];
 
 const genId = () => Math.random().toString(36).slice(2, 10);
 
-async function init() { await ensureSheet(SHEET, HEADERS); }
-
-function parseRow(r: string[]) {
+/* ── snake_case DB row → camelCase frontend object ── */
+function toClient(row: Record<string, unknown>) {
   return {
-    id: r[0] ?? "", type: r[1] ?? "", sizeLabel: r[2] ?? "",
-    outerQty: parseFloat(r[3]) || 0, outerPKR: parseFloat(r[4]) || 0,
-    innerQty: parseFloat(r[5]) || 0, innerPKR: parseFloat(r[6]) || 0,
-    masterQty: parseFloat(r[7]) || 0, masterPKR: parseFloat(r[8]) || 0,
-    labourPKR: parseFloat(r[9]) || 0, sortOrder: parseInt(r[10]) || 0,
+    id: row.id ?? "",
+    type: row.type ?? "",
+    sizeLabel: row.size_label ?? "",
+    outerQty: Number(row.outer_qty) || 0,
+    outerPKR: Number(row.outer_pkr) || 0,
+    innerQty: Number(row.inner_qty) || 0,
+    innerPKR: Number(row.inner_pkr) || 0,
+    masterQty: Number(row.master_qty) || 0,
+    masterPKR: Number(row.master_pkr) || 0,
+    labourPKR: Number(row.labour_pkr) || 0,
+    sortOrder: Number(row.sort_order) || 0,
   };
 }
 
-function serializeRow(b: Record<string, unknown>): string[] {
-  return [
-    String(b.id ?? genId()), String(b.type ?? ""), String(b.sizeLabel ?? ""),
-    String(b.outerQty ?? 0), String(b.outerPKR ?? 0), String(b.innerQty ?? 0), String(b.innerPKR ?? 0),
-    String(b.masterQty ?? 0), String(b.masterPKR ?? 0), String(b.labourPKR ?? 0), String(b.sortOrder ?? 0),
-  ];
+/* ── camelCase frontend object → snake_case DB row ── */
+function toRow(b: Record<string, unknown>) {
+  return {
+    id: String(b.id ?? genId()),
+    type: String(b.type ?? ""),
+    size_label: String(b.sizeLabel ?? ""),
+    outer_qty: Number(b.outerQty) || 0,
+    outer_pkr: Number(b.outerPKR) || 0,
+    inner_qty: Number(b.innerQty) || 0,
+    inner_pkr: Number(b.innerPKR) || 0,
+    master_qty: Number(b.masterQty) || 0,
+    master_pkr: Number(b.masterPKR) || 0,
+    labour_pkr: Number(b.labourPKR) || 0,
+    sort_order: Number(b.sortOrder) || 0,
+  };
 }
 
 // First open: seed the NON WOVEN component prices from Hafeez's sheet so the
 // accountant has real, recognisable data to review/adjust.
 async function ensureSeeded() {
-  const rows = await readSheet(SHEET);
-  if (rows.length > 1) return;
-  const seed = RICE_DEFAULT_BAGS.map((b, i) => serializeRow({ ...b, id: genId(), sortOrder: i }));
-  if (seed.length) await writeRows(SHEET, seed);
+  const { data, error } = await supabase.from("rice_bags").select("id").limit(1);
+  if (error) throw error;
+  if (data && data.length > 0) return;
+
+  const seed = RICE_DEFAULT_BAGS.map((b, i) => toRow({ ...b, id: genId(), sortOrder: i }));
+  if (seed.length) {
+    const { error: insertErr } = await supabase.from("rice_bags").insert(seed);
+    if (insertErr) throw insertErr;
+  }
 }
 
 export async function GET() {
   try {
-    await init();
     await ensureSeeded();
-    const rows = await readSheet(SHEET);
-    const bags = rows.slice(1).filter(r => r[0]).map(parseRow).sort((a, b) => a.sortOrder - b.sortOrder);
+    const { data, error } = await supabase
+      .from("rice_bags")
+      .select("*")
+      .order("sort_order", { ascending: true });
+    if (error) throw error;
+    const bags = (data ?? []).map(toClient);
     return Response.json({ bags });
   } catch (err) {
     return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
@@ -52,22 +72,18 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    await init();
     const body = await request.json() as { action: string; bag?: Record<string, unknown>; id?: string };
 
     if (body.action === "upsert" && body.bag) {
-      const rows = await readSheet(SHEET);
-      const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.bag!.id);
-      const row = serializeRow(body.bag);
-      if (idx > 0) await updateRow(SHEET, idx + 1, row);
-      else await writeRows(SHEET, [row]);
+      const row = toRow(body.bag);
+      const { error } = await supabase.from("rice_bags").upsert(row, { onConflict: "id" });
+      if (error) throw error;
       return Response.json({ saved: true });
     }
 
     if (body.action === "delete" && body.id) {
-      const rows = await readSheet(SHEET);
-      const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.id);
-      if (idx > 0) await deleteRow(SHEET, idx + 1);
+      const { error } = await supabase.from("rice_bags").delete().eq("id", body.id);
+      if (error) throw error;
       return Response.json({ deleted: true });
     }
 

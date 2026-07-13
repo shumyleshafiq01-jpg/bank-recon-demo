@@ -1,19 +1,28 @@
-import { ensureSheet, readSheet, updateRow, writeRows, deleteRow } from "@/lib/google-sheets";
+import { supabase } from "@/lib/supabase";
 
-const SHEET = "PL_Categories";
-const HEADERS = ["id", "name", "createdAt"];
+const TABLE = "pl_categories";
 
-async function init() { await ensureSheet(SHEET, HEADERS); }
+function toFrontend(row: Record<string, unknown>) {
+  return {
+    id: row.id ?? "",
+    name: row.name ?? "",
+    createdAt: row.created_at ?? "",
+  };
+}
 
-function parseRow(r: string[]) {
-  return { id: r[0] ?? "", name: r[1] ?? "", createdAt: r[2] ?? "" };
+function toDb(c: Record<string, unknown>, createdAt?: string) {
+  return {
+    id: c.id ?? "",
+    name: c.name ?? "",
+    created_at: createdAt ?? new Date().toISOString(),
+  };
 }
 
 export async function GET() {
   try {
-    await init();
-    const rows = await readSheet(SHEET);
-    return Response.json({ categories: rows.slice(1).filter(r => r[0]).map(parseRow) });
+    const { data, error } = await supabase.from(TABLE).select();
+    if (error) throw error;
+    return Response.json({ categories: (data ?? []).map(toFrontend) });
   } catch (err) {
     return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
@@ -21,23 +30,23 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    await init();
     const body = await request.json() as { action: string; category?: Record<string, unknown>; id?: string };
 
     if (body.action === "upsert" && body.category) {
       const c = body.category;
-      const rows = await readSheet(SHEET);
-      const idx = rows.findIndex((r, i) => i > 0 && r[0] === c.id);
-      const row = [String(c.id ?? ""), String(c.name ?? ""), idx > 0 ? rows[idx][2] : new Date().toISOString()];
-      if (idx > 0) await updateRow(SHEET, idx + 1, row);
-      else await writeRows(SHEET, [row]);
+      let createdAt: string | undefined;
+      if (c.id) {
+        const { data: existing } = await supabase.from(TABLE).select("created_at").eq("id", c.id).single();
+        if (existing) createdAt = existing.created_at;
+      }
+      const { error } = await supabase.from(TABLE).upsert(toDb(c, createdAt), { onConflict: "id" });
+      if (error) throw error;
       return Response.json({ saved: true });
     }
 
     if (body.action === "delete" && body.id) {
-      const rows = await readSheet(SHEET);
-      const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.id);
-      if (idx > 0) await deleteRow(SHEET, idx + 1);
+      const { error } = await supabase.from(TABLE).delete().eq("id", body.id);
+      if (error) throw error;
       return Response.json({ deleted: true });
     }
 

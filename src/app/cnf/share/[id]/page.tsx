@@ -1,17 +1,7 @@
-import { readSheet, ensureSheet } from "@/lib/google-sheets";
+import { supabase } from "@/lib/supabase";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import PrintButton from "../PrintButton";
-
-const SHEET = "CNF_Quotes";
-const HEADERS = [
-  "id","quoteNo","clientName","clientContact","destination","country","generatedAt","validTill","status","createdBy","brandKafi","brandEssence","notes","productsSnapshot",
-  "quoteType","discountType","discountScope","discountValue","discountAmount","discountProductIds",
-  "shipmentPort","shippingMode","leadTime",
-];
-
-const BRANDS_SHEET = "PL_Brands";
-const BRANDS_HEADERS = ["id", "name", "address", "city", "country", "logoUrl", "createdAt", "contactPerson", "website", "email"];
 
 type QuoteProduct = {
   productId?: string; productName: string; sku: string; specs: string; packagingDesc: string;
@@ -21,44 +11,61 @@ type QuoteProduct = {
 
 type Brand = { id: string; name: string; contactPerson: string; website: string; email: string };
 
-// Distinguishes "this quote genuinely doesn't exist" (real 404) from "the
-// Sheets read failed" (transient — e.g. a brief rate-limit hiccup), which
-// used to be conflated: any fetch error rendered a hard 404 that looked like
-// the quote had vanished, when it was actually still there.
+type Quote = {
+  id: string; quoteNo: string; clientName: string; clientContact: string;
+  destination: string; country: string; generatedAt: string; validTill: string;
+  status: string; createdBy: string; brandKafi: boolean; brandEssence: boolean;
+  notes: string; products: QuoteProduct[];
+  quoteType: "CNF" | "FOB";
+  discountType: "none" | "percent" | "amount";
+  discountScope: "all" | "specific";
+  discountValue: number; discountAmount: number; discountProductIds: string[];
+  shipmentPort: string; shippingMode: string; leadTime: string;
+};
+
 type GetQuoteResult =
-  | { status: "ok"; quote: NonNullable<ReturnType<typeof parseQuoteRow>> }
+  | { status: "ok"; quote: Quote }
   | { status: "not_found" }
   | { status: "error" };
 
-function parseQuoteRow(row: string[]) {
-  let products: QuoteProduct[] = [];
-  try { products = JSON.parse(row[13] ?? "[]"); } catch { products = []; }
-  let discountProductIds: string[] = [];
-  try { discountProductIds = JSON.parse(row[19] ?? "[]"); } catch { discountProductIds = []; }
+function rowToQuote(row: Record<string, unknown>): Quote {
   return {
-    id: row[0], quoteNo: row[1], clientName: row[2], clientContact: row[3],
-    destination: row[4], country: row[5], generatedAt: row[6], validTill: row[7],
-    status: row[8], createdBy: row[9], brandKafi: row[10] !== "false", brandEssence: row[11] === "true",
-    notes: row[12], products,
-    quoteType: (row[14] || "CNF") as "CNF" | "FOB",
-    discountType: (row[15] || "none") as "none" | "percent" | "amount",
-    discountScope: (row[16] || "all") as "all" | "specific",
-    discountValue: parseFloat(row[17]) || 0,
-    discountAmount: parseFloat(row[18]) || 0,
-    discountProductIds,
-    shipmentPort: row[20] || "Karachi Port",
-    shippingMode: row[21] || "By Sea",
-    leadTime: row[22] || "30 to 35 Working Days",
+    id: String(row.id ?? ""),
+    quoteNo: String(row.quote_no ?? ""),
+    clientName: String(row.client_name ?? ""),
+    clientContact: String(row.client_contact ?? ""),
+    destination: String(row.destination ?? ""),
+    country: String(row.country ?? ""),
+    generatedAt: String(row.generated_at ?? ""),
+    validTill: String(row.valid_till ?? ""),
+    status: String(row.status ?? "active"),
+    createdBy: String(row.created_by ?? ""),
+    brandKafi: row.brand_kafi !== false,
+    brandEssence: row.brand_essence === true,
+    notes: String(row.notes ?? ""),
+    products: (row.products_snapshot as QuoteProduct[]) ?? [],
+    quoteType: (row.quote_type || "CNF") as "CNF" | "FOB",
+    discountType: (row.discount_type || "none") as "none" | "percent" | "amount",
+    discountScope: (row.discount_scope || "all") as "all" | "specific",
+    discountValue: Number(row.discount_value) || 0,
+    discountAmount: Number(row.discount_amount) || 0,
+    discountProductIds: (row.discount_product_ids as string[]) ?? [],
+    shipmentPort: String(row.shipment_port || "Karachi Port"),
+    shippingMode: String(row.shipping_mode || "By Sea"),
+    leadTime: String(row.lead_time || "30 to 35 Working Days"),
   };
 }
 
 async function getQuote(id: string): Promise<GetQuoteResult> {
   try {
-    await ensureSheet(SHEET, HEADERS);
-    const rows = await readSheet(SHEET);
-    const row = rows.slice(1).find(r => r[0] === id);
-    if (!row) return { status: "not_found" };
-    return { status: "ok", quote: parseQuoteRow(row) };
+    const { data, error } = await supabase
+      .from("cnf_quotes")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+    if (error) return { status: "error" };
+    if (!data) return { status: "not_found" };
+    return { status: "ok", quote: rowToQuote(data) };
   } catch {
     return { status: "error" };
   }
@@ -66,10 +73,14 @@ async function getQuote(id: string): Promise<GetQuoteResult> {
 
 async function getBrands(): Promise<Brand[]> {
   try {
-    await ensureSheet(BRANDS_SHEET, BRANDS_HEADERS);
-    const rows = await readSheet(BRANDS_SHEET);
-    return rows.slice(1).filter(r => r[0]).map(r => ({
-      id: r[0] ?? "", name: r[1] ?? "", contactPerson: r[7] ?? "", website: r[8] ?? "", email: r[9] ?? "",
+    const { data, error } = await supabase.from("pl_brands").select("*");
+    if (error) return [];
+    return (data ?? []).map((r) => ({
+      id: String(r.id ?? ""),
+      name: String(r.name ?? ""),
+      contactPerson: String(r.contact_person ?? ""),
+      website: String(r.website ?? ""),
+      email: String(r.email ?? ""),
     }));
   } catch {
     return [];

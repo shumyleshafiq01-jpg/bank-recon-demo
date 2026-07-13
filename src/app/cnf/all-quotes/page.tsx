@@ -1,12 +1,5 @@
-import { readSheet, ensureSheet } from "@/lib/google-sheets";
+import { supabase } from "@/lib/supabase";
 import Link from "next/link";
-
-const SHEET = "CNF_Quotes";
-const HEADERS = [
-  "id","quoteNo","clientName","clientContact","destination","country","generatedAt","validTill","status","createdBy","brandKafi","brandEssence","notes","productsSnapshot",
-  "quoteType","discountType","discountScope","discountValue","discountAmount","discountProductIds",
-  "shipmentPort","shippingMode","leadTime",
-];
 
 type QuoteRow = {
   id: string; quoteNo: string; clientName: string; destination: string; country: string;
@@ -16,20 +9,29 @@ type QuoteRow = {
 
 async function getQuotes(): Promise<QuoteRow[]> {
   try {
-    await ensureSheet(SHEET, HEADERS);
-    const rows = await readSheet(SHEET);
-    return rows.slice(1).filter(r => r[0]).map(r => {
-      let products: { qty: number; cnfPerCarton: number }[] = [];
-      try { products = JSON.parse(r[13] ?? "[]"); } catch { products = []; }
+    const { data, error } = await supabase
+      .from("cnf_quotes")
+      .select("*")
+      .eq("status", "active");
+    if (error) return [];
+    return (data ?? []).map((r) => {
+      const products: { qty: number; cnfPerCarton: number }[] = (r.products_snapshot as { qty: number; cnfPerCarton: number }[]) ?? [];
       const subtotal = products.reduce((s, p) => s + (p.cnfPerCarton ?? 0) * (p.qty ?? 0), 0);
-      const discountAmount = parseFloat(r[18]) || 0;
+      const discountAmount = Number(r.discount_amount) || 0;
       return {
-        id: r[0], quoteNo: r[1] ?? "", clientName: r[2] ?? "", destination: r[4] ?? "",
-        country: r[5] ?? "", generatedAt: r[6] ?? "", validTill: r[7] ?? "", status: r[8] ?? "active",
-        productCount: products.length, total: subtotal - discountAmount,
-        quoteType: (r[14] || "CNF") as "CNF" | "FOB",
+        id: r.id,
+        quoteNo: r.quote_no ?? "",
+        clientName: r.client_name ?? "",
+        destination: r.destination ?? "",
+        country: r.country ?? "",
+        generatedAt: r.generated_at ?? "",
+        validTill: r.valid_till ?? "",
+        status: r.status ?? "active",
+        productCount: products.length,
+        total: subtotal - discountAmount,
+        quoteType: (r.quote_type || "CNF") as "CNF" | "FOB",
       };
-    }).filter(q => q.status === "active");
+    });
   } catch {
     return [];
   }
@@ -86,9 +88,6 @@ export default async function AllQuotesPage() {
                         {expired ? "EXPIRED" : fmtDate(q.validTill + "T00:00:00")}
                       </td>
                       <td style={{ padding: "20px 26px", textAlign: "right" }}>
-                        {/* prefetch=false: with many active quotes, Next.js prefetching every visible
-                            Link would fire dozens of simultaneous Google Sheets reads on page load —
-                            enough to trip Sheets' rate limit and cause failures elsewhere in the app. */}
                         <Link href={`/cnf/share/${q.id}`} prefetch={false} style={{ fontSize: 15, fontWeight: 600, color: "#1e40af", textDecoration: "none", whiteSpace: "nowrap" }}>View →</Link>
                       </td>
                     </tr>

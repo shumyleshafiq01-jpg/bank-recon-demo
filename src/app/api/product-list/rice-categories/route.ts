@@ -1,20 +1,21 @@
-import { ensureSheet, readSheet, updateRow, writeRows, deleteRow } from "@/lib/google-sheets";
+import { supabase } from "@/lib/supabase";
 
-// Rice division categories — separate sheet from Food & Spices (PL_Categories).
-const SHEET = "RICE_Categories";
-const HEADERS = ["id", "name", "createdAt"];
+// Rice division categories — separate table from Food & Spices (pl_categories).
 
-async function init() { await ensureSheet(SHEET, HEADERS); }
-
-function parseRow(r: string[]) {
-  return { id: r[0] ?? "", name: r[1] ?? "", createdAt: r[2] ?? "" };
+/* ── snake_case DB row → camelCase frontend object ── */
+function toClient(row: Record<string, unknown>) {
+  return {
+    id: row.id ?? "",
+    name: row.name ?? "",
+    createdAt: row.created_at ?? "",
+  };
 }
 
 export async function GET() {
   try {
-    await init();
-    const rows = await readSheet(SHEET);
-    return Response.json({ categories: rows.slice(1).filter(r => r[0]).map(parseRow) });
+    const { data, error } = await supabase.from("rice_categories").select("*");
+    if (error) throw error;
+    return Response.json({ categories: (data ?? []).map(toClient) });
   } catch (err) {
     return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
@@ -22,23 +23,27 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    await init();
     const body = await request.json() as { action: string; category?: Record<string, unknown>; id?: string };
 
     if (body.action === "upsert" && body.category) {
       const c = body.category;
-      const rows = await readSheet(SHEET);
-      const idx = rows.findIndex((r, i) => i > 0 && r[0] === c.id);
-      const row = [String(c.id ?? ""), String(c.name ?? ""), idx > 0 ? rows[idx][2] : new Date().toISOString()];
-      if (idx > 0) await updateRow(SHEET, idx + 1, row);
-      else await writeRows(SHEET, [row]);
+      const row: Record<string, unknown> = {
+        id: String(c.id ?? ""),
+        name: String(c.name ?? ""),
+      };
+      // Only set created_at for new inserts (when no id exists yet in the table)
+      // Supabase upsert will keep existing created_at on update if we don't send it
+      if (!c.id) {
+        row.created_at = new Date().toISOString();
+      }
+      const { error } = await supabase.from("rice_categories").upsert(row, { onConflict: "id" });
+      if (error) throw error;
       return Response.json({ saved: true });
     }
 
     if (body.action === "delete" && body.id) {
-      const rows = await readSheet(SHEET);
-      const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.id);
-      if (idx > 0) await deleteRow(SHEET, idx + 1);
+      const { error } = await supabase.from("rice_categories").delete().eq("id", body.id);
+      if (error) throw error;
       return Response.json({ deleted: true });
     }
 

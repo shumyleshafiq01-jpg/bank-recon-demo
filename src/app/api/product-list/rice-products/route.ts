@@ -1,38 +1,51 @@
-import { ensureSheet, readSheet, updateRow, writeRows, deleteRow } from "@/lib/google-sheets";
+import { supabase } from "@/lib/supabase";
 
 // Rice division products — each row is a full costing sheet (recovery %,
-// purchase rate, by-product % breakdown). Separate sheet from PL_Products.
-const SHEET = "RICE_Products";
-const HEADERS = ["id", "sku", "name", "brandId", "category", "imageUrl", "packagingDesc", "quantity", "recoveryPct", "purchaseRate", "freight", "byproducts", "active"];
+// purchase rate, by-product % breakdown). Separate table from pl_products.
 
-function parseRow(r: string[]) {
-  let byproducts: { name: string; percent: number; rate: number }[] = [];
-  try { byproducts = JSON.parse(r[11] || "[]"); } catch { byproducts = []; }
+/* ── snake_case DB row → camelCase frontend object ── */
+function toClient(row: Record<string, unknown>) {
   return {
-    id: r[0] ?? "", sku: r[1] ?? "", name: r[2] ?? "", brandId: r[3] ?? "", category: r[4] ?? "",
-    imageUrl: r[5] ?? "", packagingDesc: r[6] ?? "",
-    quantity: parseFloat(r[7]) || 1000, recoveryPct: parseFloat(r[8]) || 90,
-    purchaseRate: parseFloat(r[9]) || 0, freight: parseFloat(r[10]) || 0,
-    byproducts, active: r[12] !== "false",
+    id: row.id ?? "",
+    sku: row.sku ?? "",
+    name: row.name ?? "",
+    brandId: row.brand_id ?? "",
+    category: row.category ?? "",
+    imageUrl: row.image_url ?? "",
+    packagingDesc: row.packaging_desc ?? "",
+    quantity: Number(row.quantity) || 1000,
+    recoveryPct: Number(row.recovery_pct) || 90,
+    purchaseRate: Number(row.purchase_rate) || 0,
+    freight: Number(row.freight) || 0,
+    byproducts: row.byproducts ?? [],
+    active: row.active !== false,
   };
 }
 
-function serializeRow(p: Record<string, unknown>): string[] {
-  return [
-    String(p.id ?? ""), String(p.sku ?? ""), String(p.name ?? ""), String(p.brandId ?? ""), String(p.category ?? ""),
-    String(p.imageUrl ?? ""), String(p.packagingDesc ?? ""),
-    String(p.quantity ?? 1000), String(p.recoveryPct ?? 90), String(p.purchaseRate ?? 0), String(p.freight ?? 0),
-    JSON.stringify(p.byproducts ?? []), String(p.active !== false),
-  ];
+/* ── camelCase frontend object → snake_case DB row ── */
+function toRow(p: Record<string, unknown>) {
+  return {
+    id: String(p.id ?? ""),
+    sku: String(p.sku ?? ""),
+    name: String(p.name ?? ""),
+    brand_id: String(p.brandId ?? ""),
+    category: String(p.category ?? ""),
+    image_url: String(p.imageUrl ?? ""),
+    packaging_desc: String(p.packagingDesc ?? ""),
+    quantity: Number(p.quantity) || 1000,
+    recovery_pct: Number(p.recoveryPct) || 90,
+    purchase_rate: Number(p.purchaseRate) || 0,
+    freight: Number(p.freight) || 0,
+    byproducts: p.byproducts ?? [],
+    active: p.active !== false,
+  };
 }
-
-async function init() { await ensureSheet(SHEET, HEADERS); }
 
 export async function GET() {
   try {
-    await init();
-    const rows = await readSheet(SHEET);
-    return Response.json({ products: rows.slice(1).filter(r => r[0]).map(parseRow) });
+    const { data, error } = await supabase.from("rice_products").select("*");
+    if (error) throw error;
+    return Response.json({ products: (data ?? []).map(toClient) });
   } catch (err) {
     return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
@@ -40,22 +53,18 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    await init();
     const body = await request.json() as { action: string; product?: Record<string, unknown> };
 
     if (body.action === "upsert" && body.product) {
-      const rows = await readSheet(SHEET);
-      const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.product!.id);
-      const row = serializeRow(body.product);
-      if (idx > 0) await updateRow(SHEET, idx + 1, row);
-      else await writeRows(SHEET, [row]);
+      const row = toRow(body.product);
+      const { error } = await supabase.from("rice_products").upsert(row, { onConflict: "id" });
+      if (error) throw error;
       return Response.json({ saved: true });
     }
 
     if (body.action === "delete" && body.product) {
-      const rows = await readSheet(SHEET);
-      const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.product!.id);
-      if (idx > 0) await deleteRow(SHEET, idx + 1);
+      const { error } = await supabase.from("rice_products").delete().eq("id", body.product.id);
+      if (error) throw error;
       return Response.json({ deleted: true });
     }
 

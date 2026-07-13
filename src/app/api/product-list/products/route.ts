@@ -1,38 +1,48 @@
-import { ensureSheet, readSheet, updateRow, writeRows, deleteRow } from "@/lib/google-sheets";
+import { supabase } from "@/lib/supabase";
 
-const SHEET = "PL_Products";
-const HEADERS = ["id","sku","name","productType","fclQty","grossProfitPct","imageUrl","notes","active","specs","packagingDesc","brandId","category"];
+const TABLE = "pl_products";
 
-async function init() { await ensureSheet(SHEET, HEADERS); }
-
-function parseRow(r: string[]) {
+function toFrontend(row: Record<string, unknown>) {
   return {
-    id: r[0] ?? "", sku: r[1] ?? "", name: r[2] ?? "", productType: r[3] ?? "FINISH GOODS",
-    fclQty: parseFloat(r[4]) || 1500,
-    grossProfitPct: parseFloat(r[5]) || 50,
-    imageUrl: r[6] ?? "",
-    notes: r[7] ?? "", active: r[8] !== "false",
-    specs: r[9] ?? "", packagingDesc: r[10] ?? "",
-    brandId: r[11] ?? "",
-    category: r[12] ?? "",
+    id: row.id ?? "",
+    sku: row.sku ?? "",
+    name: row.name ?? "",
+    productType: row.product_type ?? "FINISH GOODS",
+    fclQty: parseFloat(String(row.fcl_qty)) || 1500,
+    grossProfitPct: parseFloat(String(row.gross_profit_pct)) || 50,
+    imageUrl: row.image_url ?? "",
+    notes: row.notes ?? "",
+    active: row.active !== false,
+    specs: row.specs ?? "",
+    packagingDesc: row.packaging_desc ?? "",
+    brandId: row.brand_id ?? "",
+    category: row.category ?? "",
   };
 }
 
-function serializeRow(p: Record<string, unknown>): string[] {
-  return [
-    String(p.id ?? ""), String(p.sku ?? ""), String(p.name ?? ""), String(p.productType ?? "FINISH GOODS"),
-    String(p.fclQty ?? 1500), String(p.grossProfitPct ?? 50),
-    String(p.imageUrl ?? ""), String(p.notes ?? ""),
-    String(p.active !== false), String(p.specs ?? ""), String(p.packagingDesc ?? ""),
-    String(p.brandId ?? ""), String(p.category ?? ""),
-  ];
+function toDb(p: Record<string, unknown>) {
+  return {
+    id: p.id ?? "",
+    sku: p.sku ?? "",
+    name: p.name ?? "",
+    product_type: p.productType ?? "FINISH GOODS",
+    fcl_qty: p.fclQty ?? 1500,
+    gross_profit_pct: p.grossProfitPct ?? 50,
+    image_url: p.imageUrl ?? "",
+    notes: p.notes ?? "",
+    active: p.active !== false,
+    specs: p.specs ?? "",
+    packaging_desc: p.packagingDesc ?? "",
+    brand_id: p.brandId ?? "",
+    category: p.category ?? "",
+  };
 }
 
 export async function GET() {
   try {
-    await init();
-    const rows = await readSheet(SHEET);
-    return Response.json({ products: rows.slice(1).filter(r => r[0]).map(parseRow) });
+    const { data, error } = await supabase.from(TABLE).select();
+    if (error) throw error;
+    return Response.json({ products: (data ?? []).map(toFrontend) });
   } catch (err) {
     return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
@@ -40,22 +50,17 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    await init();
     const body = await request.json() as { action: string; product?: Record<string, unknown> };
 
     if (body.action === "upsert" && body.product) {
-      const rows = await readSheet(SHEET);
-      const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.product!.id);
-      const row = serializeRow(body.product);
-      if (idx > 0) await updateRow(SHEET, idx + 1, row);
-      else await writeRows(SHEET, [row]);
+      const { error } = await supabase.from(TABLE).upsert(toDb(body.product), { onConflict: "id" });
+      if (error) throw error;
       return Response.json({ saved: true });
     }
 
     if (body.action === "delete" && body.product) {
-      const rows = await readSheet(SHEET);
-      const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.product!.id);
-      if (idx > 0) await deleteRow(SHEET, idx + 1);
+      const { error } = await supabase.from(TABLE).delete().eq("id", body.product.id);
+      if (error) throw error;
       return Response.json({ deleted: true });
     }
 

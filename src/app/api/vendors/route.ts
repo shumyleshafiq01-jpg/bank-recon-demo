@@ -1,25 +1,40 @@
-import { ensureSheet, readSheet, updateRow, writeRows, deleteRow } from "@/lib/google-sheets";
+import { supabase } from "@/lib/supabase";
 
-const SHEET = "VB_Vendors";
-const HEADERS = ["id","vendorName","contactPerson","commodity","phone","bank","acTitle","acNo","branchCode","notes"];
-
-async function init() { await ensureSheet(SHEET, HEADERS); }
-
-function parseRow(r: string[]) {
-  return { id: r[0]??"", vendorName: r[1]??"", contactPerson: r[2]??"", commodity: r[3]??"",
-    phone: r[4]??"", bank: r[5]??"", acTitle: r[6]??"", acNo: r[7]??"",
-    branchCode: r[8]??"", notes: r[9]??"" };
+function toFrontend(r: Record<string, unknown>) {
+  return {
+    id: (r.id as string) ?? "",
+    vendorName: (r.vendor_name as string) ?? "",
+    contactPerson: (r.contact_person as string) ?? "",
+    commodity: (r.commodity as string) ?? "",
+    phone: (r.phone as string) ?? "",
+    bank: (r.bank as string) ?? "",
+    acTitle: (r.ac_title as string) ?? "",
+    acNo: (r.ac_no as string) ?? "",
+    branchCode: (r.branch_code as string) ?? "",
+    notes: (r.notes as string) ?? "",
+  };
 }
 
-function serializeRow(v: Record<string,string>): string[] {
-  return HEADERS.map(h => String(v[h] ?? ""));
+function toDb(v: Record<string, string>) {
+  return {
+    id: v.id ?? "",
+    vendor_name: v.vendorName ?? "",
+    contact_person: v.contactPerson ?? "",
+    commodity: v.commodity ?? "",
+    phone: v.phone ?? "",
+    bank: v.bank ?? "",
+    ac_title: v.acTitle ?? "",
+    ac_no: v.acNo ?? "",
+    branch_code: v.branchCode ?? "",
+    notes: v.notes ?? "",
+  };
 }
 
 export async function GET() {
   try {
-    await init();
-    const rows = await readSheet(SHEET);
-    return Response.json({ vendors: rows.slice(1).filter(r => r[0]).map(parseRow) });
+    const { data, error } = await supabase.from("vb_vendors").select("*");
+    if (error) throw new Error(error.message);
+    return Response.json({ vendors: (data ?? []).map(toFrontend) });
   } catch (err) {
     return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
@@ -27,36 +42,33 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    await init();
-    const body = await request.json() as { action?: string; vendor?: Record<string,string>; id?: string; vendors?: Record<string,string>[] };
+    const body = await request.json() as { action?: string; vendor?: Record<string, string>; id?: string; vendors?: Record<string, string>[] };
 
     if (body.action === "upsert" && body.vendor) {
-      const rows = await readSheet(SHEET);
-      const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.vendor!.id);
-      const row = serializeRow(body.vendor);
-      if (idx > 0) await updateRow(SHEET, idx + 1, row);
-      else await writeRows(SHEET, [row]);
+      const { error } = await supabase
+        .from("vb_vendors")
+        .upsert(toDb(body.vendor), { onConflict: "id" });
+      if (error) throw new Error(error.message);
       return Response.json({ saved: true });
     }
 
     if (body.action === "delete" && body.id) {
-      const rows = await readSheet(SHEET);
-      const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.id);
-      if (idx > 0) await deleteRow(SHEET, idx + 1);
+      const { error } = await supabase
+        .from("vb_vendors")
+        .delete()
+        .eq("id", body.id);
+      if (error) throw new Error(error.message);
       return Response.json({ deleted: true });
     }
 
-    // Legacy whole-array path (older cached tabs) — merge only, never clear.
+    // Legacy whole-array path — merge only, never clear.
     if (body.vendors) {
-      const rows = await readSheet(SHEET);
-      const idById = new Map<string, number>();
-      rows.forEach((r, i) => { if (i > 0 && r[0]) idById.set(r[0], i + 1); });
-      for (const v of body.vendors) {
-        if (!v.id) continue;
-        const row = serializeRow(v);
-        const sr = idById.get(v.id);
-        if (sr) await updateRow(SHEET, sr, row);
-        else await writeRows(SHEET, [row]);
+      const dbRows = body.vendors.filter((v) => v.id).map(toDb);
+      if (dbRows.length > 0) {
+        const { error } = await supabase
+          .from("vb_vendors")
+          .upsert(dbRows, { onConflict: "id" });
+        if (error) throw new Error(error.message);
       }
       return Response.json({ saved: true, merged: true });
     }

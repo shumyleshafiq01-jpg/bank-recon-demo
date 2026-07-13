@@ -1,20 +1,36 @@
-import { ensureSheet, readSheet, clearAndWrite, updateRow, writeRows, deleteRow } from "@/lib/google-sheets";
+import { supabase } from "@/lib/supabase";
 
-const SHEET = "PL_Master";
-const HEADERS = ["id", "name", "unit", "category", "pricePerUnit", "updatedAt", "defaultUnitType"];
+const TABLE = "pl_master";
 
-async function init() { await ensureSheet(SHEET, HEADERS); }
+function toFrontend(row: Record<string, unknown>) {
+  return {
+    id: row.id ?? "",
+    name: row.name ?? "",
+    unit: row.unit ?? "",
+    category: row.category ?? "",
+    pricePerUnit: parseFloat(String(row.price_per_unit)) || 0,
+    updatedAt: row.updated_at ?? "",
+    defaultUnitType: (row.default_unit_type || "PCS") as "PCS" | "CONTAINER" | "FIXED",
+  };
+}
 
-function parseRow(r: string[]) {
-  return { id: r[0] ?? "", name: r[1] ?? "", unit: r[2] ?? "", category: r[3] ?? "",
-    pricePerUnit: parseFloat(r[4]) || 0, updatedAt: r[5] ?? "", defaultUnitType: (r[6] || "PCS") as "PCS" | "CONTAINER" | "FIXED" };
+function toDb(m: Record<string, unknown>) {
+  return {
+    id: m.id ?? "",
+    name: m.name ?? "",
+    unit: m.unit ?? "",
+    category: m.category ?? "",
+    price_per_unit: m.pricePerUnit ?? 0,
+    updated_at: new Date().toISOString(),
+    default_unit_type: m.defaultUnitType ?? "PCS",
+  };
 }
 
 export async function GET() {
   try {
-    await init();
-    const rows = await readSheet(SHEET);
-    return Response.json({ materials: rows.slice(1).filter(r => r[0]).map(parseRow) });
+    const { data, error } = await supabase.from(TABLE).select();
+    if (error) throw error;
+    return Response.json({ materials: (data ?? []).map(toFrontend) });
   } catch (err) {
     return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
@@ -22,33 +38,29 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    await init();
     const body = await request.json() as { action: string; material?: Record<string, unknown>; materials?: Record<string, unknown>[] };
 
     if (body.action === "upsert" && body.material) {
-      const m = body.material;
-      const rows = await readSheet(SHEET);
-      const idx = rows.findIndex((r, i) => i > 0 && r[0] === m.id);
-      const row = [String(m.id ?? ""), String(m.name ?? ""), String(m.unit ?? ""), String(m.category ?? ""),
-        String(m.pricePerUnit ?? 0), new Date().toISOString(), String(m.defaultUnitType ?? "PCS")];
-      if (idx > 0) await updateRow(SHEET, idx + 1, row);
-      else await writeRows(SHEET, [row]);
+      const { error } = await supabase.from(TABLE).upsert(toDb(body.material), { onConflict: "id" });
+      if (error) throw error;
       return Response.json({ saved: true });
     }
 
     if (body.action === "delete" && body.material) {
-      const rows = await readSheet(SHEET);
-      const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.material!.id);
-      if (idx > 0) await deleteRow(SHEET, idx + 1);
+      const { error } = await supabase.from(TABLE).delete().eq("id", body.material.id);
+      if (error) throw error;
       return Response.json({ deleted: true });
     }
 
     if (body.action === "bulk" && body.materials) {
-      const data = [HEADERS, ...body.materials.map(m => [
-        String(m.id ?? ""), String(m.name ?? ""), String(m.unit ?? ""), String(m.category ?? ""),
-        String(m.pricePerUnit ?? 0), new Date().toISOString(), String(m.defaultUnitType ?? "PCS"),
-      ])];
-      await clearAndWrite(SHEET, data);
+      // Delete all then insert — mirrors the old clearAndWrite behavior
+      const { error: delError } = await supabase.from(TABLE).delete().neq("id", "");
+      if (delError) throw delError;
+      const rows = body.materials.map(m => toDb(m));
+      if (rows.length > 0) {
+        const { error: insError } = await supabase.from(TABLE).insert(rows);
+        if (insError) throw insError;
+      }
       return Response.json({ saved: true });
     }
 

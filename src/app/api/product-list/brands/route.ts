@@ -1,21 +1,44 @@
-import { ensureSheet, readSheet, updateRow, writeRows, deleteRow } from "@/lib/google-sheets";
+import { supabase } from "@/lib/supabase";
 
-const SHEET = "PL_Brands";
-const HEADERS = ["id", "name", "address", "city", "country", "logoUrl", "createdAt", "contactPerson", "website", "email"];
+const TABLE = "pl_brands";
 
-async function init() { await ensureSheet(SHEET, HEADERS); }
+// Supabase snake_case → frontend camelCase
+function toFrontend(row: Record<string, unknown>) {
+  return {
+    id: row.id ?? "",
+    name: row.name ?? "",
+    address: row.address ?? "",
+    city: row.city ?? "",
+    country: row.country ?? "",
+    logoUrl: row.logo_url ?? "",
+    createdAt: row.created_at ?? "",
+    contactPerson: row.contact_person ?? "",
+    website: row.website ?? "",
+    email: row.email ?? "",
+  };
+}
 
-function parseRow(r: string[]) {
-  return { id: r[0] ?? "", name: r[1] ?? "", address: r[2] ?? "", city: r[3] ?? "",
-    country: r[4] ?? "", logoUrl: r[5] ?? "", createdAt: r[6] ?? "",
-    contactPerson: r[7] ?? "", website: r[8] ?? "", email: r[9] ?? "" };
+// Frontend camelCase → Supabase snake_case
+function toDb(b: Record<string, unknown>, createdAt?: string) {
+  return {
+    id: b.id ?? "",
+    name: b.name ?? "",
+    address: b.address ?? "",
+    city: b.city ?? "",
+    country: b.country ?? "",
+    logo_url: b.logoUrl ?? "",
+    created_at: createdAt ?? new Date().toISOString(),
+    contact_person: b.contactPerson ?? "",
+    website: b.website ?? "",
+    email: b.email ?? "",
+  };
 }
 
 export async function GET() {
   try {
-    await init();
-    const rows = await readSheet(SHEET);
-    return Response.json({ brands: rows.slice(1).filter(r => r[0]).map(parseRow) });
+    const { data, error } = await supabase.from(TABLE).select();
+    if (error) throw error;
+    return Response.json({ brands: (data ?? []).map(toFrontend) });
   } catch (err) {
     return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
@@ -23,25 +46,24 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    await init();
     const body = await request.json() as { action: string; brand?: Record<string, unknown> };
 
     if (body.action === "upsert" && body.brand) {
       const b = body.brand;
-      const rows = await readSheet(SHEET);
-      const idx = rows.findIndex((r, i) => i > 0 && r[0] === b.id);
-      const row = [String(b.id ?? ""), String(b.name ?? ""), String(b.address ?? ""), String(b.city ?? ""),
-        String(b.country ?? ""), String(b.logoUrl ?? ""), idx > 0 ? rows[idx][6] : new Date().toISOString(),
-        String(b.contactPerson ?? ""), String(b.website ?? ""), String(b.email ?? "")];
-      if (idx > 0) await updateRow(SHEET, idx + 1, row);
-      else await writeRows(SHEET, [row]);
+      // Check if exists to preserve createdAt
+      let createdAt: string | undefined;
+      if (b.id) {
+        const { data: existing } = await supabase.from(TABLE).select("created_at").eq("id", b.id).single();
+        if (existing) createdAt = existing.created_at;
+      }
+      const { error } = await supabase.from(TABLE).upsert(toDb(b, createdAt), { onConflict: "id" });
+      if (error) throw error;
       return Response.json({ saved: true });
     }
 
     if (body.action === "delete" && body.brand) {
-      const rows = await readSheet(SHEET);
-      const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.brand!.id);
-      if (idx > 0) await deleteRow(SHEET, idx + 1);
+      const { error } = await supabase.from(TABLE).delete().eq("id", body.brand.id);
+      if (error) throw error;
       return Response.json({ deleted: true });
     }
 

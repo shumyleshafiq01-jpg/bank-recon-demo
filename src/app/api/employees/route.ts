@@ -1,60 +1,71 @@
-import { ensureSheet, readSheet, updateRow, writeRows, deleteRow } from "@/lib/google-sheets";
+import { supabase } from "@/lib/supabase";
 
-const SHEET = "EmpBankDetails";
-const HEADERS = ["id","name","designation","phone","bank","acTitle","acNo","branchCode","notes"];
+function toFrontend(r: Record<string, unknown>) {
+  return {
+    id: (r.id as string) ?? "",
+    name: (r.name as string) ?? "",
+    designation: (r.designation as string) ?? "",
+    phone: (r.phone as string) ?? "",
+    bank: (r.bank as string) ?? "",
+    acTitle: (r.ac_title as string) ?? "",
+    acNo: (r.ac_no as string) ?? "",
+    branchCode: (r.branch_code as string) ?? "",
+    notes: (r.notes as string) ?? "",
+  };
+}
 
-async function init() { await ensureSheet(SHEET, HEADERS); }
-
-function parseRow(r: string[]) {
-  return { id: r[0]??"", name: r[1]??"", designation: r[2]??"", phone: r[3]??"",
-    bank: r[4]??"", acTitle: r[5]??"", acNo: r[6]??"", branchCode: r[7]??"", notes: r[8]??"" };
+function toDb(e: Record<string, string>) {
+  return {
+    id: e.id ?? "",
+    name: e.name ?? "",
+    designation: e.designation ?? "",
+    phone: e.phone ?? "",
+    bank: e.bank ?? "",
+    ac_title: e.acTitle ?? "",
+    ac_no: e.acNo ?? "",
+    branch_code: e.branchCode ?? "",
+    notes: e.notes ?? "",
+  };
 }
 
 export async function GET() {
   try {
-    await init();
-    const rows = await readSheet(SHEET);
-    return Response.json({ employees: rows.slice(1).filter(r => r[0]).map(parseRow) });
+    const { data, error } = await supabase.from("emp_bank_details").select("*");
+    if (error) throw new Error(error.message);
+    return Response.json({ employees: (data ?? []).map(toFrontend) });
   } catch (err) {
     return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
 
-function serializeRow(e: Record<string, string>): string[] {
-  return HEADERS.map(h => String(e[h] ?? ""));
-}
-
 export async function POST(request: Request) {
   try {
-    await init();
-    const body = await request.json() as { action?: string; employee?: Record<string,string>; id?: string; employees?: Record<string,string>[] };
+    const body = await request.json() as { action?: string; employee?: Record<string, string>; id?: string; employees?: Record<string, string>[] };
 
     if (body.action === "upsert" && body.employee) {
-      const rows = await readSheet(SHEET);
-      const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.employee!.id);
-      const row = serializeRow(body.employee);
-      if (idx > 0) await updateRow(SHEET, idx + 1, row);
-      else await writeRows(SHEET, [row]);
+      const { error } = await supabase
+        .from("emp_bank_details")
+        .upsert(toDb(body.employee), { onConflict: "id" });
+      if (error) throw new Error(error.message);
       return Response.json({ saved: true });
     }
 
     if (body.action === "delete" && body.id) {
-      const rows = await readSheet(SHEET);
-      const idx = rows.findIndex((r, i) => i > 0 && r[0] === body.id);
-      if (idx > 0) await deleteRow(SHEET, idx + 1);
+      const { error } = await supabase
+        .from("emp_bank_details")
+        .delete()
+        .eq("id", body.id);
+      if (error) throw new Error(error.message);
       return Response.json({ deleted: true });
     }
 
     if (body.employees) {
-      const rows = await readSheet(SHEET);
-      const idById = new Map<string, number>();
-      rows.forEach((r, i) => { if (i > 0 && r[0]) idById.set(r[0], i + 1); });
-      for (const e of body.employees) {
-        if (!e.id) continue;
-        const row = serializeRow(e);
-        const sr = idById.get(e.id);
-        if (sr) await updateRow(SHEET, sr, row);
-        else await writeRows(SHEET, [row]);
+      const dbRows = body.employees.filter((e) => e.id).map(toDb);
+      if (dbRows.length > 0) {
+        const { error } = await supabase
+          .from("emp_bank_details")
+          .upsert(dbRows, { onConflict: "id" });
+        if (error) throw new Error(error.message);
       }
       return Response.json({ saved: true, merged: true });
     }

@@ -1,17 +1,6 @@
-import { ensureSheet, readSheet, writeRows, updateRow, deleteRow } from "@/lib/google-sheets";
-
-const REMINDERS_SHEET = "Reminders";
-const DONE_SHEET = "RemindersDone";
-
-const REMINDERS_HEADERS = ["id", "message", "target", "dueDate", "frequency", "createdAt", "active"];
-const DONE_HEADERS = ["reminderId", "role", "markedAt"];
+import { supabase } from "@/lib/supabase";
 
 type Frequency = "one-time" | "daily" | "weekly" | "monthly" | "annual";
-
-async function init() {
-  await ensureSheet(REMINDERS_SHEET, REMINDERS_HEADERS);
-  await ensureSheet(DONE_SHEET, DONE_HEADERS);
-}
 
 function targetMatchesRole(target: string, role: string): boolean {
   if (target === "all") return true;
@@ -43,20 +32,31 @@ function isDoneForNow(frequency: Frequency, markedAt: string): boolean {
 
 export async function GET(request: Request) {
   try {
-    await init();
     const { searchParams } = new URL(request.url);
     const role = searchParams.get("role");
 
-    const rows = await readSheet(REMINDERS_SHEET);
-    const doneRows = await readSheet(DONE_SHEET);
+    const [remRes, doneRes] = await Promise.all([
+      supabase.from("reminders").select("*").eq("active", true),
+      supabase.from("reminders_done").select("*"),
+    ]);
 
-    const reminders = rows.slice(1).filter((r) => r[0] && r[6] === "true").map((r) => ({
-      id: r[0], message: r[1], target: r[2], dueDate: r[3],
-      frequency: (r[4] || "one-time") as Frequency, createdAt: r[5], active: true,
+    if (remRes.error) throw new Error(remRes.error.message);
+    if (doneRes.error) throw new Error(doneRes.error.message);
+
+    const reminders = (remRes.data ?? []).map((r) => ({
+      id: r.id as string,
+      message: r.message as string,
+      target: r.target as string,
+      dueDate: (r.due_date as string) ?? "",
+      frequency: ((r.frequency as string) || "one-time") as Frequency,
+      createdAt: (r.created_at as string) ?? "",
+      active: true,
     }));
 
-    const done = doneRows.slice(1).filter((r) => r[0]).map((r) => ({
-      reminderId: r[0], role: r[1], markedAt: r[2],
+    const done = (doneRes.data ?? []).map((r) => ({
+      reminderId: r.reminder_id as string,
+      role: r.role as string,
+      markedAt: (r.marked_at as string) ?? "",
     }));
 
     if (role && role !== "accountant-manage") {
@@ -94,12 +94,20 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    await init();
     const body = await request.json() as {
       message: string; target: string; dueDate: string; frequency: string;
     };
     const id = Math.random().toString(36).slice(2, 10);
-    await writeRows(REMINDERS_SHEET, [[id, body.message, body.target, body.dueDate, body.frequency, new Date().toISOString(), "true"]]);
+    const { error } = await supabase.from("reminders").insert({
+      id,
+      message: body.message,
+      target: body.target,
+      due_date: body.dueDate,
+      frequency: body.frequency,
+      created_at: new Date().toISOString(),
+      active: true,
+    });
+    if (error) throw new Error(error.message);
     return Response.json({ created: true, id });
   } catch (err) {
     return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
@@ -108,11 +116,15 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    await init();
     const body = await request.json() as { action: string; reminderId: string; role?: string };
 
     if (body.action === "done") {
-      await writeRows(DONE_SHEET, [[body.reminderId, body.role ?? "", new Date().toISOString()]]);
+      const { error } = await supabase.from("reminders_done").upsert({
+        reminder_id: body.reminderId,
+        role: body.role ?? "",
+        marked_at: new Date().toISOString(),
+      }, { onConflict: "reminder_id,role" });
+      if (error) throw new Error(error.message);
       return Response.json({ marked: true });
     }
 
@@ -120,33 +132,29 @@ export async function PATCH(request: Request) {
       const { reminderId, message, target, dueDate, frequency } = body as unknown as {
         action: string; reminderId: string; message: string; target: string; dueDate: string; frequency: string;
       };
-      const rows = await readSheet(REMINDERS_SHEET);
-      for (let i = 1; i < rows.length; i++) {
-        if (rows[i][0] === reminderId) {
-          rows[i][1] = message;
-          rows[i][2] = target;
-          rows[i][3] = dueDate;
-          rows[i][4] = frequency;
-          await updateRow(REMINDERS_SHEET, i + 1, rows[i]);
-          break;
-        }
-      }
+      const { error } = await supabase
+        .from("reminders")
+        .update({ message, target, due_date: dueDate, frequency })
+        .eq("id", reminderId);
+      if (error) throw new Error(error.message);
       return Response.json({ updated: true });
     }
 
     if (body.action === "reset") {
-      const rows = await readSheet(DONE_SHEET);
-      const toDelete: number[] = [];
-      for (let i = 1; i < rows.length; i++) if (rows[i][0] === body.reminderId) toDelete.push(i + 1);
-      for (const ri of toDelete.sort((a, b) => b - a)) await deleteRow(DONE_SHEET, ri);
+      const { error } = await supabase
+        .from("reminders_done")
+        .delete()
+        .eq("reminder_id", body.reminderId);
+      if (error) throw new Error(error.message);
       return Response.json({ reset: true });
     }
 
     if (body.action === "deactivate") {
-      const rows = await readSheet(REMINDERS_SHEET);
-      for (let i = 1; i < rows.length; i++) {
-        if (rows[i][0] === body.reminderId) { rows[i][6] = "false"; await updateRow(REMINDERS_SHEET, i + 1, rows[i]); break; }
-      }
+      const { error } = await supabase
+        .from("reminders")
+        .update({ active: false })
+        .eq("id", body.reminderId);
+      if (error) throw new Error(error.message);
       return Response.json({ deactivated: true });
     }
 
@@ -158,15 +166,17 @@ export async function PATCH(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
-    await init();
     const body = await request.json() as { reminderId: string };
-    const rows = await readSheet(REMINDERS_SHEET);
-    const remIdx = rows.findIndex((r, i) => i > 0 && r[0] === body.reminderId);
-    if (remIdx > 0) await deleteRow(REMINDERS_SHEET, remIdx + 1);
-    const doneRows = await readSheet(DONE_SHEET);
-    const doneToDelete: number[] = [];
-    for (let i = 1; i < doneRows.length; i++) if (doneRows[i][0] === body.reminderId) doneToDelete.push(i + 1);
-    for (const ri of doneToDelete.sort((a, b) => b - a)) await deleteRow(DONE_SHEET, ri);
+
+    // Delete done records and the reminder itself
+    const [doneRes, remRes] = await Promise.all([
+      supabase.from("reminders_done").delete().eq("reminder_id", body.reminderId),
+      supabase.from("reminders").delete().eq("id", body.reminderId),
+    ]);
+
+    if (doneRes.error) throw new Error(doneRes.error.message);
+    if (remRes.error) throw new Error(remRes.error.message);
+
     return Response.json({ deleted: true });
   } catch (err) {
     return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
