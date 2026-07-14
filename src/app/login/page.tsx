@@ -1,10 +1,9 @@
 "use client";
 
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useState, useEffect, useRef, useCallback, Suspense } from "react";
-import { Landmark, Shield, User, FlaskConical, ArrowRight, AlertTriangle, ChevronLeft } from "lucide-react";
-
-const TESTING_DEADLINE = new Date("2026-06-20T12:00:00Z").getTime();
+import { Landmark, ChevronLeft, Loader2 } from "lucide-react";
+import { supabaseBrowser } from "@/lib/supabase-client";
 
 type Node = { x: number; y: number; vx: number; vy: number; radius: number };
 
@@ -131,21 +130,49 @@ function NeuronBackground() {
   );
 }
 
+function GoogleIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 48 48">
+      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+      <path fill="#FBBC05" d="M10.53 28.59a14.5 14.5 0 0 1 0-9.18l-7.98-6.19a24.0 24.0 0 0 0 0 21.56l7.98-6.19z"/>
+      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+    </svg>
+  );
+}
+
 function LoginContent() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const expired = searchParams.get("expired") === "1";
-  const testingAvailable = Date.now() < TESTING_DEADLINE;
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [checking, setChecking] = useState(true);
 
-  function handleUser() {
-    localStorage.setItem("session", JSON.stringify({ type: "user", ts: Date.now() }));
-    router.push("/dashboard");
+  useEffect(() => {
+    supabaseBrowser.auth.getSession().then(({ data }) => {
+      if (data.session) {
+        router.replace("/dashboard");
+      } else {
+        setChecking(false);
+      }
+    });
+  }, [router]);
+
+  async function handleGoogleLogin() {
+    setLoading(true);
+    setError("");
+    const { error: err } = await supabaseBrowser.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${window.location.origin}/dashboard`,
+      },
+    });
+    if (err) {
+      setError(err.message);
+      setLoading(false);
+    }
   }
 
-  function handleTesting() {
-    localStorage.setItem("session", JSON.stringify({ type: "testing", ts: Date.now() }));
-    router.push("/dashboard");
-  }
+  if (checking) return null;
 
   return (
     <div className="flex-1 flex items-center justify-center p-6 min-h-screen" style={{ background: "#e8ecf1" }}>
@@ -173,55 +200,33 @@ function LoginContent() {
             AI-Powered Finance Agent
           </p>
           <p className="text-gray-400 text-xs">
-            by Sheikh Shumyle &middot; Created: 9 June 2026
+            by Sheikh Shumyle &middot; Kafi Commodities
           </p>
         </div>
 
-        {/* Expired Banner */}
-        {expired && (
-          <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-700">
-            <AlertTriangle className="w-4 h-4 shrink-0" />
-            Your testing session has expired. Please select an access type to continue.
-          </div>
-        )}
-
-        {/* Account Selection */}
+        {/* Sign in */}
         <div className="bg-white/70 backdrop-blur-xl rounded-2xl border border-gray-200/80 p-6 space-y-4 shadow-lg shadow-black/5">
-          <div className="flex items-center gap-3 text-sm text-gray-500">
-            <Shield className="w-4 h-4 text-blue-500" />
-            <span>Select your access type</span>
-          </div>
+          <p className="text-sm text-gray-500 text-center">
+            Sign in to access the finance dashboard
+          </p>
 
-          {/* User Account */}
           <button
-            onClick={handleUser}
-            className="w-full flex items-center gap-4 bg-gray-50/80 hover:bg-blue-50 border border-gray-200 hover:border-blue-300 rounded-xl p-4 transition-all cursor-pointer group text-left"
+            onClick={handleGoogleLogin}
+            disabled={loading}
+            className="w-full flex items-center justify-center gap-3 bg-white hover:bg-gray-50 border border-gray-300 hover:border-gray-400 rounded-xl px-4 py-3.5 transition-all cursor-pointer group text-left shadow-sm"
           >
-            <div className="w-11 h-11 rounded-xl bg-blue-100 flex items-center justify-center shrink-0">
-              <User className="w-5 h-5 text-blue-600" />
-            </div>
-            <div className="flex-1">
-              <h3 className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">User</h3>
-              <p className="text-xs text-gray-400 mt-0.5">Team access</p>
-            </div>
-            <ArrowRight className="w-4 h-4 text-gray-300 group-hover:text-blue-500 transition-colors" />
+            {loading ? (
+              <Loader2 className="w-5 h-5 text-gray-400 animate-spin" />
+            ) : (
+              <GoogleIcon />
+            )}
+            <span className="font-medium text-gray-700 text-sm">
+              {loading ? "Redirecting..." : "Sign in with Google"}
+            </span>
           </button>
 
-          {/* Testing Account */}
-          {testingAvailable && (
-            <button
-              onClick={handleTesting}
-              className="w-full flex items-center gap-4 bg-gray-50/80 hover:bg-cyan-50 border border-gray-200 hover:border-cyan-300 rounded-xl p-4 transition-all cursor-pointer group text-left"
-            >
-              <div className="w-11 h-11 rounded-xl bg-cyan-100 flex items-center justify-center shrink-0">
-                <FlaskConical className="w-5 h-5 text-cyan-600" />
-              </div>
-              <div className="flex-1">
-                <h3 className="font-semibold text-gray-900 group-hover:text-cyan-600 transition-colors">Testing</h3>
-                <p className="text-xs text-gray-400 mt-0.5">Beta access &middot; expires in {Math.max(0, Math.ceil((TESTING_DEADLINE - Date.now()) / 3600000))} hours</p>
-              </div>
-              <ArrowRight className="w-4 h-4 text-gray-300 group-hover:text-cyan-500 transition-colors" />
-            </button>
+          {error && (
+            <p className="text-xs text-red-500 text-center">{error}</p>
           )}
         </div>
 
@@ -229,7 +234,6 @@ function LoginContent() {
           AI Agent Finance &middot; Kafi Commodities
         </p>
       </div>
-
     </div>
   );
 }
