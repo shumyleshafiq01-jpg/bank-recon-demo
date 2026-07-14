@@ -11,6 +11,7 @@ import { compressImage } from "@/lib/image-compress";
 /* ═══════════ types (brands/categories mirror Food & Spices) */
 interface RiceBrand { id: string; name: string; address: string; city: string; country: string; logoUrl: string; createdAt: string; contactPerson: string; website: string; email: string; }
 interface RiceCategory { id: string; name: string; createdAt: string; }
+interface RiceMockup { id: string; name: string; imageUrl: string; productIds: string[]; bagIds: string[]; sortOrder: number; }
 
 const genId = () => Math.random().toString(36).slice(2, 10);
 const fmt2 = (n: number) => n.toFixed(2);
@@ -55,6 +56,7 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
   const [settings, setSettings] = useState<RiceSettings>({ ...RICE_DEFAULT_SETTINGS });
   const [brands, setBrands] = useState<RiceBrand[]>([]);
   const [categories, setCategories] = useState<RiceCategory[]>([]);
+  const [mockups, setMockups] = useState<RiceMockup[]>([]);
 
   const [search, setSearch] = useState("");
   const [plView, setPlView] = useState<"grid" | "list">("grid");
@@ -71,13 +73,14 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
 
   const load = useCallback(async () => {
     setLoading(true); setLoadError(false);
-    const [p, m, s, b, c, bg] = await Promise.all([
+    const [p, m, s, b, c, bg, mk] = await Promise.all([
       getJson<{ products: RiceProduct[] }>("/api/product-list/rice-products", { products: [] }),
       getJson<RiceMaster>("/api/product-list/rice-master", { byproducts: [], charges: [] }),
       getJson<RiceSettings>("/api/product-list/rice-settings", { ...RICE_DEFAULT_SETTINGS }),
       getJson<{ brands: RiceBrand[] }>("/api/product-list/rice-brands", { brands: [] }),
       getJson<{ categories: RiceCategory[] }>("/api/product-list/rice-categories", { categories: [] }),
       getJson<{ bags: RiceBag[] }>("/api/product-list/rice-bags", { bags: [] }),
+      getJson<{ mockups: RiceMockup[] }>("/api/product-list/rice-mockups", { mockups: [] }),
     ]);
     setProducts(p.products ?? []);
     setMaster({ byproducts: m.byproducts ?? [], charges: m.charges ?? [] });
@@ -85,6 +88,7 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
     setBrands(b.brands ?? []);
     setCategories(c.categories ?? []);
     setBags(bg.bags ?? []);
+    setMockups(mk.mockups ?? []);
     setLoading(false);
   }, []);
 
@@ -122,6 +126,16 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
   async function deleteBag(id: string) {
     setBags(prev => prev.filter(x => x.id !== id));
     await fetch("/api/product-list/rice-bags", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete", id }) });
+  }
+
+  /* ─── mockups */
+  async function saveMockup(m: RiceMockup) {
+    setMockups(prev => prev.some(x => x.id === m.id) ? prev.map(x => x.id === m.id ? m : x) : [...prev, m]);
+    await fetch("/api/product-list/rice-mockups", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "upsert", mockup: m }) });
+  }
+  async function deleteMockup(id: string) {
+    setMockups(prev => prev.filter(x => x.id !== id));
+    await fetch("/api/product-list/rice-mockups", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete", id }) });
   }
 
   /* ─── settings */
@@ -245,7 +259,7 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
           {([
             { key: "products" as const, Icon: Package, label: "Products", desc: "Rice costing sheets — recovery %, purchase rate, by-products. Auto-calculates FOB per PMT.", count: products.length },
-            { key: "master" as const, Icon: List, label: "Master Prices", desc: "Milling & handling charges (per-kg) + bag packaging calculator ($/PMT). Update once — all rice pricing recalculates.", count: master.charges.length + bags.length },
+            { key: "master" as const, Icon: List, label: "Master Prices", desc: "Milling & handling charges (per-kg) + bag packaging calculator ($/PMT) + mockup builder. Update once — all rice pricing recalculates.", count: master.charges.length + bags.length + mockups.length },
             { key: "pricelist" as const, Icon: DollarSign, label: "Price List", desc: "Calculated rice price list, FOB per metric ton.", count: products.length },
             { key: "brands" as const, Icon: Tag, label: "Brands & Categories", desc: "Rice brands and categories. Tag each rice product to a brand and category.", count: brands.length + categories.length },
           ]).map(({ key, Icon, label, desc, count }) => (
@@ -314,6 +328,8 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
           <BagCalculator bags={bags} dollarRate={settings.bagDollarRate} overheadPct={settings.bagOverheadPct}
             onSave={(b) => requireAuth(() => saveBag(b))} onDelete={(id) => requireAuth(() => deleteBag(id))}
             onSaveSettings={(p) => requireAuth(() => saveBagSettings(p))} />
+          <MockupBuilder mockups={mockups} products={products} bags={bags}
+            onSave={(m) => requireAuth(() => saveMockup(m))} onDelete={(id) => requireAuth(() => deleteMockup(id))} />
         </div>
       )}
 
@@ -729,6 +745,174 @@ function BrandForm({ brand, onClose, onSave }: { brand: RiceBrand | null; onClos
           </Field>
         </div>
         <div className="flex justify-end gap-2 mt-4"><button onClick={onClose} className="px-4 py-2 text-sm text-muted hover:text-foreground cursor-pointer">Cancel</button><button onClick={() => onSave(d)} disabled={!d.name.trim()} className="flex items-center gap-1.5 px-4 py-2 bg-amber-500 hover:bg-amber-500/80 disabled:opacity-40 text-white text-sm font-semibold rounded-lg cursor-pointer"><Save className="w-3.5 h-3.5" /> Save</button></div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════ Mockup Builder */
+function MockupBuilder({ mockups, products, bags, onSave, onDelete }: {
+  mockups: RiceMockup[]; products: RiceProduct[]; bags: RiceBag[];
+  onSave: (m: RiceMockup) => void; onDelete: (id: string) => void;
+}) {
+  const [editing, setEditing] = useState<RiceMockup | null>(null);
+
+  return (
+    <div className="bg-surface rounded-2xl border border-border overflow-hidden">
+      <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+        <div>
+          <h3 className="text-xs font-semibold text-amber-600 uppercase tracking-wide">Mockup Builder</h3>
+          <p className="text-[10px] text-muted mt-0.5">Bag images linked to products &amp; packaging. Used as visual options when building CNF/FOB quotes.</p>
+        </div>
+        <button onClick={() => setEditing({ id: genId(), name: "", imageUrl: "", productIds: [], bagIds: [], sortOrder: mockups.length })}
+          className="flex items-center gap-1 text-xs px-3 py-1.5 bg-amber-500 hover:bg-amber-500/80 text-white rounded-lg cursor-pointer"><Plus className="w-3 h-3" /> Add mockup</button>
+      </div>
+
+      {mockups.length === 0 && !editing && (
+        <div className="px-4 py-8 text-center text-muted text-sm">No mockups yet. Click &quot;Add mockup&quot; to create one.</div>
+      )}
+
+      {mockups.length > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 p-4">
+          {mockups.map(m => (
+            <div key={m.id} className="bg-background rounded-xl border border-border overflow-hidden">
+              {m.imageUrl ? (
+                <img src={m.imageUrl} alt={m.name} className="w-full h-40 object-cover" />
+              ) : (
+                <div className="w-full h-40 bg-amber-500/5 flex items-center justify-center"><Package className="w-12 h-12 text-amber-500/20" /></div>
+              )}
+              <div className="p-3 space-y-2">
+                <p className="text-sm font-bold text-foreground">{m.name || "Untitled"}</p>
+                {m.productIds.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {m.productIds.map(pid => {
+                      const p = products.find(x => x.id === pid);
+                      return p ? <span key={pid} className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-600 font-semibold">{p.name}</span> : null;
+                    })}
+                  </div>
+                )}
+                {m.bagIds.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {m.bagIds.map(bid => {
+                      const b = bags.find(x => x.id === bid);
+                      return b ? <span key={bid} className="text-[9px] px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-500 font-semibold">{b.type} {b.sizeLabel}</span> : null;
+                    })}
+                  </div>
+                )}
+                <div className="flex items-center justify-end gap-1 pt-1 border-t border-border/50">
+                  <button onClick={() => setEditing({ ...m })} className="p-1 text-muted hover:text-amber-500 cursor-pointer"><Pencil className="w-3.5 h-3.5" /></button>
+                  <button onClick={() => onDelete(m.id)} className="p-1 text-muted hover:text-red-400 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {editing && <MockupForm mockup={editing} products={products} bags={bags} onClose={() => setEditing(null)}
+        onSave={m => { onSave(m); setEditing(null); }} />}
+    </div>
+  );
+}
+
+/* ═══════════ Mockup form modal */
+function MockupForm({ mockup, products, bags, onClose, onSave }: {
+  mockup: RiceMockup; products: RiceProduct[]; bags: RiceBag[];
+  onClose: () => void; onSave: (m: RiceMockup) => void;
+}) {
+  const [d, setD] = useState<RiceMockup>({ ...mockup, productIds: [...mockup.productIds], bagIds: [...mockup.bagIds] });
+  const [uploading, setUploading] = useState(false);
+
+  const toggleProduct = (id: string) => setD(prev => ({
+    ...prev,
+    productIds: prev.productIds.includes(id) ? prev.productIds.filter(x => x !== id) : [...prev.productIds, id],
+  }));
+  const toggleBag = (id: string) => setD(prev => ({
+    ...prev,
+    bagIds: prev.bagIds.includes(id) ? prev.bagIds.filter(x => x !== id) : [...prev.bagIds, id],
+  }));
+
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0]; if (!f) return;
+    setUploading(true);
+    try { const url = await uploadImage(f); setD(prev => ({ ...prev, imageUrl: url })); } catch { /* */ }
+    setUploading(false);
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-surface rounded-2xl border border-border w-full max-w-2xl max-h-[85vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border sticky top-0 bg-surface z-10">
+          <h3 className="text-base font-semibold text-foreground">{mockup.name ? "Edit" : "New"} Mockup</h3>
+          <div className="flex items-center gap-2">
+            <button onClick={() => onSave(d)} disabled={!d.name.trim()} className="flex items-center gap-1.5 text-sm px-4 py-2 bg-amber-500 hover:bg-amber-500/80 disabled:opacity-40 text-white rounded-lg cursor-pointer"><Save className="w-4 h-4" /> Save</button>
+            <button onClick={onClose} className="p-1.5 text-muted hover:text-foreground cursor-pointer"><X className="w-4 h-4" /></button>
+          </div>
+        </div>
+
+        <div className="p-6 space-y-5">
+          {/* Name */}
+          <div>
+            <label className="text-xs text-muted uppercase tracking-wide block mb-1">Mockup Name</label>
+            <input value={d.name} onChange={e => setD(prev => ({ ...prev, name: e.target.value }))}
+              placeholder="e.g. 1121 Sella PP 40kg Bag"
+              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-amber-500/50" />
+          </div>
+
+          {/* Image */}
+          <div>
+            <label className="text-xs text-muted uppercase tracking-wide block mb-1">Bag Image</label>
+            <div className="flex items-start gap-4">
+              {d.imageUrl ? (
+                <img src={d.imageUrl} alt={d.name} className="w-32 h-32 rounded-xl object-cover border border-border" />
+              ) : (
+                <div className="w-32 h-32 rounded-xl border border-dashed border-border bg-surface-light/30 flex items-center justify-center">
+                  <Package className="w-8 h-8 text-muted/30" />
+                </div>
+              )}
+              <div className="space-y-2">
+                <label className="flex items-center gap-1.5 text-xs px-3 py-2 border border-border rounded-lg cursor-pointer text-muted hover:text-foreground hover:border-amber-500/40">
+                  <Upload className="w-3.5 h-3.5" /> {uploading ? "Uploading…" : d.imageUrl ? "Change image" : "Upload image"}
+                  <input type="file" accept="image/*" onChange={onFile} className="hidden" />
+                </label>
+                {d.imageUrl && (
+                  <button onClick={() => setD(prev => ({ ...prev, imageUrl: "" }))} className="text-[10px] text-red-400 hover:text-red-500 cursor-pointer">Remove image</button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Products multi-select */}
+          <div>
+            <label className="text-xs text-muted uppercase tracking-wide block mb-2">Products (select which rice products this mockup applies to)</label>
+            <div className="bg-background rounded-xl border border-border p-3 max-h-48 overflow-y-auto space-y-1">
+              {products.length === 0 && <p className="text-xs text-muted text-center py-2">No rice products created yet.</p>}
+              {products.map(p => (
+                <label key={p.id} className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-surface cursor-pointer">
+                  <input type="checkbox" checked={d.productIds.includes(p.id)} onChange={() => toggleProduct(p.id)}
+                    className="w-3.5 h-3.5 rounded accent-amber-500" />
+                  <span className="text-xs text-foreground">{p.name}</span>
+                  {p.category && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-500 font-semibold">{p.category}</span>}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {/* Bags multi-select */}
+          <div>
+            <label className="text-xs text-muted uppercase tracking-wide block mb-2">Bag Packaging (select which bag types this mockup applies to)</label>
+            <div className="bg-background rounded-xl border border-border p-3 max-h-48 overflow-y-auto space-y-1">
+              {bags.length === 0 && <p className="text-xs text-muted text-center py-2">No bag packaging created yet.</p>}
+              {bags.map(b => (
+                <label key={b.id} className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-surface cursor-pointer">
+                  <input type="checkbox" checked={d.bagIds.includes(b.id)} onChange={() => toggleBag(b.id)}
+                    className="w-3.5 h-3.5 rounded accent-amber-500" />
+                  <span className="text-xs text-foreground">{b.type} {b.sizeLabel}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
