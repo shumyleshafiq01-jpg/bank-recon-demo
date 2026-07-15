@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
-import { ArrowLeft, Plus, Trash2, Pencil, X, Save, Search, Package, List, LayoutGrid, DollarSign, Settings2, Tag, Upload } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Pencil, X, Save, Search, Package, List, LayoutGrid, DollarSign, Settings2, Tag, Upload, Container, Edit2, Check, Loader2 } from "lucide-react";
+import { COUNTRIES, continentForCountry } from "@/lib/countries";
 import {
   calcRice, calcBagRate, RiceProduct, RiceMaster, RiceSettings, RiceProductByproduct, RiceBag,
   RICE_DEFAULT_SETTINGS, RICE_DEFAULT_PRODUCT_BYPRODUCTS,
@@ -39,11 +40,163 @@ async function uploadImage(rawFile: File): Promise<string> {
   return j.thumbnailUrl || j.fullUrl || "";
 }
 
-const emptyProduct = (): RiceProduct => ({
-  id: genId(), sku: "", name: "", brandId: "", category: "", imageUrl: "", packagingDesc: "",
+function suggestNextRiceSku(products: RiceProduct[]): string {
+  const rx = /^SKU-RI-(\d+)$/i;
+  const maxN = products.reduce((max, p) => {
+    const m = p.sku.match(rx);
+    return m ? Math.max(max, parseInt(m[1], 10)) : max;
+  }, 0);
+  return `SKU-RI-${String(maxN + 1).padStart(2, "0")}`;
+}
+
+const emptyProduct = (products: RiceProduct[]): RiceProduct => ({
+  id: genId(), sku: suggestNextRiceSku(products), name: "", brandId: "", category: "", imageUrl: "", packagingDesc: "",
   quantity: 1000, recoveryPct: 90, purchaseRate: 300, freight: 0,
   byproducts: RICE_DEFAULT_PRODUCT_BYPRODUCTS.map(b => ({ ...b })), active: true,
 });
+
+type ContainerMtRow = {
+  id: string; country: string; mt20: number; mt40: number; mt40hc: number; updatedAt: string;
+};
+
+function ContainerMtSection({ rows, onUpdate, requireAuth }: { rows: ContainerMtRow[]; onUpdate: (rows: ContainerMtRow[]) => void; requireAuth: (fn: () => void) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [local, setLocal] = useState<ContainerMtRow[]>(rows);
+  const [saving, setSaving] = useState(false);
+  const [search, setSearch] = useState("");
+
+  useEffect(() => { setLocal(rows); }, [rows]);
+
+  function initAllCountries() {
+    const existing = new Set(local.map(r => r.country));
+    const toAdd = COUNTRIES.filter(c => !existing.has(c.country)).map(c => ({
+      id: crypto.randomUUID(), country: c.country, mt20: 0, mt40: 0, mt40hc: 0, updatedAt: "",
+    }));
+    setLocal(prev => [...prev, ...toAdd].sort((a, b) => a.country.localeCompare(b.country)));
+  }
+
+  function updateMt(i: number, field: "mt20" | "mt40" | "mt40hc", value: number) {
+    setLocal(prev => { const next = [...prev]; next[i] = { ...next[i], [field]: Math.max(0, value) }; return next; });
+  }
+
+  async function save() {
+    setSaving(true);
+    const toSave = local.filter(r => r.mt20 > 0 || r.mt40 > 0 || r.mt40hc > 0);
+    await fetch("/api/cnf/container-mt", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rows: toSave }),
+    });
+    onUpdate(toSave);
+    setEditing(false);
+    setSaving(false);
+  }
+
+  const filtered = search
+    ? local.filter(r => r.country.toLowerCase().includes(search.toLowerCase()))
+    : local;
+  const withValues = rows.filter(r => r.mt20 > 0 || r.mt40 > 0 || r.mt40hc > 0);
+  const displayRows = editing ? filtered : withValues;
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+        <div className="flex items-center gap-2">
+          <Container className="w-4 h-4 text-green-600" />
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-gray-900">Container Capacity (MT)</h3>
+              <span className="text-[10px] bg-green-50 text-green-600 px-2 py-0.5 rounded-full font-medium">Rice only</span>
+              <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-medium">{withValues.length} countries set</span>
+            </div>
+            <p className="text-[10px] text-gray-400 mt-0.5">Metric tons per container by country — used to calculate rice freight (freight USD ÷ MT = $/MT)</p>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          {editing ? (
+            <>
+              <button onClick={() => { setLocal(rows); setEditing(false); setSearch(""); }} className="px-3 py-1.5 text-xs text-gray-500 hover:text-gray-700 cursor-pointer">Cancel</button>
+              {local.length < COUNTRIES.length && (
+                <button onClick={initAllCountries} className="flex items-center gap-1 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg cursor-pointer transition-colors">
+                  <Plus className="w-3 h-3" /> Add All Countries
+                </button>
+              )}
+              <button onClick={() => requireAuth(() => save())} disabled={saving} className="flex items-center gap-1 text-xs bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded-lg cursor-pointer transition-colors">
+                {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />} Save
+              </button>
+            </>
+          ) : (
+            <button onClick={() => { setEditing(true); if (local.length === 0) initAllCountries(); }} className="flex items-center gap-1 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg cursor-pointer transition-colors">
+              <Edit2 className="w-3 h-3" /> Edit
+            </button>
+          )}
+        </div>
+      </div>
+
+      {editing && (
+        <div className="px-4 py-2 border-b border-gray-100">
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search country…"
+            className="w-full max-w-xs border border-gray-200 rounded-lg px-3 py-1.5 text-xs text-gray-900 focus:outline-none focus:border-green-400" />
+        </div>
+      )}
+
+      {displayRows.length === 0 && !editing ? (
+        <div className="px-5 py-8 text-center text-sm text-gray-400">
+          No MT values set yet. Click Edit to configure container capacity per country.
+        </div>
+      ) : (
+        <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
+          <table className="w-full text-sm">
+            <thead className="sticky top-0 z-10">
+              <tr className="bg-gray-50 border-b border-gray-100">
+                <th className="text-left px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Country</th>
+                <th className="text-left px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Continent</th>
+                <th className="text-right px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">20ft (MT)</th>
+                <th className="text-right px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">40ft (MT)</th>
+                <th className="text-right px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">40ft HC (MT)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {displayRows.map((r) => {
+                const realIdx = local.findIndex(lr => lr.id === r.id);
+                return (
+                  <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
+                    <td className="px-4 py-2 font-medium text-gray-900 text-xs">{r.country}</td>
+                    <td className="px-4 py-2 text-xs text-gray-500">{continentForCountry(r.country) || "—"}</td>
+                    <td className="px-4 py-2 text-right">
+                      {editing ? (
+                        <input type="number" min={0} step={0.1} value={r.mt20 || ""} onChange={e => updateMt(realIdx, "mt20", parseFloat(e.target.value) || 0)}
+                          className="w-20 border border-gray-200 rounded px-2 py-1 text-xs text-gray-900 text-right focus:outline-none focus:border-green-400 ml-auto block" />
+                      ) : (
+                        <span className={`text-xs ${r.mt20 > 0 ? "font-semibold text-green-700" : "text-gray-300"}`}>{r.mt20 || "—"}</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      {editing ? (
+                        <input type="number" min={0} step={0.1} value={r.mt40 || ""} onChange={e => updateMt(realIdx, "mt40", parseFloat(e.target.value) || 0)}
+                          className="w-20 border border-gray-200 rounded px-2 py-1 text-xs text-gray-900 text-right focus:outline-none focus:border-green-400 ml-auto block" />
+                      ) : (
+                        <span className={`text-xs ${r.mt40 > 0 ? "font-semibold text-green-700" : "text-gray-300"}`}>{r.mt40 || "—"}</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      {editing ? (
+                        <input type="number" min={0} step={0.1} value={r.mt40hc || ""} onChange={e => updateMt(realIdx, "mt40hc", parseFloat(e.target.value) || 0)}
+                          className="w-20 border border-gray-200 rounded px-2 py-1 text-xs text-gray-900 text-right focus:outline-none focus:border-green-400 ml-auto block" />
+                      ) : (
+                        <span className={`text-xs ${r.mt40hc > 0 ? "font-semibold text-green-700" : "text-gray-300"}`}>{r.mt40hc || "—"}</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () => void) => void }) {
   const [tab, setTab] = useState<RiceTab>(null);
@@ -57,6 +210,7 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
   const [brands, setBrands] = useState<RiceBrand[]>([]);
   const [categories, setCategories] = useState<RiceCategory[]>([]);
   const [mockups, setMockups] = useState<RiceMockup[]>([]);
+  const [containerMtRows, setContainerMtRows] = useState<ContainerMtRow[]>([]);
 
   const [search, setSearch] = useState("");
   const [plView, setPlView] = useState<"grid" | "list">("grid");
@@ -73,7 +227,7 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
 
   const load = useCallback(async () => {
     setLoading(true); setLoadError(false);
-    const [p, m, s, b, c, bg, mk] = await Promise.all([
+    const [p, m, s, b, c, bg, mk, mt] = await Promise.all([
       getJson<{ products: RiceProduct[] }>("/api/product-list/rice-products", { products: [] }),
       getJson<RiceMaster>("/api/product-list/rice-master", { byproducts: [], charges: [] }),
       getJson<RiceSettings>("/api/product-list/rice-settings", { ...RICE_DEFAULT_SETTINGS }),
@@ -81,6 +235,7 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
       getJson<{ categories: RiceCategory[] }>("/api/product-list/rice-categories", { categories: [] }),
       getJson<{ bags: RiceBag[] }>("/api/product-list/rice-bags", { bags: [] }),
       getJson<{ mockups: RiceMockup[] }>("/api/product-list/rice-mockups", { mockups: [] }),
+      getJson<{ rows: ContainerMtRow[] }>("/api/cnf/container-mt", { rows: [] }),
     ]);
     setProducts(p.products ?? []);
     setMaster({ byproducts: m.byproducts ?? [], charges: m.charges ?? [] });
@@ -89,6 +244,7 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
     setCategories(c.categories ?? []);
     setBags(bg.bags ?? []);
     setMockups(mk.mockups ?? []);
+    setContainerMtRows(mt.rows ?? []);
     setLoading(false);
   }, []);
 
@@ -208,7 +364,7 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
               </button>
             )}
             {tab === "products" && (
-              <button onClick={() => requireAuth(() => setEditingProduct(emptyProduct()))} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-amber-500 hover:bg-amber-500/80 text-white rounded-lg cursor-pointer">
+              <button onClick={() => requireAuth(() => setEditingProduct(emptyProduct(products)))} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-amber-500 hover:bg-amber-500/80 text-white rounded-lg cursor-pointer">
                 <Plus className="w-3 h-3" /> Add Rice Product
               </button>
             )}
@@ -330,6 +486,7 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
             onSaveSettings={(p) => requireAuth(() => saveBagSettings(p))} />
           <MockupBuilder mockups={mockups} products={products} bags={bags}
             onSave={(m) => requireAuth(() => saveMockup(m))} onDelete={(id) => requireAuth(() => deleteMockup(id))} />
+          <ContainerMtSection rows={containerMtRows} onUpdate={rows => setContainerMtRows(rows)} requireAuth={requireAuth} />
         </div>
       )}
 
@@ -696,7 +853,7 @@ function SettingsForm({ settings, onClose, onSave }: { settings: RiceSettings; o
   const fields: [keyof RiceSettings, string][] = [
     ["fcRate", "FC Rate (PKR→USD)"], ["whtPct", "W.H.T %"], ["servicePct", "Service Charges %"],
     ["edsPct", "EDS %"], ["courierPct", "Courier %"], ["interestPct", "Interest %"],
-    ["profit", "Profit (USD/shipment)"], ["packagingMaterial", "Packaging Material (USD)"], ["defaultFreight", "Default Freight (USD)"],
+    ["profit", "Profit (USD/shipment)"], ["packagingMaterial", "Packaging Material (USD)"],
     ["bagDollarRate", "Bag Dollar Rate (PKR)"], ["bagOverheadPct", "Bag Overhead %"],
   ];
   return (

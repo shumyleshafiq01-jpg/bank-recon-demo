@@ -1,25 +1,35 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft, Plus, Ship, Anchor, Search, Filter, Archive,
   ArchiveRestore, Share2, ChevronDown, ChevronUp, Trash2,
-  Edit2, Check, X, Loader2, Copy,
+  Edit2, Check, X, Loader2, Copy, Container,
 } from "lucide-react";
 import { calcCost, type CostMaterial, type CostProduct, type CostRecipeItem, type CostSettings } from "@/lib/costing";
-import { calcRice, type RiceProduct, type RiceMaster, type RiceSettings } from "@/lib/rice-costing";
+import { calcRice, calcBagRate, type RiceProduct, type RiceMaster, type RiceSettings, type RiceBag } from "@/lib/rice-costing";
+import { COUNTRIES, CONTINENTS, countriesForContinent, continentForCountry } from "@/lib/countries";
 
 type FreightCard = {
-  id: string; destination: string; country: string;
-  freightPerCarton: number; freightPerTon: number; currency: string; updatedAt: string;
+  id: string; destination: string; country: string; continent: string;
+  freightUsd: number; currency: string; updatedAt: string;
 };
+
+type ContainerMtRow = {
+  id: string; country: string; mt20: number; mt40: number; mt40hc: number; updatedAt: string;
+};
+
+type ContainerSize = "20ft" | "40ft" | "40hc";
 
 type QuoteProduct = {
   productId: string; productName: string; sku: string; specs: string; packagingDesc: string;
   qty: number; fobPerCarton: number; freightPerCarton: number; cnfPerCarton: number;
   category: string; imageUrl: string; brandName: string;
   division?: "food" | "rice";
+  bagId?: string; bagLabel?: string;
+  mockupId?: string; mockupImageUrl?: string;
+  containerSize?: ContainerSize;
 };
 
 type QuoteBrand = { id: string; name: string };
@@ -77,6 +87,7 @@ function defaultValidTill() {
 
 type NewQuoteModalProps = {
   freightCards: FreightCard[];
+  containerMtRows: ContainerMtRow[];
   catalogProducts: CostProduct[];
   catalogMaterials: CostMaterial[];
   catalogRecipes: Map<string, CostRecipeItem[]>;
@@ -86,20 +97,21 @@ type NewQuoteModalProps = {
   riceMaster: RiceMaster;
   riceSettings: RiceSettings;
   riceBrands: QuoteBrand[];
+  riceBags: RiceBag[];
+  riceMockups: { id: string; name: string; imageUrl: string; productIds: string[]; bagIds: string[]; sortOrder: number }[];
   createdBy: string;
   onClose: () => void;
   onCreated: () => void;
 };
 
-function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalogRecipes, catalogSettings, catalogBrands, riceProducts, riceMaster, riceSettings, riceBrands, createdBy, onClose, onCreated }: NewQuoteModalProps) {
+function NewQuoteModal({ freightCards, containerMtRows, catalogProducts, catalogMaterials, catalogRecipes, catalogSettings, catalogBrands, riceProducts, riceMaster, riceSettings, riceBrands, riceBags, riceMockups, createdBy, onClose, onCreated }: NewQuoteModalProps) {
   const foodBrandName = (productBrandId?: string) => catalogBrands.find(b => b.id === productBrandId)?.name ?? "";
   const riceBrandName = (productBrandId?: string) => riceBrands.find(b => b.id === productBrandId)?.name ?? "";
   const [clientName, setClientName] = useState("");
   const [clientContact, setClientContact] = useState("");
   const [destination, setDestination] = useState("");
   const [country, setCountry] = useState("");
-  const [freightPerCarton, setFreightPerCarton] = useState(0);
-  const [freightPerTon, setFreightPerTon] = useState(0);
+  const [freightUsd, setFreightUsd] = useState(0);
   const [validTill, setValidTill] = useState(defaultValidTill());
   const [notes, setNotes] = useState("");
   // Brand is always Kafi Commodities on the quote — no toggle shown to the quote-maker.
@@ -147,29 +159,32 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
     return calcRice(product, riceMaster, riceSettings).fobPerPmt;
   }
 
-  // Master Freight Card stores the cost of one FULL CONTAINER to a destination.
-  // Each product's own Freight/Carton is that container cost divided by the
-  // product's FCL Container Qty (set in Product List) — different products pack
-  // differently into a container, so the per-carton freight differs per product.
   function freightFor(productId: string, containerRate: number): number {
     const product = catalogProducts.find(p => p.id === productId);
     if (!product) return 0;
     return Math.round((containerRate / (product.fclQty || 1500)) * 100) / 100;
   }
 
-  function freightForProduct(p: QuoteProduct, containerRate: number, tonRate: number, qt: QuoteType): number {
+  function riceFreightPerMt(countryName: string, containerFreight: number, cSize: ContainerSize = "20ft"): number {
+    const mtRow = containerMtRows.find(r => r.country === countryName);
+    if (!mtRow) return 0;
+    const mt = cSize === "20ft" ? mtRow.mt20 : cSize === "40ft" ? mtRow.mt40 : mtRow.mt40hc;
+    if (!mt || mt <= 0) return 0;
+    return Math.round((containerFreight / mt) * 100) / 100;
+  }
+
+  function freightForProduct(p: QuoteProduct, containerRate: number, countryName: string, qt: QuoteType): number {
     if (qt !== "CNF" || !p.productId) return 0;
-    if (p.division === "rice") return tonRate;
+    if (p.division === "rice") return riceFreightPerMt(countryName, containerRate, p.containerSize || "20ft");
     return freightFor(p.productId, containerRate);
   }
 
   function pickDestination(card: FreightCard) {
     setDestination(card.destination);
     setCountry(card.country);
-    setFreightPerCarton(card.freightPerCarton);
-    setFreightPerTon(card.freightPerTon);
+    setFreightUsd(card.freightUsd);
     setProducts(prev => prev.map(p => {
-      const freight = freightForProduct(p, card.freightPerCarton, card.freightPerTon, quoteType);
+      const freight = freightForProduct(p, card.freightUsd, card.country, quoteType);
       return { ...p, freightPerCarton: freight, cnfPerCarton: p.fobPerCarton + freight };
     }));
   }
@@ -177,7 +192,7 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
   function changeQuoteType(next: QuoteType) {
     setQuoteType(next);
     setProducts(prev => prev.map(p => {
-      const freight = freightForProduct(p, freightPerCarton, freightPerTon, next);
+      const freight = freightForProduct(p, freightUsd, country, next);
       return { ...p, freightPerCarton: freight, cnfPerCarton: p.fobPerCarton + freight };
     }));
   }
@@ -197,7 +212,7 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
           p.imageUrl = rp?.imageUrl ?? "";
           p.brandName = riceBrandName(rp?.brandId);
           p.fobPerCarton = riceFobPerPmt(String(value));
-          p.freightPerCarton = (quoteType === "CNF") ? freightPerTon : 0;
+          p.freightPerCarton = (quoteType === "CNF") ? riceFreightPerMt(country, freightUsd, p.containerSize || "20ft") : 0;
           p.cnfPerCarton = p.fobPerCarton + p.freightPerCarton;
         } else {
           const product = catalogProducts.find(cp => cp.id === value);
@@ -209,7 +224,7 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
           p.imageUrl = product?.imageUrl ?? "";
           p.brandName = foodBrandName(product?.brandId);
           p.fobPerCarton = fobFor(String(value), p.qty);
-          p.freightPerCarton = (quoteType === "CNF") ? freightFor(String(value), freightPerCarton) : 0;
+          p.freightPerCarton = (quoteType === "CNF") ? freightFor(String(value), freightUsd) : 0;
           p.cnfPerCarton = p.fobPerCarton + p.freightPerCarton;
         }
       } else if (field === "qty") {
@@ -239,18 +254,18 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
     if (div === "rice") {
       const rp = riceProducts.find(cp => cp.id === productId);
       const fob = riceFobPerPmt(productId);
-      const freight = (quoteType === "CNF") ? freightPerTon : 0;
+      const freight = (quoteType === "CNF") ? riceFreightPerMt(country, freightUsd, "20ft") : 0;
       return {
         productId, productName: rp?.name ?? "", sku: rp?.sku ?? "",
         specs: "", packagingDesc: rp?.packagingDesc ?? "",
         category: rp?.category ?? "", imageUrl: rp?.imageUrl ?? "", brandName: riceBrandName(rp?.brandId),
         qty: 1, fobPerCarton: fob, freightPerCarton: freight, cnfPerCarton: fob + freight,
-        division: "rice",
+        division: "rice", containerSize: "20ft",
       };
     }
     const product = catalogProducts.find(cp => cp.id === productId);
     const fob = fobFor(productId, 1);
-    const freight = (quoteType === "CNF") ? freightFor(productId, freightPerCarton) : 0;
+    const freight = (quoteType === "CNF") ? freightFor(productId, freightUsd) : 0;
     return {
       productId, productName: product?.name ?? "", sku: product?.sku ?? "",
       specs: product?.specs || product?.notes || "", packagingDesc: product?.packagingDesc ?? "",
@@ -480,6 +495,61 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
                       ))}
                     </select>
                   </div>
+                  {p.division === "rice" && p.productId && (
+                    <>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Bag Packaging *</label>
+                        <select value={p.bagId ?? ""} onChange={e => {
+                          const bag = riceBags.find(b => b.id === e.target.value);
+                          setProducts(prev => { const next = [...prev]; next[i] = { ...next[i], bagId: bag?.id ?? "", bagLabel: bag ? `${bag.type} — ${bag.sizeLabel}` : "" }; return next; });
+                        }} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-400 bg-white cursor-pointer">
+                          <option value="">— Select bag packaging —</option>
+                          {riceBags.map(b => (
+                            <option key={b.id} value={b.id}>{b.type} — {b.sizeLabel}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Mockup Image *</label>
+                        <select value={p.mockupId ?? ""} onChange={e => {
+                          const mk = riceMockups.find(m => m.id === e.target.value);
+                          setProducts(prev => { const next = [...prev]; next[i] = { ...next[i], mockupId: mk?.id ?? "", mockupImageUrl: mk?.imageUrl ?? "" }; return next; });
+                        }} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-400 bg-white cursor-pointer">
+                          <option value="">— Select mockup —</option>
+                          {riceMockups.filter(m => m.productIds.includes(p.productId)).map(m => (
+                            <option key={m.id} value={m.id}>{m.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Container Size *</label>
+                      <div className="flex gap-2">
+                        {(["20ft", "40ft", "40hc"] as ContainerSize[]).map(sz => (
+                          <button key={sz} type="button" onClick={() => {
+                            const freight = riceFreightPerMt(country, freightUsd, sz);
+                            setProducts(prev => { const next = [...prev]; next[i] = { ...next[i], containerSize: sz, freightPerCarton: freight, cnfPerCarton: next[i].fobPerCarton + freight }; return next; });
+                          }}
+                            className={`flex-1 border rounded-lg px-3 py-2 text-sm cursor-pointer transition-all ${(p.containerSize || "20ft") === sz ? "border-blue-500 bg-blue-50 text-blue-700 font-medium" : "border-gray-200 text-gray-500 hover:border-gray-300"}`}>
+                            {sz === "40hc" ? "40ft HC" : sz.toUpperCase()}
+                          </button>
+                        ))}
+                      </div>
+                      {(() => {
+                        const mtRow = containerMtRows.find(r => r.country === country);
+                        const mt = !mtRow ? 0 : (p.containerSize || "20ft") === "20ft" ? mtRow.mt20 : (p.containerSize || "20ft") === "40ft" ? mtRow.mt40 : mtRow.mt40hc;
+                        return mt > 0 ? (
+                          <p className="text-[10px] text-gray-400 mt-1">
+                            ${freightUsd.toLocaleString()} ÷ {mt} MT = ${p.freightPerCarton.toFixed(2)}/MT freight
+                          </p>
+                        ) : country ? (
+                          <p className="text-[10px] text-amber-600 mt-1">MT not set for {country} — set it in Rice → Master Prices → Container Capacity</p>
+                        ) : null;
+                      })()}
+                    </div>
+                    </>
+                  )}
                   {(() => {
                     const unit = p.division === "rice" ? "PMT" : "Carton";
                     return (
@@ -650,7 +720,7 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
                       {catProducts.map(p => {
                         const already = inQuote.has(p.id);
                         const fob = isRice ? riceFobPerPmt(p.id) : fobFor(p.id, 1);
-                        const freight = quoteType !== "CNF" ? 0 : isRice ? freightPerTon : freightFor(p.id, freightPerCarton);
+                        const freight = quoteType !== "CNF" ? 0 : isRice ? riceFreightPerMt(country, freightUsd, "20ft") : freightFor(p.id, freightUsd);
                         const cnf = fob + freight;
                         const checked = catPickerSelected.has(p.id);
                         return (
@@ -688,6 +758,52 @@ function NewQuoteModal({ freightCards, catalogProducts, catalogMaterials, catalo
   );
 }
 
+// ─── Searchable Select (for freight card dropdowns) ─────────────────────────
+
+function FreightSearchSelect({ value, options, onChange, placeholder = "— Select —", className = "" }: {
+  value: string; options: string[]; onChange: (v: string) => void; placeholder?: string; className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const filtered = query ? options.filter(o => o.toLowerCase().includes(query.toLowerCase())) : options;
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  useEffect(() => { if (open && inputRef.current) inputRef.current.focus(); }, [open]);
+
+  return (
+    <div ref={ref} className={`relative ${className}`}>
+      <button type="button" onClick={() => { setOpen(!open); setQuery(""); }}
+        className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 text-left focus:outline-none focus:border-blue-400 cursor-pointer truncate bg-white">
+        {value || <span className="text-gray-400">{placeholder}</span>}
+      </button>
+      {open && (
+        <div className="absolute z-50 top-full left-0 right-0 mt-0.5 bg-white border border-gray-200 rounded-lg shadow-lg max-h-56 flex flex-col">
+          <div className="p-1.5 border-b border-gray-100">
+            <input ref={inputRef} value={query} onChange={e => setQuery(e.target.value)} placeholder="Search…"
+              className="w-full border border-gray-200 rounded px-2 py-1 text-xs text-gray-900 focus:outline-none focus:border-blue-400" />
+          </div>
+          <div className="overflow-y-auto flex-1">
+            {filtered.map(o => (
+              <div key={o} onClick={() => { onChange(o); setOpen(false); }}
+                className={`px-2 py-1.5 text-xs cursor-pointer hover:bg-blue-50 ${o === value ? "bg-blue-50 text-blue-700 font-semibold" : "text-gray-900"}`}>
+                {o}
+              </div>
+            ))}
+            {filtered.length === 0 && <div className="px-2 py-3 text-xs text-gray-400 text-center">No results</div>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Master Freight Section ─────────────────────────────────────────────────
 
 function MasterFreightSection({ cards, onUpdate }: { cards: FreightCard[]; onUpdate: (cards: FreightCard[]) => void }) {
@@ -698,12 +814,22 @@ function MasterFreightSection({ cards, onUpdate }: { cards: FreightCard[]; onUpd
   useEffect(() => { setLocal(cards); }, [cards]);
 
   function addRow() {
-    setLocal(prev => [...prev, { id: crypto.randomUUID(), destination: "", country: "", freightPerCarton: 0, freightPerTon: 0, currency: "USD", updatedAt: "" }]);
+    setLocal(prev => [...prev, { id: crypto.randomUUID(), destination: "", country: "", continent: "", freightUsd: 0, currency: "USD", updatedAt: "" }]);
   }
 
   function updateRow(i: number, field: keyof FreightCard, value: string | number) {
-    const v = field === "freightPerCarton" ? Math.max(0, Number(value)) : value;
-    setLocal(prev => { const next = [...prev]; next[i] = { ...next[i], [field]: v }; return next; });
+    setLocal(prev => {
+      const next = [...prev];
+      const updated = { ...next[i], [field]: field === "freightUsd" ? Math.max(0, Number(value)) : value };
+      if (field === "continent") {
+        updated.country = "";
+      }
+      if (field === "country" && !updated.continent) {
+        updated.continent = continentForCountry(String(value));
+      }
+      next[i] = updated;
+      return next;
+    });
   }
 
   function removeRow(i: number) {
@@ -722,114 +848,133 @@ function MasterFreightSection({ cards, onUpdate }: { cards: FreightCard[]; onUpd
     setSaving(false);
   }
 
+  const freightTable = (rows: FreightCard[], isEditing: boolean) => (
+    <div className={isEditing ? "" : "overflow-x-auto"}>
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="bg-gray-50 border-b border-gray-100">
+            <th className="text-left px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Continent</th>
+            <th className="text-left px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Country</th>
+            <th className="text-left px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Destination / Port</th>
+            <th className="text-right px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Freight (USD)</th>
+            <th className="text-left px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Last Updated</th>
+            {isEditing && <th className="px-4 py-2.5 w-8" />}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((c, i) => (
+            <tr key={c.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
+              <td className="px-4 py-2.5">
+                {isEditing ? (
+                  <FreightSearchSelect value={c.continent} options={[...CONTINENTS]} onChange={v => updateRow(i, "continent", v)} placeholder="Region…" />
+                ) : (
+                  <span className="text-gray-500 text-xs">{c.continent || "—"}</span>
+                )}
+              </td>
+              <td className="px-4 py-2.5">
+                {isEditing ? (
+                  <FreightSearchSelect value={c.country} options={c.continent ? countriesForContinent(c.continent) : COUNTRIES.map(cc => cc.country)} onChange={v => updateRow(i, "country", v)} placeholder="Country…" />
+                ) : (
+                  <span className="text-gray-600">{c.country}</span>
+                )}
+              </td>
+              <td className="px-4 py-2.5">
+                {isEditing ? (
+                  <input value={c.destination} onChange={e => updateRow(i, "destination", e.target.value)} placeholder="e.g. JEBEL ALI PORT"
+                    className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 focus:outline-none focus:border-blue-400" />
+                ) : (
+                  <span className="font-medium text-gray-900">{c.destination}</span>
+                )}
+              </td>
+              <td className="px-4 py-2.5 text-right">
+                {isEditing ? (
+                  <input type="number" min={0} value={c.freightUsd} onChange={e => updateRow(i, "freightUsd", parseFloat(e.target.value) || 0)}
+                    className="w-28 border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 text-right focus:outline-none focus:border-blue-400 ml-auto block" />
+                ) : (
+                  <span className="font-semibold text-blue-700">${c.freightUsd.toLocaleString()}</span>
+                )}
+              </td>
+              <td className="px-4 py-2.5">
+                {c.updatedAt ? (() => {
+                  const days = Math.floor((Date.now() - new Date(c.updatedAt).getTime()) / 86400000);
+                  const stale = days > 30;
+                  return (
+                    <span className={`text-xs ${stale ? "text-amber-600 font-medium" : "text-gray-400"}`}>
+                      {days === 0 ? "Today" : days === 1 ? "Yesterday" : `${days}d ago`}
+                      {stale && " ⚠"}
+                    </span>
+                  );
+                })() : <span className="text-xs text-gray-300">—</span>}
+              </td>
+              {isEditing && (
+                <td className="px-4 py-2.5">
+                  <button onClick={() => removeRow(i)} className="text-red-400 hover:text-red-600 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
+                </td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+
   return (
-    <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-      <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-        <div className="flex items-center gap-2">
-          <Anchor className="w-4 h-4 text-blue-500" />
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="text-sm font-semibold text-gray-900">Master Freight Card</h3>
-              <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-medium">{cards.length} destinations</span>
+    <>
+      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <div className="flex items-center gap-2">
+            <Anchor className="w-4 h-4 text-blue-500" />
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-semibold text-gray-900">Master Freight Card</h3>
+                <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-medium">{cards.length} destinations</span>
+              </div>
+              <p className="text-[10px] text-gray-400 mt-0.5">Cost per full container — each product&apos;s freight is calculated from this automatically</p>
             </div>
-            <p className="text-[10px] text-gray-400 mt-0.5">Cost per full container — each product&apos;s per-carton freight is calculated automatically from this ÷ its FCL Container Qty</p>
           </div>
+          <button onClick={() => { setLocal(cards); setEditing(true); }} className="flex items-center gap-1 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg cursor-pointer transition-colors">
+            <Edit2 className="w-3 h-3" /> Edit
+          </button>
         </div>
-        <div className="flex gap-2">
-          {editing ? (
-            <>
-              <button onClick={() => { setLocal(cards); setEditing(false); }} className="px-3 py-1.5 text-xs text-gray-500 hover:text-gray-700 cursor-pointer">Cancel</button>
-              <button onClick={addRow} className="flex items-center gap-1 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg cursor-pointer transition-colors">
-                <Plus className="w-3 h-3" /> Add Row
-              </button>
-              <button onClick={save} disabled={saving} className="flex items-center gap-1 text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg cursor-pointer transition-colors">
-                {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />} Save
-              </button>
-            </>
-          ) : (
-            <button onClick={() => setEditing(true)} className="flex items-center gap-1 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg cursor-pointer transition-colors">
-              <Edit2 className="w-3 h-3" /> Edit
-            </button>
-          )}
-        </div>
+
+        {cards.length === 0 ? (
+          <div className="px-5 py-8 text-center text-sm text-gray-400">
+            No freight destinations yet. Click Edit to add destinations.
+          </div>
+        ) : freightTable(cards, false)}
       </div>
 
-      {local.length === 0 && !editing ? (
-        <div className="px-5 py-8 text-center text-sm text-gray-400">
-          No freight destinations yet. Click Edit to add destinations.
-        </div>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-gray-50 border-b border-gray-100">
-                <th className="text-left px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Destination / Port</th>
-                <th className="text-left px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Country</th>
-                <th className="text-right px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Freight/Container (USD)</th>
-                <th className="text-right px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Freight/Ton (USD)</th>
-                <th className="text-left px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Last Updated</th>
-                {editing && <th className="px-4 py-2.5 w-8" />}
-              </tr>
-            </thead>
-            <tbody>
-              {(editing ? local : cards).map((c, i) => (
-                <tr key={c.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
-                  <td className="px-4 py-2.5">
-                    {editing ? (
-                      <input value={c.destination} onChange={e => updateRow(i, "destination", e.target.value)} placeholder="e.g. JEBEL ALI PORT"
-                        className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 focus:outline-none focus:border-blue-400" />
-                    ) : (
-                      <span className="font-medium text-gray-900">{c.destination}</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    {editing ? (
-                      <input value={c.country} onChange={e => updateRow(i, "country", e.target.value)} placeholder="UAE"
-                        className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 focus:outline-none focus:border-blue-400" />
-                    ) : (
-                      <span className="text-gray-600">{c.country}</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2.5 text-right">
-                    {editing ? (
-                      <input type="number" min={0} value={c.freightPerCarton} onChange={e => updateRow(i, "freightPerCarton", parseFloat(e.target.value) || 0)}
-                        className="w-28 border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 text-right focus:outline-none focus:border-blue-400 ml-auto block" />
-                    ) : (
-                      <span className="font-semibold text-blue-700">${c.freightPerCarton.toFixed(2)}</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2.5 text-right">
-                    {editing ? (
-                      <input type="number" min={0} value={c.freightPerTon} onChange={e => updateRow(i, "freightPerTon", parseFloat(e.target.value) || 0)}
-                        className="w-28 border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 text-right focus:outline-none focus:border-blue-400 ml-auto block" />
-                    ) : (
-                      <span className="font-semibold text-green-700">${c.freightPerTon.toFixed(2)}</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    {c.updatedAt ? (() => {
-                      const days = Math.floor((Date.now() - new Date(c.updatedAt).getTime()) / 86400000);
-                      const stale = days > 30;
-                      return (
-                        <span className={`text-xs ${stale ? "text-amber-600 font-medium" : "text-gray-400"}`}>
-                          {days === 0 ? "Today" : days === 1 ? "Yesterday" : `${days}d ago`}
-                          {stale && " ⚠"}
-                        </span>
-                      );
-                    })() : <span className="text-xs text-gray-300">—</span>}
-                  </td>
-                  {editing && (
-                    <td className="px-4 py-2.5">
-                      <button onClick={() => removeRow(i)} className="text-red-400 hover:text-red-600 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {editing && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 overflow-y-auto py-8">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl mx-4">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <div className="flex items-center gap-2">
+                <Anchor className="w-5 h-5 text-blue-500" />
+                <h2 className="text-base font-semibold text-gray-900">Edit Master Freight Card</h2>
+                <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-medium">{local.length} destinations</span>
+              </div>
+              <button onClick={() => { setLocal(cards); setEditing(false); }} className="text-gray-400 hover:text-gray-600 cursor-pointer"><X className="w-5 h-5" /></button>
+            </div>
+
+            <div className="p-6 min-h-[350px]">
+              {freightTable(local, true)}
+            </div>
+
+            <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 bg-gray-50 rounded-b-2xl">
+              <button onClick={addRow} className="flex items-center gap-1.5 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg cursor-pointer transition-colors">
+                <Plus className="w-4 h-4" /> Add Row
+              </button>
+              <div className="flex gap-3">
+                <button onClick={() => { setLocal(cards); setEditing(false); }} className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 cursor-pointer">Cancel</button>
+                <button onClick={save} disabled={saving} className="flex items-center gap-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg cursor-pointer transition-colors">
+                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Save
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
-    </div>
+    </>
   );
 }
 
@@ -853,6 +998,9 @@ export default function CNFPage() {
   const [riceMasterData, setRiceMasterData] = useState<RiceMaster>({ byproducts: [], charges: [] });
   const [riceSettingsData, setRiceSettingsData] = useState<RiceSettings>({ fcRate: 270, whtPct: 2, servicePct: 0.16, edsPct: 0.25, courierPct: 0.02, interestPct: 1.7, profit: 50, packagingMaterial: 6, defaultFreight: 0, bagDollarRate: 280, bagOverheadPct: 15 });
   const [riceBrandsList, setRiceBrandsList] = useState<QuoteBrand[]>([]);
+  const [riceBagsList, setRiceBagsList] = useState<RiceBag[]>([]);
+  const [riceMockupsList, setRiceMockupsList] = useState<{ id: string; name: string; imageUrl: string; productIds: string[]; bagIds: string[]; sortOrder: number }[]>([]);
+  const [containerMtRows, setContainerMtRows] = useState<ContainerMtRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [showNew, setShowNew] = useState(false);
@@ -886,7 +1034,7 @@ export default function CNFPage() {
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(false);
-    const [q, f, prod, mat, settings, rec, br, rProd, rMaster, rSettings, rBr] = await Promise.all([
+    const [q, f, prod, mat, settings, rec, br, rProd, rMaster, rSettings, rBr, rBags, rMockups, cmt] = await Promise.all([
       fetchJsonSafe<{ quotes: Quote[] }>("/api/cnf/quotes", { quotes: [] }),
       fetchJsonSafe<{ freightCards: FreightCard[] }>("/api/cnf/master-freight", { freightCards: [] }),
       fetchJsonSafe<{ products: CostProduct[] }>("/api/product-list/products", { products: [] }),
@@ -898,6 +1046,9 @@ export default function CNFPage() {
       fetchJsonSafe<RiceMaster>("/api/product-list/rice-master", { byproducts: [], charges: [] }),
       fetchJsonSafe<RiceSettings>("/api/product-list/rice-settings", { fcRate: 270, whtPct: 2, servicePct: 0.16, edsPct: 0.25, courierPct: 0.02, interestPct: 1.7, profit: 50, packagingMaterial: 6, defaultFreight: 0, bagDollarRate: 280, bagOverheadPct: 15 }),
       fetchJsonSafe<{ brands: QuoteBrand[] }>("/api/product-list/rice-brands", { brands: [] }),
+      fetchJsonSafe<{ bags: RiceBag[] }>("/api/product-list/rice-bags", { bags: [] }),
+      fetchJsonSafe<{ mockups: { id: string; name: string; imageUrl: string; productIds: string[]; bagIds: string[]; sortOrder: number }[] }>("/api/product-list/rice-mockups", { mockups: [] }),
+      fetchJsonSafe<{ rows: ContainerMtRow[] }>("/api/cnf/container-mt", { rows: [] }),
     ]);
     // Only the quotes fetch failing is worth alarming about — the others are
     // supporting data for the New Quote form, not "is my data gone?" panic.
@@ -927,6 +1078,9 @@ export default function CNFPage() {
       defaultFreight: rSettings.data.defaultFreight ?? 0, bagDollarRate: rSettings.data.bagDollarRate ?? 280, bagOverheadPct: rSettings.data.bagOverheadPct ?? 15,
     });
     setRiceBrandsList(rBr.data.brands ?? []);
+    setRiceBagsList(rBags.data.bags ?? []);
+    setRiceMockupsList(rMockups.data.mockups ?? []);
+    setContainerMtRows(cmt.data.rows ?? []);
     setLoading(false);
   }, []);
 
@@ -1257,12 +1411,15 @@ export default function CNFPage() {
         {!loading && (
           <MasterFreightSection cards={freightCards} onUpdate={cards => setFreightCards(cards)} />
         )}
+
+        {/* Container Capacity (MT) is managed in Rice Master Prices */}
       </div>
 
       {/* New Quote Modal */}
       {showNew && (
         <NewQuoteModal
           freightCards={freightCards}
+          containerMtRows={containerMtRows}
           catalogProducts={catalogProducts}
           catalogMaterials={catalogMaterials}
           catalogRecipes={catalogRecipes}
@@ -1272,6 +1429,8 @@ export default function CNFPage() {
           riceMaster={riceMasterData}
           riceSettings={riceSettingsData}
           riceBrands={riceBrandsList}
+          riceBags={riceBagsList}
+          riceMockups={riceMockupsList}
           createdBy={user}
           onClose={() => setShowNew(false)}
           onCreated={load}

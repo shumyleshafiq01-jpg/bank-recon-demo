@@ -8,6 +8,8 @@ type QuoteProduct = {
   qty: number; fobPerCarton: number; freightPerCarton: number; cnfPerCarton: number;
   category?: string; imageUrl?: string; brandName?: string;
   division?: "food" | "rice";
+  bagId?: string; bagLabel?: string;
+  mockupId?: string; mockupImageUrl?: string;
 };
 
 type Brand = { id: string; name: string; contactPerson: string; website: string; email: string };
@@ -238,7 +240,7 @@ export default async function CNFSharePage({ params }: { params: Promise<{ id: s
                       <tr key={i} style={{ background: "#fff" }}>
                         <td style={{ padding: "18px 10px", textAlign: "center", fontSize: 20, fontWeight: 700, border: "1px solid #1a1a2e", background: "#dfe6f2" }}>{i + 1}</td>
                         <td style={{ padding: "18px 10px", textAlign: "center", fontSize: 22, fontWeight: 700, color: "#1a1a2e", border: "1px solid #1a1a2e", wordWrap: "break-word", overflowWrap: "break-word" }}>{p.productName}{p.brandName ? ` - ${p.brandName}` : ""}</td>
-                        <td style={{ padding: "18px 10px", textAlign: "center", fontSize: 18, fontWeight: 600, color: "#1a1a2e", border: "1px solid #1a1a2e", whiteSpace: "pre-line", wordWrap: "break-word", overflowWrap: "break-word", background: "#dfe6f2" }}>{p.specs || p.packagingDesc || "—"}</td>
+                        <td style={{ padding: "18px 10px", textAlign: "center", fontSize: 18, fontWeight: 600, color: "#1a1a2e", border: "1px solid #1a1a2e", whiteSpace: "pre-line", wordWrap: "break-word", overflowWrap: "break-word", background: "#dfe6f2" }}>{p.bagLabel || p.specs || p.packagingDesc || "—"}</td>
                         <td style={{ padding: "18px 10px", fontSize: 24, fontWeight: 700, color: "#1a1a2e", border: "1px solid #1a1a2e", wordWrap: "break-word", overflowWrap: "break-word" }}>
                           {(() => {
                             const { original, discounted, hasDiscount } = itemDiscount(
@@ -271,11 +273,14 @@ export default async function CNFSharePage({ params }: { params: Promise<{ id: s
                           })()}
                         </td>
                         <td style={{ padding: "10px", textAlign: "center", border: "1px solid #1a1a2e" }}>
-                          {p.imageUrl ? (
-                            <img src={p.imageUrl} alt={p.productName} style={{ width: 130, height: 160, objectFit: "contain", margin: "0 auto" }} />
-                          ) : (
-                            <div style={{ width: 130, height: 160, background: "#f0f2f5", margin: "0 auto" }} />
-                          )}
+                          {(() => {
+                            const imgUrl = p.mockupImageUrl || p.imageUrl;
+                            return imgUrl ? (
+                              <img src={imgUrl} alt={p.productName} style={{ width: 130, height: 160, objectFit: "contain", margin: "0 auto" }} />
+                            ) : (
+                              <div style={{ width: 130, height: 160, background: "#f0f2f5", margin: "0 auto" }} />
+                            );
+                          })()}
                         </td>
                       </tr>
                     ))}

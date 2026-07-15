@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { ArrowLeft, Plus, Trash2, Pencil, X, Save, Lock, Search, Package, List, LayoutGrid, DollarSign, Settings2, ChevronRight, ChevronDown, ExternalLink, Copy, Ship, Upload, Check, Tag } from "lucide-react";
 import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
@@ -590,17 +590,15 @@ export default function ProductListPage() {
                           return (
                             <tr key={item.id} className={idx % 2 === 0 ? "" : "bg-surface-light/20"}>
                               <td className="px-3 py-1.5">
-                                <select value={item.materialId} onChange={e => {
-                                  const m = materials.find(x => x.id === e.target.value);
-                                  updateRecipeRow(idx, "materialId", e.target.value);
-                                  if (m) {
-                                    updateRecipeRow(idx, "materialName", m.name);
-                                    updateRecipeRow(idx, "unitType", m.defaultUnitType || "PCS");
-                                  }
-                                }} className="w-full bg-background border border-border rounded px-2 py-1 text-xs text-foreground focus:outline-none focus:border-green-500/50 cursor-pointer">
-                                  <option value="">— Select —</option>
-                                  {materials.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-                                </select>
+                                <SearchableSelect value={item.materialId} options={materials.map(m => ({ id: m.id, name: m.name }))}
+                                  onChange={(id, o) => {
+                                    const m = materials.find(x => x.id === id);
+                                    updateRecipeRow(idx, "materialId", id);
+                                    if (m) {
+                                      updateRecipeRow(idx, "materialName", m.name);
+                                      updateRecipeRow(idx, "unitType", m.defaultUnitType || "PCS");
+                                    }
+                                  }} />
                               </td>
                               <td className="px-3 py-1.5">
                                 <input type="number" value={item.qty} onChange={e => updateRecipeRow(idx, "qty", parseFloat(e.target.value) || 0)} disabled={false}
@@ -1173,6 +1171,53 @@ export default function ProductListPage() {
               )}
             </div>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ════════════════════════════════ SEARCHABLE SELECT */
+function SearchableSelect({ value, options, onChange, placeholder = "— Select —" }: {
+  value: string; options: { id: string; name: string }[]; onChange: (id: string, item?: { id: string; name: string }) => void; placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const selected = options.find(o => o.id === value);
+  const filtered = query ? options.filter(o => o.name.toLowerCase().includes(query.toLowerCase())) : options;
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  useEffect(() => { if (open && inputRef.current) inputRef.current.focus(); }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button type="button" onClick={() => { setOpen(!open); setQuery(""); }}
+        className="w-full bg-background border border-border rounded px-2 py-1 text-xs text-foreground text-left focus:outline-none focus:border-green-500/50 cursor-pointer truncate">
+        {selected ? selected.name : <span className="text-muted">{placeholder}</span>}
+      </button>
+      {open && (
+        <div className="absolute z-50 top-full left-0 right-0 mt-0.5 bg-surface border border-border rounded-lg shadow-lg max-h-56 flex flex-col">
+          <div className="p-1.5 border-b border-border">
+            <input ref={inputRef} value={query} onChange={e => setQuery(e.target.value)} placeholder="Search…"
+              className="w-full bg-background border border-border rounded px-2 py-1 text-xs text-foreground focus:outline-none focus:border-green-500/50" />
+          </div>
+          <div className="overflow-y-auto flex-1">
+            <div onClick={() => { onChange(""); setOpen(false); }} className="px-2 py-1.5 text-xs text-muted hover:bg-green-500/10 cursor-pointer">{placeholder}</div>
+            {filtered.map(o => (
+              <div key={o.id} onClick={() => { onChange(o.id, o); setOpen(false); }}
+                className={`px-2 py-1.5 text-xs cursor-pointer hover:bg-green-500/10 ${o.id === value ? "bg-green-500/10 text-green-400 font-semibold" : "text-foreground"}`}>
+                {o.name}
+              </div>
+            ))}
+            {filtered.length === 0 && <div className="px-2 py-3 text-xs text-muted text-center">No results</div>}
+          </div>
         </div>
       )}
     </div>

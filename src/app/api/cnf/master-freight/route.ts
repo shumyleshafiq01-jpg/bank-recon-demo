@@ -1,13 +1,12 @@
 import { supabase } from "@/lib/supabase";
 
-/** Map a Supabase snake_case row to the camelCase shape the frontend expects. */
 function toClient(row: Record<string, unknown>) {
   return {
     id: row.id ?? "",
     destination: row.destination ?? "",
     country: row.country ?? "",
-    freightPerCarton: row.freight_per_carton ?? 0,
-    freightPerTon: row.freight_per_ton ?? 0,
+    continent: row.continent ?? "",
+    freightUsd: row.freight_usd ?? row.freight_per_carton ?? 0,
     currency: row.currency ?? "USD",
     updatedAt: row.updated_at ?? "",
   };
@@ -28,15 +27,16 @@ export async function POST(request: Request) {
     const { freightCards } = await request.json() as { freightCards: Record<string, unknown>[] };
     const now = new Date().toISOString();
 
-    // Upsert all provided cards
     const upsertRows = freightCards
       .filter((c) => c.id)
       .map((c) => ({
         id: String(c.id),
         destination: String(c.destination ?? ""),
         country: String(c.country ?? ""),
-        freight_per_carton: Number(c.freightPerCarton ?? 0),
-        freight_per_ton: Number(c.freightPerTon ?? 0),
+        continent: String(c.continent ?? ""),
+        freight_usd: Number(c.freightUsd ?? 0),
+        freight_per_carton: Number(c.freightUsd ?? 0),
+        freight_per_ton: Number(c.freightUsd ?? 0),
         currency: String(c.currency ?? "USD"),
         updated_at: now,
       }));
@@ -48,7 +48,6 @@ export async function POST(request: Request) {
       if (error) throw error;
     }
 
-    // Delete cards that were removed: fetch current IDs, remove any not in provided set
     const providedIds = new Set(upsertRows.map((r) => r.id));
     const { data: existing, error: fetchErr } = await supabase
       .from("cnf_master_freight")
