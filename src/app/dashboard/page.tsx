@@ -4,11 +4,20 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, useRef, useCallback } from "react";
 import {
   Landmark, ArrowRight, Clock, User, Building2, CreditCard,
-  Globe, FileText, LogOut, Scale, BookOpen, Wallet, Banknote, Zap, Settings, Package,
+  Globe, FileText, LogOut, Scale, Timer, BookOpen, Wallet, Banknote, Zap, Settings, Package,
 } from "lucide-react";
-import { supabaseBrowser } from "@/lib/supabase-client";
 
-type AuthUser = { email: string; name: string; avatar: string } | null;
+const TESTING_DEADLINE = new Date("2026-06-20T12:00:00Z").getTime();
+
+type Session = { type: "user" | "testing"; ts: number } | null;
+
+function formatCountdown(ms: number): string {
+  if (ms <= 0) return "00:00:00";
+  const h = Math.floor(ms / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  const s = Math.floor((ms % 60000) / 1000);
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
 
 type Node = { x: number; y: number; vx: number; vy: number; radius: number };
 
@@ -305,8 +314,9 @@ const MODULES = [
 
 export default function DashboardPage() {
   const router = useRouter();
-  const [authUser, setAuthUser] = useState<AuthUser>(null);
+  const [session, setSession] = useState<Session>(null);
   const [checked, setChecked] = useState(false);
+  const [remaining, setRemaining] = useState("");
   const [apiUsage, setApiUsage] = useState<{ totalCost: number; totalCalls: number } | null>(null);
 
   // Super user
@@ -319,27 +329,22 @@ export default function DashboardPage() {
   const [savingConfig, setSavingConfig] = useState(false);
 
   useEffect(() => {
-    supabaseBrowser.auth.getSession().then(({ data }) => {
-      if (!data.session) {
-        router.replace("/login");
+    try {
+      const raw = localStorage.getItem("session");
+      if (!raw) { router.replace("/login"); return; }
+      const s = JSON.parse(raw) as Session;
+      if (!s) { router.replace("/login"); return; }
+      if (s.type === "testing" && Date.now() > TESTING_DEADLINE) {
+        localStorage.removeItem("session");
+        router.replace("/login?expired=1");
         return;
       }
-      const u = data.session.user;
-      setAuthUser({
-        email: u.email ?? "",
-        name: u.user_metadata?.full_name ?? u.email ?? "",
-        avatar: u.user_metadata?.avatar_url ?? "",
-      });
-      setChecked(true);
-    });
-
-    const { data: { subscription } } = supabaseBrowser.auth.onAuthStateChange((_event, session) => {
-      if (!session) {
-        router.replace("/login");
-      }
-    });
-
-    return () => subscription.unsubscribe();
+      setSession(s);
+    } catch {
+      router.replace("/login");
+      return;
+    }
+    setChecked(true);
   }, [router]);
 
   useEffect(() => {
@@ -347,8 +352,24 @@ export default function DashboardPage() {
     fetch("/api/dashboard-config").then((r) => r.json()).then((d) => setHiddenModules(d.hiddenModules ?? [])).catch(() => {});
   }, []);
 
-  async function logout() {
-    await supabaseBrowser.auth.signOut();
+  useEffect(() => {
+    if (!session || session.type !== "testing") return;
+    const tick = () => {
+      const left = TESTING_DEADLINE - Date.now();
+      if (left <= 0) {
+        localStorage.removeItem("session");
+        router.replace("/login?expired=1");
+        return;
+      }
+      setRemaining(formatCountdown(left));
+    };
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [session, router]);
+
+  function logout() {
+    localStorage.removeItem("session");
     router.replace("/login");
   }
 
@@ -385,6 +406,7 @@ export default function DashboardPage() {
 
   if (!checked) return null;
 
+  const sessionLabel = session?.type === "user" ? "User" : "Tester";
   const visibleModules = isSuperUser ? MODULES : MODULES.filter((m) => !hiddenModules.includes(m.key));
 
   return (
@@ -404,13 +426,15 @@ export default function DashboardPage() {
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 text-sm text-gray-500 bg-gray-100 rounded-lg px-3 py-1.5">
-            {authUser?.avatar ? (
-              <img src={authUser.avatar} alt="" className="w-5 h-5 rounded-full" referrerPolicy="no-referrer" />
-            ) : (
-              <User className="w-3.5 h-3.5" />
-            )}
-            <span className="max-w-[120px] truncate">{authUser?.name ?? "User"}</span>
+            <User className="w-3.5 h-3.5" />
+            {sessionLabel}
           </div>
+          {session?.type === "testing" && remaining && (
+            <div className="flex items-center gap-1.5 text-xs font-mono bg-amber-50 border border-amber-200 text-amber-700 px-3 py-1.5 rounded-lg">
+              <Timer className="w-3.5 h-3.5" />
+              {remaining}
+            </div>
+          )}
           {/* Single gear dropdown */}
           <div className="relative group">
             <button className={`flex items-center gap-1 p-1.5 rounded-lg cursor-pointer transition-colors ${isSuperUser ? "text-amber-600 bg-amber-50 hover:bg-amber-100" : "text-gray-300 hover:text-gray-500 hover:bg-gray-100"}`}>
