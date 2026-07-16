@@ -158,7 +158,7 @@ export default async function CNFSharePage({ params }: { params: Promise<{ id: s
 
   // Group products by category (e.g. RICE, SALT) — each gets its own header bar, like the reference quotation format.
   const categories = Array.from(new Set(quote.products.map(p => p.category || "PRODUCTS")));
-  const priceHeader = `${isFob ? "FOB" : "CNF"} - ${(quote.destination || "").toUpperCase()}`;
+  const priceHeader = `${isFob ? "FOB" : "CNF"} - ${[quote.country, quote.destination].filter(Boolean).join(", ").toUpperCase() || "TBD"}`;
 
   return (
     <>
@@ -240,19 +240,19 @@ export default async function CNFSharePage({ params }: { params: Promise<{ id: s
                       <tr key={i} style={{ background: "#fff" }}>
                         <td style={{ padding: "18px 10px", textAlign: "center", fontSize: 20, fontWeight: 700, border: "1px solid #1a1a2e", background: "#dfe6f2" }}>{i + 1}</td>
                         <td style={{ padding: "18px 10px", textAlign: "center", fontSize: 22, fontWeight: 700, color: "#1a1a2e", border: "1px solid #1a1a2e", wordWrap: "break-word", overflowWrap: "break-word" }}>{p.productName}{p.brandName ? ` - ${p.brandName}` : ""}</td>
-                        <td style={{ padding: "18px 10px", textAlign: "center", fontSize: 18, fontWeight: 600, color: "#1a1a2e", border: "1px solid #1a1a2e", whiteSpace: "pre-line", wordWrap: "break-word", overflowWrap: "break-word", background: "#dfe6f2" }}>{p.bagLabel || p.specs || p.packagingDesc || "—"}</td>
+                        <td style={{ padding: "18px 10px", textAlign: "center", fontSize: 18, fontWeight: 600, color: "#1a1a2e", border: "1px solid #1a1a2e", whiteSpace: "pre-line", wordWrap: "break-word", overflowWrap: "break-word", background: "#dfe6f2" }}>{p.division === "rice" && p.bagLabel ? p.bagLabel.replace(/^[^—]*—\s*/, "") : (p.specs || p.packagingDesc || "—")}</td>
                         <td style={{ padding: "18px 10px", fontSize: 24, fontWeight: 700, color: "#1a1a2e", border: "1px solid #1a1a2e", wordWrap: "break-word", overflowWrap: "break-word" }}>
                           {(() => {
                             const { original, discounted, hasDiscount } = itemDiscount(
                               p, quote.products, quote.discountType, quote.discountScope, quote.discountValue, quote.discountProductIds,
                             );
-                            const unitLabel = p.division === "rice" ? "Per MT" : "";
+                            const unitLabel = p.division === "rice" ? "PMT" : "";
                             if (!hasDiscount) return (
                               <div style={{ padding: "0 8px" }}>
                                 <div style={{ display: "flex", justifyContent: "space-between" }}>
                                   <span>$</span><span>{fmtUSD(original)}</span>
                                 </div>
-                                {unitLabel && <div style={{ textAlign: "center", fontSize: 13, fontWeight: 500, color: "#666", marginTop: 3 }}>{unitLabel}</div>}
+                                {unitLabel && <div style={{ textAlign: "center", fontSize: 20, fontWeight: 600, color: "#666", marginTop: 3 }}>{unitLabel}</div>}
                               </div>
                             );
                             const pct = original > 0 ? Math.round(((original - discounted) / original) * 100) : 0;
@@ -264,7 +264,7 @@ export default async function CNFSharePage({ params }: { params: Promise<{ id: s
                                 <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3 }}>
                                   <span>$</span><span>{fmtUSD(discounted)}</span>
                                 </div>
-                                {unitLabel && <div style={{ textAlign: "center", fontSize: 13, fontWeight: 500, color: "#666", marginTop: 3 }}>{unitLabel}</div>}
+                                {unitLabel && <div style={{ textAlign: "center", fontSize: 20, fontWeight: 600, color: "#666", marginTop: 3 }}>{unitLabel}</div>}
                                 <div style={{ textAlign: "center", fontSize: 16, fontWeight: 700, color: "#dc2626", marginTop: 3 }}>
                                   Discount {pct}% applied
                                 </div>

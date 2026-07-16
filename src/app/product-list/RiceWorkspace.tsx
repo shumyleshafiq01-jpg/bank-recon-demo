@@ -50,7 +50,7 @@ function suggestNextRiceSku(products: RiceProduct[]): string {
 
 const emptyProduct = (products: RiceProduct[]): RiceProduct => ({
   id: genId(), sku: suggestNextRiceSku(products), name: "", brandId: "", category: "", imageUrl: "", packagingDesc: "",
-  quantity: 1000, recoveryPct: 90, purchaseRate: 300, freight: 0, profit: 50,
+  quantity: 1000, recoveryPct: 90, purchaseRate: 300, freight: 0, profit: 50, fcRate: 0,
   byproducts: RICE_DEFAULT_PRODUCT_BYPRODUCTS.map(b => ({ ...b })), active: true,
 });
 
@@ -364,7 +364,7 @@ export default function RiceWorkspace({ requireAuth }: { requireAuth: (fn: () =>
           <div className="flex items-center gap-2">
             {tab === "master" && (
               <button onClick={() => setShowSettings(true)} className="flex items-center gap-1.5 text-xs px-3 py-1.5 border border-border text-muted hover:text-foreground hover:border-amber-500/40 rounded-lg cursor-pointer">
-                <Settings2 className="w-3 h-3" /> Cost Settings (FC {settings.fcRate})
+                <Settings2 className="w-3 h-3" /> Cost Settings
               </button>
             )}
             {tab === "products" && (
@@ -783,6 +783,9 @@ function ProductForm({ product, master, settings, brands, categories, onClose, o
               <Field label="Profit (USD/shipment)">
                 <input type="number" step="1" value={draft.profit} onChange={e => upd("profit", parseFloat(e.target.value) || 0)} className={inp} />
               </Field>
+              <Field label="FC Rate (PKR→USD)">
+                <input type="number" step="0.01" value={draft.fcRate} onChange={e => upd("fcRate", parseFloat(e.target.value) || 0)} className={inp} placeholder="0 = use global" />
+              </Field>
             </div>
 
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
@@ -858,7 +861,7 @@ function SettingsForm({ settings, onClose, onSave }: { settings: RiceSettings; o
   const [d, setD] = useState<RiceSettings>({ ...settings });
   const upd = (k: keyof RiceSettings, v: number) => setD(s => ({ ...s, [k]: v }));
   const fields: [keyof RiceSettings, string][] = [
-    ["fcRate", "FC Rate (PKR→USD)"], ["whtPct", "W.H.T %"], ["servicePct", "Service Charges %"],
+    ["whtPct", "W.H.T %"], ["servicePct", "Service Charges %"],
     ["edsPct", "EDS %"], ["courierPct", "Courier %"], ["interestPct", "Interest %"],
     ["packagingMaterial", "Packaging Material (USD)"],
     ["bagOverheadPct", "Bag Overhead %"],

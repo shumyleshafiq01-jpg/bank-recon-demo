@@ -18,6 +18,7 @@ function toClient(row: Record<string, unknown>) {
     purchaseRate: Number(row.purchase_rate) || 0,
     freight: Number(row.freight) || 0,
     profit: Number(row.profit ?? 50),
+    fcRate: Number(row.fc_rate ?? 0),
     byproducts: row.byproducts ?? [],
     active: row.active !== false,
   };
@@ -38,6 +39,7 @@ function toRow(p: Record<string, unknown>) {
     purchase_rate: Number(p.purchaseRate) || 0,
     freight: Number(p.freight) || 0,
     profit: Number(p.profit ?? 50),
+    fc_rate: Number(p.fcRate ?? 0),
     byproducts: p.byproducts ?? [],
     active: p.active !== false,
   };

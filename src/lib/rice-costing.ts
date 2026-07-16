@@ -100,6 +100,7 @@ export interface RiceProduct {
   purchaseRate: number;    // PKR/kg of raw paddy
   freight: number;         // USD (per lot) for CNF; 0 = FOB only
   profit: number;          // USD per shipment (was global, now per-product)
+  fcRate: number;           // PKR→USD conversion rate (was global, now per-product)
   byproducts: RiceProductByproduct[];
   active: boolean;
 }
@@ -144,7 +145,7 @@ export function calcRice(product: RiceProduct, master: RiceMaster, settings: Ric
   const chargePerKg = master.charges.reduce((s, c) => s + (c.rate || 0), 0);
   const totalPerKg = netHeadPerKg + chargePerKg;
 
-  const fc = settings.fcRate || 270;
+  const fc = (product.fcRate !== undefined && product.fcRate !== null && product.fcRate > 0) ? product.fcRate : (settings.fcRate || 270);
   const usdTotal = (totalPerKg * qty) / fc;
 
   const financePct = (settings.whtPct || 0) + (settings.servicePct || 0) + (settings.edsPct || 0) +
