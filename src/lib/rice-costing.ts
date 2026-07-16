@@ -99,6 +99,7 @@ export interface RiceProduct {
   recoveryPct: number;     // milling yield, e.g. 90
   purchaseRate: number;    // PKR/kg of raw paddy
   freight: number;         // USD (per lot) for CNF; 0 = FOB only
+  profit: number;          // USD per shipment (was global, now per-product)
   byproducts: RiceProductByproduct[];
   active: boolean;
 }
@@ -150,7 +151,8 @@ export function calcRice(product: RiceProduct, master: RiceMaster, settings: Ric
     (settings.courierPct || 0) + (settings.interestPct || 0);
   const bankCharges = usdTotal * (financePct / 100);
 
-  const fob = usdTotal + bankCharges + (settings.profit || 0) + (settings.packagingMaterial || 0);
+  const profit = product.profit !== undefined && product.profit !== null ? product.profit : (settings.profit || 0);
+  const fob = usdTotal + bankCharges + profit + (settings.packagingMaterial || 0);
   const freight = product.freight || 0;
   const cnf = fob + freight;
 

@@ -17,6 +17,7 @@ function toClient(row: Record<string, unknown>) {
     recoveryPct: Number(row.recovery_pct) || 90,
     purchaseRate: Number(row.purchase_rate) || 0,
     freight: Number(row.freight) || 0,
+    profit: Number(row.profit ?? 50),
     byproducts: row.byproducts ?? [],
     active: row.active !== false,
   };
@@ -36,6 +37,7 @@ function toRow(p: Record<string, unknown>) {
     recovery_pct: Number(p.recoveryPct) || 90,
     purchase_rate: Number(p.purchaseRate) || 0,
     freight: Number(p.freight) || 0,
+    profit: Number(p.profit ?? 50),
     byproducts: p.byproducts ?? [],
     active: p.active !== false,
   };

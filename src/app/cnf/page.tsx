@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft, Plus, Ship, Anchor, Search, Filter, Archive,
@@ -9,10 +9,9 @@ import {
 } from "lucide-react";
 import { calcCost, type CostMaterial, type CostProduct, type CostRecipeItem, type CostSettings } from "@/lib/costing";
 import { calcRice, calcBagRate, type RiceProduct, type RiceMaster, type RiceSettings, type RiceBag } from "@/lib/rice-costing";
-import { COUNTRIES, CONTINENTS, countriesForContinent, continentForCountry } from "@/lib/countries";
 
 type FreightCard = {
-  id: string; destination: string; country: string; continent: string;
+  id: string; destination: string; country: string;
   freightUsd: number; currency: string; updatedAt: string;
 };
 
@@ -770,52 +769,6 @@ function NewQuoteModal({ freightCards, containerMtRows, catalogProducts, catalog
   );
 }
 
-// ─── Searchable Select (for freight card dropdowns) ─────────────────────────
-
-function FreightSearchSelect({ value, options, onChange, placeholder = "— Select —", className = "" }: {
-  value: string; options: string[]; onChange: (v: string) => void; placeholder?: string; className?: string;
-}) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const ref = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const filtered = query ? options.filter(o => o.toLowerCase().includes(query.toLowerCase())) : options;
-
-  useEffect(() => {
-    function handleClick(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, []);
-
-  useEffect(() => { if (open && inputRef.current) inputRef.current.focus(); }, [open]);
-
-  return (
-    <div ref={ref} className={`relative ${className}`}>
-      <button type="button" onClick={() => { setOpen(!open); setQuery(""); }}
-        className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 text-left focus:outline-none focus:border-blue-400 cursor-pointer truncate bg-white">
-        {value || <span className="text-gray-400">{placeholder}</span>}
-      </button>
-      {open && (
-        <div className="absolute z-50 top-full left-0 right-0 mt-0.5 bg-white border border-gray-200 rounded-lg shadow-lg max-h-56 flex flex-col">
-          <div className="p-1.5 border-b border-gray-100">
-            <input ref={inputRef} value={query} onChange={e => setQuery(e.target.value)} placeholder="Search…"
-              className="w-full border border-gray-200 rounded px-2 py-1 text-xs text-gray-900 focus:outline-none focus:border-blue-400" />
-          </div>
-          <div className="overflow-y-auto flex-1">
-            {filtered.map(o => (
-              <div key={o} onClick={() => { onChange(o); setOpen(false); }}
-                className={`px-2 py-1.5 text-xs cursor-pointer hover:bg-blue-50 ${o === value ? "bg-blue-50 text-blue-700 font-semibold" : "text-gray-900"}`}>
-                {o}
-              </div>
-            ))}
-            {filtered.length === 0 && <div className="px-2 py-3 text-xs text-gray-400 text-center">No results</div>}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ─── Master Freight Section ─────────────────────────────────────────────────
 
 function MasterFreightSection({ cards, onUpdate }: { cards: FreightCard[]; onUpdate: (cards: FreightCard[]) => void }) {
@@ -826,19 +779,13 @@ function MasterFreightSection({ cards, onUpdate }: { cards: FreightCard[]; onUpd
   useEffect(() => { setLocal(cards); }, [cards]);
 
   function addRow() {
-    setLocal(prev => [...prev, { id: crypto.randomUUID(), destination: "", country: "", continent: "", freightUsd: 0, currency: "USD", updatedAt: "" }]);
+    setLocal(prev => [...prev, { id: crypto.randomUUID(), destination: "", country: "", freightUsd: 0, currency: "USD", updatedAt: "" }]);
   }
 
   function updateRow(i: number, field: keyof FreightCard, value: string | number) {
     setLocal(prev => {
       const next = [...prev];
       const updated = { ...next[i], [field]: field === "freightUsd" ? Math.max(0, Number(value)) : value };
-      if (field === "continent") {
-        updated.country = "";
-      }
-      if (field === "country" && !updated.continent) {
-        updated.continent = continentForCountry(String(value));
-      }
       next[i] = updated;
       return next;
     });
@@ -865,7 +812,6 @@ function MasterFreightSection({ cards, onUpdate }: { cards: FreightCard[]; onUpd
       <table className="w-full text-sm">
         <thead>
           <tr className="bg-gray-50 border-b border-gray-100">
-            <th className="text-left px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Continent</th>
             <th className="text-left px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Country</th>
             <th className="text-left px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Destination / Port</th>
             <th className="text-right px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Freight (USD)</th>
@@ -878,14 +824,8 @@ function MasterFreightSection({ cards, onUpdate }: { cards: FreightCard[]; onUpd
             <tr key={c.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
               <td className="px-4 py-2.5">
                 {isEditing ? (
-                  <FreightSearchSelect value={c.continent} options={[...CONTINENTS]} onChange={v => updateRow(i, "continent", v)} placeholder="Region…" />
-                ) : (
-                  <span className="text-gray-500 text-xs">{c.continent || "—"}</span>
-                )}
-              </td>
-              <td className="px-4 py-2.5">
-                {isEditing ? (
-                  <FreightSearchSelect value={c.country} options={c.continent ? countriesForContinent(c.continent) : COUNTRIES.map(cc => cc.country)} onChange={v => updateRow(i, "country", v)} placeholder="Country…" />
+                  <input value={c.country} onChange={e => updateRow(i, "country", e.target.value)} placeholder="e.g. United Arab Emirates"
+                    className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 focus:outline-none focus:border-blue-400" />
                 ) : (
                   <span className="text-gray-600">{c.country}</span>
                 )}

@@ -1,7 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import { ArrowLeft, Plus, Trash2, Pencil, X, Save, Search, Package, List, LayoutGrid, DollarSign, Settings2, Tag, Upload, Container, Edit2, Check, Loader2 } from "lucide-react";
-import { COUNTRIES, continentForCountry } from "@/lib/countries";
 import {
   calcRice, calcBagRate, RiceProduct, RiceMaster, RiceSettings, RiceProductByproduct, RiceBag,
   RICE_DEFAULT_SETTINGS, RICE_DEFAULT_PRODUCT_BYPRODUCTS,
@@ -51,7 +50,7 @@ function suggestNextRiceSku(products: RiceProduct[]): string {
 
 const emptyProduct = (products: RiceProduct[]): RiceProduct => ({
   id: genId(), sku: suggestNextRiceSku(products), name: "", brandId: "", category: "", imageUrl: "", packagingDesc: "",
-  quantity: 1000, recoveryPct: 90, purchaseRate: 300, freight: 0,
+  quantity: 1000, recoveryPct: 90, purchaseRate: 300, freight: 0, profit: 50,
   byproducts: RICE_DEFAULT_PRODUCT_BYPRODUCTS.map(b => ({ ...b })), active: true,
 });
 
@@ -67,12 +66,8 @@ function ContainerMtSection({ rows, onUpdate, requireAuth }: { rows: ContainerMt
 
   useEffect(() => { setLocal(rows); }, [rows]);
 
-  function initAllCountries() {
-    const existing = new Set(local.map(r => r.country));
-    const toAdd = COUNTRIES.filter(c => !existing.has(c.country)).map(c => ({
-      id: crypto.randomUUID(), country: c.country, mt20: 0, mt40: 0, mt40hc: 0, updatedAt: "",
-    }));
-    setLocal(prev => [...prev, ...toAdd].sort((a, b) => a.country.localeCompare(b.country)));
+  function addRow() {
+    setLocal(prev => [...prev, { id: crypto.randomUUID(), country: "", mt20: 0, mt40: 0, mt40hc: 0, updatedAt: "" }]);
   }
 
   function updateMt(i: number, field: "mt20" | "mt40" | "mt40hc", value: number) {
@@ -116,17 +111,15 @@ function ContainerMtSection({ rows, onUpdate, requireAuth }: { rows: ContainerMt
           {editing ? (
             <>
               <button onClick={() => { setLocal(rows); setEditing(false); setSearch(""); }} className="px-3 py-1.5 text-xs text-gray-500 hover:text-gray-700 cursor-pointer">Cancel</button>
-              {local.length < COUNTRIES.length && (
-                <button onClick={initAllCountries} className="flex items-center gap-1 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg cursor-pointer transition-colors">
-                  <Plus className="w-3 h-3" /> Add All Countries
-                </button>
-              )}
+              <button onClick={addRow} className="flex items-center gap-1 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg cursor-pointer transition-colors">
+                <Plus className="w-3 h-3" /> Add Country
+              </button>
               <button onClick={() => requireAuth(() => save())} disabled={saving} className="flex items-center gap-1 text-xs bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded-lg cursor-pointer transition-colors">
                 {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />} Save
               </button>
             </>
           ) : (
-            <button onClick={() => { setEditing(true); if (local.length === 0) initAllCountries(); }} className="flex items-center gap-1 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg cursor-pointer transition-colors">
+            <button onClick={() => setEditing(true)} className="flex items-center gap-1 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg cursor-pointer transition-colors">
               <Edit2 className="w-3 h-3" /> Edit
             </button>
           )}
@@ -150,10 +143,10 @@ function ContainerMtSection({ rows, onUpdate, requireAuth }: { rows: ContainerMt
             <thead className="sticky top-0 z-10">
               <tr className="bg-gray-50 border-b border-gray-100">
                 <th className="text-left px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Country</th>
-                <th className="text-left px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Continent</th>
                 <th className="text-right px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">20ft (MT)</th>
                 <th className="text-right px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">40ft (MT)</th>
                 <th className="text-right px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">40ft HC (MT)</th>
+                {editing && <th className="px-2 py-2.5 w-8" />}
               </tr>
             </thead>
             <tbody>
@@ -161,8 +154,14 @@ function ContainerMtSection({ rows, onUpdate, requireAuth }: { rows: ContainerMt
                 const realIdx = local.findIndex(lr => lr.id === r.id);
                 return (
                   <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
-                    <td className="px-4 py-2 font-medium text-gray-900 text-xs">{r.country}</td>
-                    <td className="px-4 py-2 text-xs text-gray-500">{continentForCountry(r.country) || "—"}</td>
+                    <td className="px-4 py-2">
+                      {editing ? (
+                        <input value={r.country} onChange={e => { setLocal(prev => { const next = [...prev]; next[realIdx] = { ...next[realIdx], country: e.target.value }; return next; }); }}
+                          placeholder="e.g. Pakistan" className="w-full border border-gray-200 rounded px-2 py-1 text-xs text-gray-900 focus:outline-none focus:border-green-400" />
+                      ) : (
+                        <span className="font-medium text-gray-900 text-xs">{r.country}</span>
+                      )}
+                    </td>
                     <td className="px-4 py-2 text-right">
                       {editing ? (
                         <input type="number" min={0} step={0.1} value={r.mt20 || ""} onChange={e => updateMt(realIdx, "mt20", parseFloat(e.target.value) || 0)}
@@ -187,6 +186,11 @@ function ContainerMtSection({ rows, onUpdate, requireAuth }: { rows: ContainerMt
                         <span className={`text-xs ${r.mt40hc > 0 ? "font-semibold text-green-700" : "text-gray-300"}`}>{r.mt40hc || "—"}</span>
                       )}
                     </td>
+                    {editing && (
+                      <td className="px-2 py-2 text-center">
+                        <button onClick={() => setLocal(prev => prev.filter((_, idx) => idx !== realIdx))} className="p-0.5 text-gray-400 hover:text-red-500 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
+                      </td>
+                    )}
                   </tr>
                 );
               })}
@@ -776,6 +780,9 @@ function ProductForm({ product, master, settings, brands, categories, onClose, o
                   <option value="">—</option>{categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
                 </select>
               </Field>
+              <Field label="Profit (USD/shipment)">
+                <input type="number" step="1" value={draft.profit} onChange={e => upd("profit", parseFloat(e.target.value) || 0)} className={inp} />
+              </Field>
             </div>
 
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
@@ -853,8 +860,8 @@ function SettingsForm({ settings, onClose, onSave }: { settings: RiceSettings; o
   const fields: [keyof RiceSettings, string][] = [
     ["fcRate", "FC Rate (PKR→USD)"], ["whtPct", "W.H.T %"], ["servicePct", "Service Charges %"],
     ["edsPct", "EDS %"], ["courierPct", "Courier %"], ["interestPct", "Interest %"],
-    ["profit", "Profit (USD/shipment)"], ["packagingMaterial", "Packaging Material (USD)"],
-    ["bagDollarRate", "Bag Dollar Rate (PKR)"], ["bagOverheadPct", "Bag Overhead %"],
+    ["packagingMaterial", "Packaging Material (USD)"],
+    ["bagOverheadPct", "Bag Overhead %"],
   ];
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
