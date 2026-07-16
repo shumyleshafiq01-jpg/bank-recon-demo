@@ -771,7 +771,7 @@ function NewQuoteModal({ freightCards, containerMtRows, catalogProducts, catalog
 
 // ─── Master Freight Section ─────────────────────────────────────────────────
 
-function MasterFreightSection({ cards, onUpdate }: { cards: FreightCard[]; onUpdate: (cards: FreightCard[]) => void }) {
+function MasterFreightSection({ cards, onUpdate, mtCountries }: { cards: FreightCard[]; onUpdate: (cards: FreightCard[]) => void; mtCountries: string[] }) {
   const [editing, setEditing] = useState(false);
   const [local, setLocal] = useState<FreightCard[]>(cards);
   const [saving, setSaving] = useState(false);
@@ -824,8 +824,11 @@ function MasterFreightSection({ cards, onUpdate }: { cards: FreightCard[]; onUpd
             <tr key={c.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
               <td className="px-4 py-2.5">
                 {isEditing ? (
-                  <input value={c.country} onChange={e => updateRow(i, "country", e.target.value)} placeholder="e.g. United Arab Emirates"
-                    className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 focus:outline-none focus:border-blue-400" />
+                  <select value={c.country} onChange={e => updateRow(i, "country", e.target.value)}
+                    className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 focus:outline-none focus:border-blue-400 bg-white cursor-pointer">
+                    <option value="">— Select Country —</option>
+                    {mtCountries.map(ct => <option key={ct} value={ct}>{ct}</option>)}
+                  </select>
                 ) : (
                   <span className="text-gray-600">{c.country}</span>
                 )}
@@ -1361,7 +1364,7 @@ export default function CNFPage() {
 
         {/* Master Freight Card */}
         {!loading && (
-          <MasterFreightSection cards={freightCards} onUpdate={cards => setFreightCards(cards)} />
+          <MasterFreightSection cards={freightCards} onUpdate={cards => setFreightCards(cards)} mtCountries={containerMtRows.map(r => r.country).filter(Boolean).sort()} />
         )}
 
         {/* Container Capacity (MT) is managed in Rice Master Prices */}
