@@ -173,6 +173,17 @@ function NewQuoteModal({ freightCards, containerMtRows, catalogProducts, catalog
     return Math.round((containerFreight / mt) * 100) / 100;
   }
 
+  function bagPmtForId(bagId?: string): number {
+    if (!bagId) return 0;
+    const bag = riceBags.find(b => b.id === bagId);
+    if (!bag) return 0;
+    return calcBagRate(bag, riceSettings.bagDollarRate, riceSettings.bagOverheadPct).finalPmt;
+  }
+
+  function riceCnf(fob: number, freight: number, bagId?: string): number {
+    return Math.round((fob + freight + bagPmtForId(bagId)) * 100) / 100;
+  }
+
   function freightForProduct(p: QuoteProduct, containerRate: number, countryName: string, qt: QuoteType): number {
     if (qt !== "CNF" || !p.productId) return 0;
     if (p.division === "rice") return riceFreightPerMt(countryName, containerRate, p.containerSize || "20ft");
@@ -185,7 +196,7 @@ function NewQuoteModal({ freightCards, containerMtRows, catalogProducts, catalog
     setFreightUsd(card.freightUsd);
     setProducts(prev => prev.map(p => {
       const freight = freightForProduct(p, card.freightUsd, card.country, quoteType);
-      return { ...p, freightPerCarton: freight, cnfPerCarton: p.fobPerCarton + freight };
+      return { ...p, freightPerCarton: freight, cnfPerCarton: p.division === "rice" ? riceCnf(p.fobPerCarton, freight, p.bagId) : p.fobPerCarton + freight };
     }));
   }
 
@@ -193,7 +204,7 @@ function NewQuoteModal({ freightCards, containerMtRows, catalogProducts, catalog
     setQuoteType(next);
     setProducts(prev => prev.map(p => {
       const freight = freightForProduct(p, freightUsd, country, next);
-      return { ...p, freightPerCarton: freight, cnfPerCarton: p.fobPerCarton + freight };
+      return { ...p, freightPerCarton: freight, cnfPerCarton: p.division === "rice" ? riceCnf(p.fobPerCarton, freight, p.bagId) : p.fobPerCarton + freight };
     }));
   }
 
@@ -213,7 +224,7 @@ function NewQuoteModal({ freightCards, containerMtRows, catalogProducts, catalog
           p.brandName = riceBrandName(rp?.brandId);
           p.fobPerCarton = riceFobPerPmt(String(value));
           p.freightPerCarton = (quoteType === "CNF") ? riceFreightPerMt(country, freightUsd, p.containerSize || "20ft") : 0;
-          p.cnfPerCarton = p.fobPerCarton + p.freightPerCarton;
+          p.cnfPerCarton = riceCnf(p.fobPerCarton, p.freightPerCarton, p.bagId);
         } else {
           const product = catalogProducts.find(cp => cp.id === value);
           p.productName = product?.name ?? "";
@@ -232,10 +243,10 @@ function NewQuoteModal({ freightCards, containerMtRows, catalogProducts, catalog
         if (p.division !== "rice") {
           p.fobPerCarton = p.productId ? fobFor(p.productId, qty) : p.fobPerCarton;
         }
-        p.cnfPerCarton = p.fobPerCarton + p.freightPerCarton;
+        p.cnfPerCarton = p.division === "rice" ? riceCnf(p.fobPerCarton, p.freightPerCarton, p.bagId) : p.fobPerCarton + p.freightPerCarton;
       } else if (field === "freightPerCarton") {
         p.freightPerCarton = Math.max(0, Number(value));
-        p.cnfPerCarton = p.fobPerCarton + p.freightPerCarton;
+        p.cnfPerCarton = p.division === "rice" ? riceCnf(p.fobPerCarton, p.freightPerCarton, p.bagId) : p.fobPerCarton + p.freightPerCarton;
       }
       next[i] = p;
       return next;
@@ -260,7 +271,7 @@ function NewQuoteModal({ freightCards, containerMtRows, catalogProducts, catalog
         specs: "", packagingDesc: rp?.packagingDesc ?? "",
         category: rp?.category ?? "", imageUrl: rp?.imageUrl ?? "", brandName: riceBrandName(rp?.brandId),
         qty: 1, fobPerCarton: fob, freightPerCarton: freight, cnfPerCarton: fob + freight,
-        division: "rice", containerSize: "20ft",
+        division: "rice", containerSize: "20ft", bagId: "", bagLabel: "",
       };
     }
     const product = catalogProducts.find(cp => cp.id === productId);
@@ -502,7 +513,8 @@ function NewQuoteModal({ freightCards, containerMtRows, catalogProducts, catalog
                         <label className="block text-xs text-gray-500 mb-1">Bag Packaging *</label>
                         <select value={p.bagId ?? ""} onChange={e => {
                           const bag = riceBags.find(b => b.id === e.target.value);
-                          setProducts(prev => { const next = [...prev]; next[i] = { ...next[i], bagId: bag?.id ?? "", bagLabel: bag ? `${bag.type} — ${bag.sizeLabel}` : "" }; return next; });
+                          const newBagId = bag?.id ?? "";
+                          setProducts(prev => { const next = [...prev]; const up = { ...next[i], bagId: newBagId, bagLabel: bag ? `${bag.type} — ${bag.sizeLabel}` : "" }; up.cnfPerCarton = riceCnf(up.fobPerCarton, up.freightPerCarton, newBagId); next[i] = up; return next; });
                         }} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-400 bg-white cursor-pointer">
                           <option value="">— Select bag packaging —</option>
                           {riceBags.map(b => (
@@ -529,7 +541,7 @@ function NewQuoteModal({ freightCards, containerMtRows, catalogProducts, catalog
                         {(["20ft", "40ft", "40hc"] as ContainerSize[]).map(sz => (
                           <button key={sz} type="button" onClick={() => {
                             const freight = riceFreightPerMt(country, freightUsd, sz);
-                            setProducts(prev => { const next = [...prev]; next[i] = { ...next[i], containerSize: sz, freightPerCarton: freight, cnfPerCarton: next[i].fobPerCarton + freight }; return next; });
+                            setProducts(prev => { const next = [...prev]; next[i] = { ...next[i], containerSize: sz, freightPerCarton: freight, cnfPerCarton: riceCnf(next[i].fobPerCarton, freight, next[i].bagId) }; return next; });
                           }}
                             className={`flex-1 border rounded-lg px-3 py-2 text-sm cursor-pointer transition-all ${(p.containerSize || "20ft") === sz ? "border-blue-500 bg-blue-50 text-blue-700 font-medium" : "border-gray-200 text-gray-500 hover:border-gray-300"}`}>
                             {sz === "40hc" ? "40ft HC" : sz.toUpperCase()}
