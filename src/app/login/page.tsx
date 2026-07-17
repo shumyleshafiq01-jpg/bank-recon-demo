@@ -80,7 +80,7 @@ function LoginContent() {
   // Check if already logged in
   useEffect(() => {
     fetch("/api/auth").then(r => r.json()).then(d => {
-      if (d.user && !d.user.mustChangePin) router.replace("/dashboard");
+      if (d.user && !d.user.mustChangePin) router.replace("/");
     }).catch(() => {});
   }, [router]);
 
@@ -99,7 +99,7 @@ function LoginContent() {
       if (d.user?.mustChangePin) {
         setMustChange(true);
       } else {
-        router.push("/dashboard");
+        router.push("/");
       }
     } catch { setError("Network error"); } finally { setLoading(false); }
   }
@@ -118,7 +118,7 @@ function LoginContent() {
       });
       const d = await r.json();
       if (!r.ok) { setError(d.error || "Failed"); return; }
-      router.push("/dashboard");
+      router.push("/");
     } catch { setError("Network error"); } finally { setChangingPin(false); }
   }
 

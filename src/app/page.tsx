@@ -1,10 +1,10 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 import {
   Landmark, DollarSign, Package, Users, Bot,
-  ArrowRight, Sparkles, UserCheck, ClipboardList,
+  ArrowRight, Sparkles, UserCheck, ClipboardList, LogOut,
 } from "lucide-react";
 
 type Node = { x: number; y: number; vx: number; vy: number; radius: number };
@@ -168,14 +168,14 @@ const AGENTS = [
   },
   {
     name: "AI Supply Chain Agent",
-    status: "tba",
-    statusLabel: "TBA",
-    statusColor: "bg-gray-100 text-gray-400",
-    desc: "Inventory management, procurement automation, supplier analytics",
+    status: "wip",
+    statusLabel: "WIP",
+    statusColor: "bg-emerald-100 text-emerald-600",
+    desc: "CBM calculator, packing plans, BOM, PO, GRN, shipment tracking",
     icon: Package,
-    iconBg: "bg-gray-100",
-    iconColor: "text-gray-400",
-    route: null,
+    iconBg: "bg-emerald-100",
+    iconColor: "text-emerald-500",
+    route: "/supply-chain",
   },
   {
     name: "AI Agent CRM",
@@ -225,10 +225,45 @@ const AGENTS = [
 
 export default function HubPage() {
   const router = useRouter();
+  const [checked, setChecked] = useState(false);
+  const [displayName, setDisplayName] = useState("");
+
+  // Require login before showing the agent hub
+  useEffect(() => {
+    fetch("/api/auth")
+      .then(r => r.json())
+      .then(d => {
+        if (!d.user || d.user.mustChangePin) { router.replace("/login"); return; }
+        setDisplayName(d.user.displayName || "");
+        setChecked(true);
+      })
+      .catch(() => router.replace("/login"));
+  }, [router]);
+
+  async function logout() {
+    await fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "logout" }) });
+    router.replace("/login");
+  }
+
+  if (!checked) {
+    return (
+      <div className="flex-1 flex items-center justify-center min-h-screen" style={{ background: "#e8ecf1" }}>
+        <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 flex items-center justify-center p-6 min-h-screen" style={{ background: "#e8ecf1" }}>
       <NeuronBackground />
+
+      {/* Top bar: signed-in user + logout */}
+      <div className="fixed top-0 right-0 z-20 flex items-center gap-3 px-5 py-4">
+        {displayName && <span className="text-sm text-gray-500">Hi, <span className="font-medium text-gray-700">{displayName}</span></span>}
+        <button onClick={logout} className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-700 transition-colors cursor-pointer">
+          <LogOut className="w-4 h-4" /> Sign out
+        </button>
+      </div>
 
       <div className="relative z-10 w-full max-w-lg space-y-8 animate-fade-in">
         {/* Title */}
