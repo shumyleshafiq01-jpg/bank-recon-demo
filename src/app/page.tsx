@@ -142,7 +142,7 @@ const AGENTS = [
     icon: Landmark,
     iconBg: "bg-blue-100",
     iconColor: "text-blue-600",
-    route: "/login",
+    route: "/dashboard",
   },
   {
     name: "AI Product List / Recipes / Price List",
