@@ -19,7 +19,11 @@ export async function GET(request: Request) {
         .from("sc_bom_items").select("*").eq("bom_id", bomId).order("sort_order");
       if (iErr) throw iErr;
 
-      return Response.json({ bom, items: items ?? [] });
+      const { data: materials, error: mErr } = await supabase
+        .from("sc_bom_materials").select("*").eq("bom_id", bomId).order("sort_order");
+      if (mErr) throw mErr;
+
+      return Response.json({ bom, items: items ?? [], materials: materials ?? [] });
     }
 
     const { data, error } = await supabase
@@ -46,10 +50,47 @@ export async function POST(request: Request) {
 
       const { data: planItems, error: piErr } = await supabase
         .from("sc_packing_items")
-        .select("*, sc_products(product_name, packing_desc, pcs_per_carton)")
+        .select("*, sc_products(product_name, packing_desc, pcs_per_carton, source_product_id)")
         .eq("plan_id", body.planId)
         .order("sort_order");
       if (piErr) throw piErr;
+
+      // Recipes turn a finished-good line into its raw materials — reuses
+      // the Product List's existing costing recipe (pl_recipes/pl_master).
+      // recipe.qty is PER CARTON for unit_type PCS (verified against real
+      // data: 500g Fliptop recipe = 20 bottles/carton + 10kg sea salt/carton
+      // = 20 x 0.5kg, exact). CONTAINER/FIXED types are once-per-shipment,
+      // not per-carton, so they're deduped to a single max rather than summed.
+      const sourceIds = Array.from(new Set(
+        (planItems ?? [])
+          .map((it: Record<string, unknown>) => (it.sc_products as Record<string, unknown> | null)?.source_product_id as string | undefined)
+          .filter((x): x is string => !!x)
+      ));
+
+      let recipesByProduct: Record<string, { material_id: string; material_name: string; qty: number; unit_type: string }[]> = {};
+      let materialMeta: Record<string, { unit: string; category: string; price: number }> = {};
+
+      if (sourceIds.length > 0) {
+        const { data: recipeRows } = await supabase.from("pl_recipes").select("*").in("product_id", sourceIds);
+        recipesByProduct = (recipeRows ?? []).reduce((acc: typeof recipesByProduct, r) => {
+          const pid = r.product_id as string;
+          (acc[pid] ||= []).push({
+            material_id: r.material_id as string,
+            material_name: r.material_name as string,
+            qty: Number(r.qty || 0),
+            unit_type: (r.unit_type as string) || "PCS",
+          });
+          return acc;
+        }, {});
+
+        const materialIds = Array.from(new Set((recipeRows ?? []).map(r => r.material_id as string)));
+        if (materialIds.length > 0) {
+          const { data: materialRows } = await supabase.from("pl_master").select("*").in("id", materialIds);
+          for (const m of materialRows ?? []) {
+            materialMeta[m.id as string] = { unit: (m.unit as string) || "", category: (m.category as string) || "", price: Number(m.price_per_unit || 0) };
+          }
+        }
+      }
 
       // Create the BOM header
       const { data: bom, error: bErr } = await supabase
@@ -66,11 +107,33 @@ export async function POST(request: Request) {
         .single();
       if (bErr) throw bErr;
 
-      // Create BOM items from plan items
+      // Aggregate raw materials across every recipe-bearing line
+      const materialsAgg: Record<string, { name: string; qty: number; unitType: string }> = {};
+
+      // Create BOM items from plan items — recipe-bearing products get
+      // has_recipe=true (they decompose into materials below) and skip
+      // finished-goods in-stock tracking, which only applies to products
+      // Kafi purchases ready-made (no recipe on file).
       const rows = (planItems ?? []).map((it: Record<string, unknown>, i: number) => {
         const prod = it.sc_products as Record<string, unknown> | null;
         const cartons = Number(it.cartons || 0);
         const pcsPerCarton = Number(prod?.pcs_per_carton || 0);
+        const sourceId = prod?.source_product_id as string | undefined;
+        const recipe = sourceId ? recipesByProduct[sourceId] : undefined;
+        const hasRecipe = !!recipe && recipe.length > 0;
+
+        if (hasRecipe) {
+          for (const line of recipe!) {
+            const entry = (materialsAgg[line.material_id] ||= { name: line.material_name, qty: 0, unitType: line.unit_type });
+            if (line.unit_type === "PCS") {
+              entry.qty += line.qty * cartons;
+            } else {
+              // CONTAINER / FIXED — once per shipment, not summed per line
+              entry.qty = Math.max(entry.qty, line.qty);
+            }
+          }
+        }
+
         return {
           bom_id: bom.id,
           product_id: it.product_id,
@@ -82,10 +145,11 @@ export async function POST(request: Request) {
           net_weight_total: Number(it.net_weight_total || 0),
           value_total: Number(it.total_value || 0),
           in_stock: 0,
-          to_order: cartons, // nothing in stock yet
+          to_order: cartons,
           item_status: "pending",
           remarks: (it.remarks as string) || "",
           sort_order: i,
+          has_recipe: hasRecipe,
         };
       });
 
@@ -94,12 +158,31 @@ export async function POST(request: Request) {
         if (insErr) throw insErr;
       }
 
+      const materialRows2 = Object.entries(materialsAgg)
+        .sort((a, b) => (materialMeta[a[0]]?.category || "").localeCompare(materialMeta[b[0]]?.category || "") || a[1].name.localeCompare(b[1].name))
+        .map(([materialId, m], i) => ({
+          bom_id: bom.id,
+          material_id: materialId,
+          material_name: m.name,
+          unit: materialMeta[materialId]?.unit || "",
+          category: materialMeta[materialId]?.category || "",
+          qty_needed: Math.round(m.qty * 1000) / 1000,
+          est_cost: Math.round(m.qty * (materialMeta[materialId]?.price || 0) * 100) / 100,
+          unit_type: m.unitType,
+          sort_order: i,
+        }));
+
+      if (materialRows2.length > 0) {
+        const { error: matErr } = await supabase.from("sc_bom_materials").insert(materialRows2);
+        if (matErr) throw matErr;
+      }
+
       // Notify subscribers that the BOM stage is done
       const totalCartons = rows.reduce((s, r) => s + r.cartons_required, 0);
       const notified = await notifyEvent({
         event: "bom_generated",
         refId: bom.id,
-        text: `*KAFI — BOM GENERATED*\nFrom plan "${plan.plan_name}"${plan.buyer_name ? ` (${plan.buyer_name})` : ""}\n${rows.length} items · ${totalCartons} cartons required.`,
+        text: `*KAFI — BOM GENERATED*\nFrom plan "${plan.plan_name}"${plan.buyer_name ? ` (${plan.buyer_name})` : ""}\n${rows.length} product line${rows.length !== 1 ? "s" : ""}, ${totalCartons} cartons · ${materialRows2.length} raw material${materialRows2.length !== 1 ? "s" : ""} to procure.`,
         subject: `BOM generated — ${plan.plan_name}`,
       });
 
@@ -138,6 +221,15 @@ export async function POST(request: Request) {
             remarks: it.remarks || "",
           })
           .eq("id", it.id);
+        if (error) throw error;
+      }
+      return Response.json({ ok: true });
+    }
+
+    // Save remarks on raw-material rows
+    if (body.action === "save-materials" && Array.isArray(body.items)) {
+      for (const it of body.items) {
+        const { error } = await supabase.from("sc_bom_materials").update({ remarks: it.remarks || "" }).eq("id", it.id);
         if (error) throw error;
       }
       return Response.json({ ok: true });

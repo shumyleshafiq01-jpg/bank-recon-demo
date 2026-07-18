@@ -1,11 +1,12 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import {
   ChevronLeft, Plus, Package, Search, Edit3, Trash2,
-  Save, X, Loader2, ChevronDown, Check, AlertTriangle, Info,
+  Save, X, Loader2, ChevronDown, Check, AlertTriangle, Info, Wand2,
 } from "lucide-react";
+import { maxCartonsFit } from "@/lib/cbm-calc";
 
 type Product = {
   id: string; brand: string; product_name: string; packing_desc: string;
@@ -26,6 +27,8 @@ type DimForm = {
   net_weight_kg: number; pcs_per_carton: number; sort_order: number;
 };
 
+type ContainerType = { name: string; length_ft: number; width_ft: number; height_ft: number };
+
 export default function ProductMasterPage() {
   const router = useRouter();
   const [products, setProducts] = useState<Product[]>([]);
@@ -37,6 +40,7 @@ export default function ProductMasterPage() {
   const [editing, setEditing] = useState<Product | null>(null);
   const [form, setForm] = useState<DimForm | null>(null);
   const [saving, setSaving] = useState(false);
+  const [containers, setContainers] = useState<ContainerType[]>([]);
 
   // Catalog picker
   const [catalog, setCatalog] = useState<CatalogItem[]>([]);
@@ -52,7 +56,27 @@ export default function ProductMasterPage() {
     setLoading(false);
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    fetch("/api/supply-chain/settings").then(r => r.json()).then(d => setContainers(d.containers ?? [])).catch(() => {});
+  }, []);
+
+  // Auto-calculate max cartons per container whenever L/W/H change
+  const recalcMax = useCallback((f: DimForm): DimForm => {
+    if (containers.length === 0 || !f.length_in || !f.width_in || !f.height_in) return f;
+    const dims = (name: string) => containers.find(c => c.name === name);
+    const c20 = dims("20ft"), c40 = dims("40ft"), c40hc = dims("40hc");
+    return {
+      ...f,
+      max_20ft: c20 ? maxCartonsFit(f.length_in, f.width_in, f.height_in, c20.length_ft, c20.width_ft, c20.height_ft) : f.max_20ft,
+      max_40ft: c40 ? maxCartonsFit(f.length_in, f.width_in, f.height_in, c40.length_ft, c40.width_ft, c40.height_ft) : f.max_40ft,
+      max_40hc: c40hc ? maxCartonsFit(f.length_in, f.width_in, f.height_in, c40hc.length_ft, c40hc.width_ft, c40hc.height_ft) : f.max_40hc,
+    };
+  }, [containers]);
+
+  function setDim(field: "length_in" | "width_in" | "height_in", value: number) {
+    setForm(f => f && recalcMax({ ...f, [field]: value }));
+  }
 
   const brands = useMemo(() => {
     const set = new Set(products.map(p => p.brand).filter(Boolean));
@@ -213,41 +237,65 @@ export default function ProductMasterPage() {
                 <label className="text-xs text-gray-500 mb-1 block">Packing Description</label>
                 <input value={form.packing_desc} onChange={e => setForm(f => f && ({ ...f, packing_desc: e.target.value }))} placeholder="e.g. 150G X 48 POUCH IN CARTON" className="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-900 placeholder-gray-700 focus:outline-none focus:border-emerald-500/50" />
               </div>
-              <div>
-                <label className="text-xs text-gray-500 mb-1 block">Pcs/Carton</label>
-                <input type="number" value={form.pcs_per_carton || ""} onChange={e => setForm(f => f && ({ ...f, pcs_per_carton: Number(e.target.value) }))} className="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-900 focus:outline-none focus:border-emerald-500/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
-              </div>
-              <div>
-                <label className="text-xs text-gray-500 mb-1 block">Net Weight/Carton (kg)</label>
-                <input type="number" step="0.01" value={form.net_weight_kg || ""} onChange={e => setForm(f => f && ({ ...f, net_weight_kg: Number(e.target.value) }))} className="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-900 focus:outline-none focus:border-emerald-500/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
-              </div>
+              {editing.source_division === "rice" ? (
+                <div>
+                  <label className="text-xs text-blue-600 mb-1 block">Weight per Bag (kg)</label>
+                  <input type="number" step="0.01" value={form.net_weight_kg || ""} onChange={e => setForm(f => f && ({ ...f, net_weight_kg: Number(e.target.value) }))} className="w-full bg-blue-500/[0.04] border border-blue-500/20 rounded-lg px-3 py-1.5 text-sm text-gray-900 focus:outline-none focus:border-blue-500/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label className="text-xs text-gray-500 mb-1 block">Pcs/Carton</label>
+                    <input type="number" value={form.pcs_per_carton || ""} onChange={e => setForm(f => f && ({ ...f, pcs_per_carton: Number(e.target.value) }))} className="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-900 focus:outline-none focus:border-emerald-500/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500 mb-1 block">Net Weight/Carton (kg)</label>
+                    <input type="number" step="0.01" value={form.net_weight_kg || ""} onChange={e => setForm(f => f && ({ ...f, net_weight_kg: Number(e.target.value) }))} className="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-900 focus:outline-none focus:border-emerald-500/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                  </div>
+                </>
+              )}
             </div>
-            <div className="grid grid-cols-3 md:grid-cols-6 gap-3 mb-4">
-              <div>
-                <label className="text-xs text-gray-500 mb-1 block">L (in)</label>
-                <input type="number" step="0.01" value={form.length_in || ""} onChange={e => setForm(f => f && ({ ...f, length_in: Number(e.target.value) }))} className="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-900 focus:outline-none focus:border-emerald-500/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
-              </div>
-              <div>
-                <label className="text-xs text-gray-500 mb-1 block">W (in)</label>
-                <input type="number" step="0.01" value={form.width_in || ""} onChange={e => setForm(f => f && ({ ...f, width_in: Number(e.target.value) }))} className="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-900 focus:outline-none focus:border-emerald-500/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
-              </div>
-              <div>
-                <label className="text-xs text-gray-500 mb-1 block">H (in)</label>
-                <input type="number" step="0.01" value={form.height_in || ""} onChange={e => setForm(f => f && ({ ...f, height_in: Number(e.target.value) }))} className="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-900 focus:outline-none focus:border-emerald-500/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
-              </div>
-              <div>
-                <label className="text-xs text-gray-500 mb-1 block">Max 20FT</label>
-                <input type="number" value={form.max_20ft || ""} onChange={e => setForm(f => f && ({ ...f, max_20ft: Number(e.target.value) }))} className="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-900 focus:outline-none focus:border-emerald-500/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
-              </div>
-              <div>
-                <label className="text-xs text-gray-500 mb-1 block">Max 40FT</label>
-                <input type="number" value={form.max_40ft || ""} onChange={e => setForm(f => f && ({ ...f, max_40ft: Number(e.target.value) }))} className="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-900 focus:outline-none focus:border-emerald-500/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
-              </div>
-              <div>
-                <label className="text-xs text-gray-500 mb-1 block">Max 40HC</label>
-                <input type="number" value={form.max_40hc || ""} onChange={e => setForm(f => f && ({ ...f, max_40hc: Number(e.target.value) }))} className="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-900 focus:outline-none focus:border-emerald-500/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
-              </div>
-            </div>
+
+            {editing.source_division === "rice" ? (
+              <p className="text-[11px] text-blue-600 bg-blue-500/[0.04] border border-blue-500/20 rounded-lg px-3 py-2 mb-4">
+                Rice is weight-limited (PMT), not carton-count limited — no carton dimensions needed. Container capacity (PMT) is set once in the CBM Calculator&apos;s settings, not per product.
+              </p>
+            ) : (
+              <>
+                <div className="grid grid-cols-3 md:grid-cols-6 gap-3 mb-2">
+                  <div>
+                    <label className="text-xs text-gray-500 mb-1 block">L (in)</label>
+                    <input type="number" step="0.01" value={form.length_in || ""} onChange={e => setDim("length_in", Number(e.target.value))} className="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-900 focus:outline-none focus:border-emerald-500/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500 mb-1 block">W (in)</label>
+                    <input type="number" step="0.01" value={form.width_in || ""} onChange={e => setDim("width_in", Number(e.target.value))} className="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-900 focus:outline-none focus:border-emerald-500/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500 mb-1 block">H (in)</label>
+                    <input type="number" step="0.01" value={form.height_in || ""} onChange={e => setDim("height_in", Number(e.target.value))} className="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-900 focus:outline-none focus:border-emerald-500/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-emerald-600 mb-1 flex items-center gap-1"><Wand2 className="w-3 h-3" /> Max 20FT</label>
+                    <input type="number" value={form.max_20ft || ""} onChange={e => setForm(f => f && ({ ...f, max_20ft: Number(e.target.value) }))} className="w-full bg-emerald-500/[0.04] border border-emerald-500/20 rounded-lg px-3 py-1.5 text-sm text-gray-900 focus:outline-none focus:border-emerald-500/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-emerald-600 mb-1 flex items-center gap-1"><Wand2 className="w-3 h-3" /> Max 40FT</label>
+                    <input type="number" value={form.max_40ft || ""} onChange={e => setForm(f => f && ({ ...f, max_40ft: Number(e.target.value) }))} className="w-full bg-emerald-500/[0.04] border border-emerald-500/20 rounded-lg px-3 py-1.5 text-sm text-gray-900 focus:outline-none focus:border-emerald-500/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-emerald-600 mb-1 flex items-center gap-1"><Wand2 className="w-3 h-3" /> Max 40HC</label>
+                    <input type="number" value={form.max_40hc || ""} onChange={e => setForm(f => f && ({ ...f, max_40hc: Number(e.target.value) }))} className="w-full bg-emerald-500/[0.04] border border-emerald-500/20 rounded-lg px-3 py-1.5 text-sm text-gray-900 focus:outline-none focus:border-emerald-500/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                  </div>
+                </div>
+                <div className="flex items-center justify-between mb-4">
+                  <button onClick={() => setForm(f => f && recalcMax(f))} className="flex items-center gap-1 text-xs text-emerald-600 hover:text-emerald-700 cursor-pointer">
+                    <Wand2 className="w-3.5 h-3.5" /> Recalculate from L&times;W&times;H
+                  </button>
+                  <span className="text-[11px] text-gray-400">Auto-calculated — edit if real-world packing differs</span>
+                </div>
+              </>
+            )}
             <div className="flex justify-end gap-2">
               <button onClick={() => { setEditing(null); setForm(null); }} className="px-4 py-1.5 rounded-lg text-sm text-gray-500 hover:text-gray-900 cursor-pointer">Cancel</button>
               <button onClick={saveSpecs} disabled={saving} className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-40 cursor-pointer">
@@ -279,22 +327,30 @@ export default function ProductMasterPage() {
               </thead>
               <tbody>
                 {filtered.map((p, i) => {
-                  const missing = !p.length_in && !p.max_20ft;
+                  const isRice = p.source_division === "rice";
+                  const missing = isRice ? !p.net_weight_kg : (!p.length_in && !p.max_20ft);
                   return (
                     <tr key={p.id} className="border-b border-gray-100 hover:bg-gray-50/80">
                       <td className="px-4 py-2.5 text-gray-400 text-xs">{i + 1}</td>
                       <td className="px-4 py-2.5"><span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600">{p.brand || "—"}</span></td>
                       <td className="px-4 py-2.5 text-gray-900 text-xs font-medium">
                         {p.product_name}
+                        {isRice && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-600">Bags/PMT</span>}
                         {missing && <span className="ml-2 inline-flex items-center gap-0.5 text-[10px] text-amber-600"><AlertTriangle className="w-3 h-3" /> needs specs</span>}
                       </td>
                       <td className="px-4 py-2.5 text-gray-500 text-xs">{p.packing_desc || "—"}</td>
-                      <td className="px-4 py-2.5 text-center text-gray-500 text-xs">{p.length_in || "—"}</td>
-                      <td className="px-4 py-2.5 text-center text-gray-500 text-xs">{p.width_in || "—"}</td>
-                      <td className="px-4 py-2.5 text-center text-gray-500 text-xs">{p.height_in || "—"}</td>
-                      <td className="px-4 py-2.5 text-center text-emerald-600 text-xs font-medium">{p.max_20ft || "—"}</td>
-                      <td className="px-4 py-2.5 text-center text-blue-600 text-xs font-medium">{p.max_40ft || "—"}</td>
-                      <td className="px-4 py-2.5 text-center text-violet-600 text-xs font-medium">{p.max_40hc || "—"}</td>
+                      {isRice ? (
+                        <td colSpan={6} className="px-4 py-2.5 text-center text-blue-600 text-xs font-medium">{p.net_weight_kg ? `${p.net_weight_kg} kg/bag` : "—"} <span className="text-gray-400 font-normal">(container PMT set in CBM settings)</span></td>
+                      ) : (
+                        <>
+                          <td className="px-4 py-2.5 text-center text-gray-500 text-xs">{p.length_in || "—"}</td>
+                          <td className="px-4 py-2.5 text-center text-gray-500 text-xs">{p.width_in || "—"}</td>
+                          <td className="px-4 py-2.5 text-center text-gray-500 text-xs">{p.height_in || "—"}</td>
+                          <td className="px-4 py-2.5 text-center text-emerald-600 text-xs font-medium">{p.max_20ft || "—"}</td>
+                          <td className="px-4 py-2.5 text-center text-blue-600 text-xs font-medium">{p.max_40ft || "—"}</td>
+                          <td className="px-4 py-2.5 text-center text-violet-600 text-xs font-medium">{p.max_40hc || "—"}</td>
+                        </>
+                      )}
                       <td className="px-4 py-2.5">
                         <div className="flex items-center gap-1">
                           <button onClick={() => startEdit(p)} className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-900 cursor-pointer" title="Fill/edit carton specs"><Edit3 className="w-3.5 h-3.5" /></button>

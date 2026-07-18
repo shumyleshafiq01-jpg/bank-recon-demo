@@ -13,6 +13,7 @@ type Product = {
   length_in: number; width_in: number; height_in: number;
   max_20ft: number; max_40ft: number; max_40hc: number;
   net_weight_kg: number; cbm_per_carton: number;
+  unit_type: "carton" | "bag";
 };
 
 type PlanItem = {
@@ -26,10 +27,12 @@ type PackingPlan = {
   status: string; notes: string; total_cartons: number; total_fill_pct: number;
 };
 
-type ContainerType = { id: string; name: string; label: string; max_cbm: number };
+type ContainerType = { id: string; name: string; label: string; max_cbm: number; max_weight_pmt: number };
 
-const CONTAINER_COLORS: Record<string, string> = {
-  "20ft": "emerald", "40ft": "blue", "40hc": "violet",
+const CONTAINER_BTN_ACTIVE: Record<string, string> = {
+  "20ft": "bg-emerald-500/15 text-emerald-700",
+  "40ft": "bg-blue-500/15 text-blue-700",
+  "40hc": "bg-violet-500/15 text-violet-700",
 };
 
 export default function CbmCalculatorPage() {
@@ -61,6 +64,7 @@ export default function CbmCalculatorPage() {
   // Settings modal
   const [showSettings, setShowSettings] = useState(false);
   const [settingsThreshold, setSettingsThreshold] = useState("95");
+  const [settingsPmt, setSettingsPmt] = useState<Record<string, string>>({ "20ft": "25", "40ft": "27", "40hc": "27" });
 
   useEffect(() => {
     Promise.all([
@@ -68,10 +72,14 @@ export default function CbmCalculatorPage() {
       fetch("/api/supply-chain/settings").then(r => r.json()),
     ]).then(([pData, sData]) => {
       setProducts(pData.products ?? []);
-      setContainers(sData.containers ?? []);
+      const cts: ContainerType[] = sData.containers ?? [];
+      setContainers(cts);
       const th = Number(sData.settings?.capacity_threshold ?? 95);
       setCapacityThreshold(th);
       setSettingsThreshold(String(th));
+      const pmt: Record<string, string> = {};
+      for (const c of cts) pmt[c.name] = String(c.max_weight_pmt || 0);
+      if (Object.keys(pmt).length > 0) setSettingsPmt(pmt);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, []);
@@ -97,11 +105,17 @@ export default function CbmCalculatorPage() {
     return p.max_20ft;
   }
 
+  function getMaxWeightPmt(ct: string) {
+    return containers.find(c => c.name === ct)?.max_weight_pmt || 0;
+  }
+
   function calcFillPct(cartons: number, product: Product, ct: string) {
     const max = getMaxForContainer(product, ct);
     if (!max) return 0;
     return Math.round((cartons / max) * 10000) / 100;
   }
+
+  const isBagItem = (it: PlanItem) => it.product?.unit_type === "bag";
 
   function addProduct(product: Product) {
     if (items.find(it => it.productId === product.id)) return;
@@ -141,13 +155,26 @@ export default function CbmCalculatorPage() {
     setSaved(false);
   }
 
-  const totalCartons = items.reduce((s, it) => s + it.cartons, 0);
-  const totalFill = items.reduce((s, it) => s + it.fillPct, 0);
+  const cartonItems = items.filter(it => !isBagItem(it));
+  const bagItems = items.filter(isBagItem);
+
+  const totalCartons = cartonItems.reduce((s, it) => s + it.cartons, 0);
+  const totalFill = cartonItems.reduce((s, it) => s + it.fillPct, 0);
   const totalFillRounded = Math.round(totalFill * 100) / 100;
   const totalWeight = items.reduce((s, it) => s + it.netWeightTotal, 0);
   const totalValue = items.reduce((s, it) => s + it.totalValue, 0);
   const isOverCapacity = totalFillRounded > capacityThreshold;
   const isOverFull = totalFillRounded > 100;
+
+  // Rice/bag items are weight-limited (PMT), not carton-count limited —
+  // same threshold rule as cartons, just measured in metric tons instead
+  // of container volume.
+  const totalBags = bagItems.reduce((s, it) => s + it.cartons, 0);
+  const totalWeightPmt = bagItems.reduce((s, it) => s + it.netWeightTotal, 0) / 1000;
+  const maxWeightPmt = getMaxWeightPmt(containerType);
+  const weightFillPct = maxWeightPmt ? Math.round((totalWeightPmt / maxWeightPmt) * 10000) / 100 : 0;
+  const isWeightOverCapacity = weightFillPct > capacityThreshold;
+  const isWeightOverFull = weightFillPct > 100;
 
   function recalcForContainer(ct: string) {
     setContainerType(ct);
@@ -247,6 +274,14 @@ export default function CbmCalculatorPage() {
       });
       setCapacityThreshold(val);
     }
+    for (const name of ["20ft", "40ft", "40hc"]) {
+      const pmtVal = Number(settingsPmt[name] || 0);
+      await fetch("/api/supply-chain/settings", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "update-container-weight", name, maxWeightPmt: pmtVal }),
+      });
+    }
+    setContainers(prev => prev.map(c => ({ ...c, max_weight_pmt: Number(settingsPmt[c.name] ?? c.max_weight_pmt) })));
     setShowSettings(false);
   }
 
@@ -295,7 +330,7 @@ export default function CbmCalculatorPage() {
           <input value={buyerName} onChange={e => { setBuyerName(e.target.value); setSaved(false); }} placeholder="Buyer name" className="flex-1 min-w-[200px] bg-white border border-gray-200/80 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-600 focus:outline-none focus:border-emerald-500/50" />
           <div className="flex items-center gap-1 bg-white border border-gray-200/80 rounded-lg px-1">
             {["20ft", "40ft", "40hc"].map(ct => (
-              <button key={ct} onClick={() => recalcForContainer(ct)} className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors cursor-pointer ${containerType === ct ? `bg-${CONTAINER_COLORS[ct]}-500/20 text-${CONTAINER_COLORS[ct]}-300` : "text-gray-500 hover:text-gray-600"}`}>
+              <button key={ct} onClick={() => recalcForContainer(ct)} className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors cursor-pointer ${containerType === ct ? CONTAINER_BTN_ACTIVE[ct] : "text-gray-500 hover:text-gray-600"}`}>
                 {ct === "40hc" ? "40HC" : ct.toUpperCase()}
               </button>
             ))}
@@ -316,10 +351,10 @@ export default function CbmCalculatorPage() {
               <span className="text-gray-500">Value: <span className="text-gray-900 font-medium">${totalValue.toFixed(2)}</span></span>
             </div>
           </div>
-          <div className="w-full h-3 bg-gray-800 rounded-full overflow-hidden relative">
-            <div className="absolute top-0 h-full bg-gray-300/50 rounded-full" style={{ left: 0, width: `${Math.min(capacityThreshold, 100)}%` }} />
+          <div className="w-full h-3 bg-gray-200 rounded-full overflow-hidden relative">
+            <div className="absolute top-0 h-full bg-gray-300/60 rounded-full" style={{ left: 0, width: `${Math.min(capacityThreshold, 100)}%` }} />
             <div className={`absolute top-0 h-full rounded-full transition-all duration-500 ${isOverFull ? "bg-red-500" : isOverCapacity ? "bg-amber-500" : "bg-emerald-500"}`} style={{ width: `${Math.min(totalFillRounded, 100)}%` }} />
-            <div className="absolute top-0 h-full w-0.5 bg-amber-400/60" style={{ left: `${capacityThreshold}%` }} />
+            <div className="absolute top-0 h-full w-0.5 bg-amber-500/70" style={{ left: `${capacityThreshold}%` }} />
           </div>
           {isOverCapacity && !isOverFull && (
             <div className="flex items-center gap-1.5 mt-2 text-xs text-amber-600">
@@ -333,6 +368,41 @@ export default function CbmCalculatorPage() {
           )}
         </div>
 
+        {/* Rice / Weight Fill Bar — only appears once a bag-type (weight-limited) product is added */}
+        {bagItems.length > 0 && (
+          <div className="mb-4 p-4 rounded-xl bg-white/70 border border-gray-200/80">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-gray-500">Rice Weight Fill</span>
+                <span className={`text-2xl font-bold ${isWeightOverFull ? "text-red-600" : isWeightOverCapacity ? "text-amber-600" : "text-blue-600"}`}>{weightFillPct}%</span>
+                <span className="text-xs text-gray-400">/ {capacityThreshold}% threshold &middot; max {maxWeightPmt || "—"} PMT</span>
+              </div>
+              <div className="flex items-center gap-4 text-sm">
+                <span className="text-gray-500">Bags: <span className="text-gray-900 font-medium">{totalBags}</span></span>
+                <span className="text-gray-500">Weight: <span className="text-gray-900 font-medium">{totalWeightPmt.toFixed(2)} PMT</span></span>
+              </div>
+            </div>
+            <div className="w-full h-3 bg-gray-200 rounded-full overflow-hidden relative">
+              <div className="absolute top-0 h-full bg-gray-300/60 rounded-full" style={{ left: 0, width: `${Math.min(capacityThreshold, 100)}%` }} />
+              <div className={`absolute top-0 h-full rounded-full transition-all duration-500 ${isWeightOverFull ? "bg-red-500" : isWeightOverCapacity ? "bg-amber-500" : "bg-blue-500"}`} style={{ width: `${Math.min(weightFillPct, 100)}%` }} />
+              <div className="absolute top-0 h-full w-0.5 bg-amber-500/70" style={{ left: `${capacityThreshold}%` }} />
+            </div>
+            {isWeightOverCapacity && !isWeightOverFull && (
+              <div className="flex items-center gap-1.5 mt-2 text-xs text-amber-600">
+                <AlertTriangle className="w-3.5 h-3.5" /> Exceeds {capacityThreshold}% recommended weight threshold
+              </div>
+            )}
+            {isWeightOverFull && (
+              <div className="flex items-center gap-1.5 mt-2 text-xs text-red-600">
+                <AlertTriangle className="w-3.5 h-3.5" /> Over the container&apos;s rated tonnage! Reduce bags.
+              </div>
+            )}
+            {cartonItems.length > 0 && (
+              <p className="text-[11px] text-gray-400 mt-2">This container mixes rice with carton products — cartons and rice weight are tracked separately since the exact space-split rule is still being finalized.</p>
+            )}
+          </div>
+        )}
+
         {/* Items Table */}
         <div className="rounded-xl bg-white/70 border border-gray-200/80 overflow-hidden">
           <div className="overflow-x-auto">
@@ -343,10 +413,10 @@ export default function CbmCalculatorPage() {
                   <th className="text-left px-4 py-3 text-gray-500 font-medium">Product</th>
                   <th className="text-left px-4 py-3 text-gray-500 font-medium">Packing</th>
                   <th className="text-center px-4 py-3 text-gray-500 font-medium w-20">Max</th>
-                  <th className="text-center px-4 py-3 text-gray-500 font-medium w-24">Cartons</th>
+                  <th className="text-center px-4 py-3 text-gray-500 font-medium w-24">Cartons/Bags</th>
                   <th className="text-center px-4 py-3 text-gray-500 font-medium w-20">Fill %</th>
                   <th className="text-right px-4 py-3 text-gray-500 font-medium w-24">Weight (kg)</th>
-                  <th className="text-center px-4 py-3 text-gray-500 font-medium w-24">FOB $/ctn</th>
+                  <th className="text-center px-4 py-3 text-gray-500 font-medium w-24">FOB $/unit</th>
                   <th className="text-right px-4 py-3 text-gray-500 font-medium w-24">Value</th>
                   <th className="text-left px-4 py-3 text-gray-500 font-medium w-32">Remarks</th>
                   <th className="w-10"></th>
@@ -355,22 +425,24 @@ export default function CbmCalculatorPage() {
               <tbody>
                 {items.map((item, idx) => {
                   const product = item.product;
-                  const maxCap = product ? getMaxForContainer(product, containerType) : 0;
+                  const isBag = isBagItem(item);
+                  const maxCap = product && !isBag ? getMaxForContainer(product, containerType) : 0;
                   const fillColor = item.fillPct > 10 ? "text-amber-600" : item.fillPct > 5 ? "text-emerald-600" : "text-gray-500";
                   return (
                     <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50/80">
                       <td className="px-4 py-2.5 text-gray-400">{idx + 1}</td>
                       <td className="px-4 py-2.5">
                         <div className="text-gray-900 text-xs font-medium">{product?.product_name ?? "Unknown"}</div>
-                        <div className="text-[10px] text-gray-400">{product?.brand}</div>
+                        <div className="text-[10px] text-gray-400 flex items-center gap-1">{product?.brand}{isBag && <span className="px-1 py-0.5 rounded bg-blue-500/10 text-blue-600">Bags/PMT</span>}</div>
                       </td>
                       <td className="px-4 py-2.5 text-gray-500 text-xs">{product?.packing_desc ?? ""}</td>
-                      <td className="px-4 py-2.5 text-center text-gray-500 text-xs">{maxCap}</td>
+                      <td className="px-4 py-2.5 text-center text-gray-500 text-xs">{isBag ? "—" : maxCap}</td>
                       <td className="px-4 py-2.5">
                         <input type="number" min="0" max={maxCap || 99999} value={item.cartons || ""} onChange={e => updateItem(idx, "cartons", e.target.value)}
+                          placeholder={isBag ? "bags" : "cartons"}
                           className="w-full bg-white border border-gray-200 rounded px-2 py-1 text-center text-gray-900 text-sm focus:outline-none focus:border-emerald-500/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
                       </td>
-                      <td className={`px-4 py-2.5 text-center font-medium text-xs ${fillColor}`}>{item.fillPct}%</td>
+                      <td className={`px-4 py-2.5 text-center font-medium text-xs ${isBag ? "text-gray-400" : fillColor}`}>{isBag ? "—" : `${item.fillPct}%`}</td>
                       <td className="px-4 py-2.5 text-right text-gray-700 text-xs">{item.netWeightTotal.toFixed(1)}</td>
                       <td className="px-4 py-2.5">
                         <input type="number" step="0.01" min="0" value={item.unitPriceFob || ""} onChange={e => updateItem(idx, "unitPriceFob", e.target.value)}
@@ -437,20 +509,27 @@ export default function CbmCalculatorPage() {
             <div className="flex-1 overflow-y-auto">
               {filteredProducts.map(p => {
                 const alreadyAdded = items.some(it => it.productId === p.id);
-                const maxCap = getMaxForContainer(p, containerType);
+                const isBag = p.unit_type === "bag";
+                const maxCap = isBag ? 0 : getMaxForContainer(p, containerType);
                 return (
                   <button key={p.id} onClick={() => !alreadyAdded && addProduct(p)} disabled={alreadyAdded}
                     className={`w-full flex items-center gap-3 px-5 py-3 border-b border-gray-100 text-left transition-colors ${alreadyAdded ? "opacity-40 cursor-default" : "hover:bg-gray-50 cursor-pointer"}`}>
-                    <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
-                      <Package className="w-4 h-4 text-emerald-600" />
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${isBag ? "bg-blue-500/10" : "bg-emerald-500/10"}`}>
+                      <Package className={`w-4 h-4 ${isBag ? "text-blue-600" : "text-emerald-600"}`} />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="text-gray-900 text-sm font-medium truncate">{p.product_name}</div>
                       <div className="text-xs text-gray-500 truncate">{p.brand} &middot; {p.packing_desc}</div>
                     </div>
                     <div className="text-right shrink-0">
-                      <div className="text-xs text-gray-500">{p.length_in}&times;{p.width_in}&times;{p.height_in}&quot;</div>
-                      <div className="text-xs text-gray-400">Max {maxCap}</div>
+                      {isBag ? (
+                        <div className="text-xs text-blue-600">{p.net_weight_kg || 0} kg/bag</div>
+                      ) : (
+                        <>
+                          <div className="text-xs text-gray-500">{p.length_in}&times;{p.width_in}&times;{p.height_in}&quot;</div>
+                          <div className="text-xs text-gray-400">Max {maxCap}</div>
+                        </>
+                      )}
                     </div>
                     {alreadyAdded && <Check className="w-4 h-4 text-emerald-600 shrink-0" />}
                   </button>
@@ -501,6 +580,19 @@ export default function CbmCalculatorPage() {
             <input type="number" min="1" max="100" value={settingsThreshold} onChange={e => setSettingsThreshold(e.target.value)}
               className="w-full bg-white border border-gray-200/80 rounded-lg px-3 py-2 text-gray-900 text-sm mb-4 focus:outline-none focus:border-emerald-500/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
             <p className="text-xs text-gray-400 mb-4">When container fill exceeds this threshold, a warning is shown. Default: 95%</p>
+
+            <label className="text-sm text-gray-500 block mb-1.5">Rice Container Capacity (PMT)</label>
+            <div className="grid grid-cols-3 gap-2 mb-1.5">
+              {["20ft", "40ft", "40hc"].map(ct => (
+                <div key={ct}>
+                  <span className="text-[11px] text-gray-400 block mb-0.5">{ct === "40hc" ? "40HC" : ct.toUpperCase()}</span>
+                  <input type="number" min="0" value={settingsPmt[ct] ?? ""} onChange={e => setSettingsPmt(prev => ({ ...prev, [ct]: e.target.value }))}
+                    className="w-full bg-white border border-gray-200/80 rounded-lg px-2 py-1.5 text-gray-900 text-sm focus:outline-none focus:border-emerald-500/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-gray-400 mb-4">Metric tons rice can weigh per container (Hafeez: 20ft=25, 40ft/40HC=27, editable).</p>
+
             <div className="flex justify-end gap-2">
               <button onClick={() => setShowSettings(false)} className="px-4 py-1.5 rounded-lg text-sm text-gray-500 hover:text-gray-900 cursor-pointer">Cancel</button>
               <button onClick={saveThreshold} className="px-4 py-1.5 rounded-lg text-sm bg-emerald-600 text-white hover:bg-emerald-500 cursor-pointer">Save</button>

@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, useMemo } from "react";
 import {
   ChevronLeft, FileSpreadsheet, Plus, Trash2, Save, X,
-  Loader2, Check, FileText, Package, ChevronDown, Boxes,
+  Loader2, Check, FileText, Package, ChevronDown, Boxes, Beaker,
 } from "lucide-react";
 
 type PackingPlan = {
@@ -22,6 +22,12 @@ type BomItem = {
   cartons_required: number; pcs_per_carton: number; pcs_required: number;
   net_weight_total: number; value_total: number;
   in_stock: number; to_order: number; item_status: string; remarks: string;
+  has_recipe: boolean;
+};
+
+type BomMaterial = {
+  id: string; material_name: string; unit: string; category: string;
+  qty_needed: number; est_cost: number; unit_type: string; remarks: string;
 };
 
 const STATUS_OPTIONS = [
@@ -39,8 +45,11 @@ export default function BomPage() {
   // Active BOM
   const [bom, setBom] = useState<Bom | null>(null);
   const [items, setItems] = useState<BomItem[]>([]);
+  const [materials, setMaterials] = useState<BomMaterial[]>([]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [savingMaterials, setSavingMaterials] = useState(false);
+  const [materialsSaved, setMaterialsSaved] = useState(false);
 
   // Generate modal
   const [showGenerate, setShowGenerate] = useState(false);
@@ -89,25 +98,26 @@ export default function BomPage() {
     const d = await r.json();
     setBom(d.bom ?? null);
     setItems(d.items ?? []);
+    setMaterials(d.materials ?? []);
     setShowList(false);
     setSaved(true);
+    setMaterialsSaved(true);
   }
 
-  function updateItem(idx: number, field: "in_stock" | "item_status" | "remarks", val: string | number) {
-    setItems(prev => {
-      const next = [...prev];
-      const item = { ...next[idx] };
+  function updateItem(id: string, field: "in_stock" | "item_status" | "remarks", val: string | number) {
+    setItems(prev => prev.map(item => {
+      if (item.id !== id) return item;
+      const next = { ...item };
       if (field === "in_stock") {
-        item.in_stock = Number(val) || 0;
-        item.to_order = Math.max(item.cartons_required - item.in_stock, 0);
+        next.in_stock = Number(val) || 0;
+        next.to_order = Math.max(next.cartons_required - next.in_stock, 0);
       } else if (field === "item_status") {
-        item.item_status = String(val);
+        next.item_status = String(val);
       } else if (field === "remarks") {
-        item.remarks = String(val);
+        next.remarks = String(val);
       }
-      next[idx] = item;
       return next;
-    });
+    }));
     setSaved(false);
   }
 
@@ -125,6 +135,22 @@ export default function BomPage() {
     setSaved(true);
   }
 
+  function updateMaterialRemarks(idx: number, remarks: string) {
+    setMaterials(prev => { const next = [...prev]; next[idx] = { ...next[idx], remarks }; return next; });
+    setMaterialsSaved(false);
+  }
+
+  async function saveMaterials() {
+    if (materials.length === 0) return;
+    setSavingMaterials(true);
+    await fetch("/api/supply-chain/boms", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "save-materials", items: materials.map(m => ({ id: m.id, remarks: m.remarks })) }),
+    });
+    setSavingMaterials(false);
+    setMaterialsSaved(true);
+  }
+
   async function deleteBom(id: string) {
     await fetch("/api/supply-chain/boms", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -134,12 +160,16 @@ export default function BomPage() {
     if (bom?.id === id) { setBom(null); setItems([]); }
   }
 
+  const finishedGoods = useMemo(() => items.filter(it => !it.has_recipe), [items]);
+  const manufacturedGoods = useMemo(() => items.filter(it => it.has_recipe), [items]);
+
   const totals = useMemo(() => ({
     cartons: items.reduce((s, it) => s + it.cartons_required, 0),
-    toOrder: items.reduce((s, it) => s + it.to_order, 0),
+    toOrder: finishedGoods.reduce((s, it) => s + it.to_order, 0),
     weight: items.reduce((s, it) => s + it.net_weight_total, 0),
     value: items.reduce((s, it) => s + it.value_total, 0),
-  }), [items]);
+    materialsCost: materials.reduce((s, m) => s + m.est_cost, 0),
+  }), [items, finishedGoods, materials]);
 
   if (loading) return <div className="min-h-screen flex items-center justify-center" style={{ background: "#e8ecf1" }}><div className="w-8 h-8 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" /></div>;
 
@@ -196,8 +226,13 @@ export default function BomPage() {
               </div>
             </div>
 
-            {/* BOM items table */}
-            <div className="rounded-xl bg-white/70 border border-gray-200/80 overflow-hidden">
+            {/* Finished Goods to Purchase — products with no recipe on file (e.g. Laziza, Rafan, Lipton) are bought ready-made */}
+            <div className="flex items-center gap-2 mb-2 mt-6">
+              <Boxes className="w-4 h-4 text-violet-600" />
+              <h3 className="text-sm font-semibold text-gray-900">Finished Goods to Purchase</h3>
+              <span className="text-xs text-gray-400">— products bought ready-made (no recipe on file)</span>
+            </div>
+            <div className="rounded-xl bg-white/70 border border-gray-200/80 overflow-hidden mb-6">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
@@ -214,7 +249,7 @@ export default function BomPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {items.map((item, idx) => (
+                    {finishedGoods.map((item, idx) => (
                       <tr key={item.id} className="border-b border-gray-100 hover:bg-gray-50/80">
                         <td className="px-4 py-2.5 text-gray-400 text-xs">{idx + 1}</td>
                         <td className="px-4 py-2.5 text-gray-900 text-xs font-medium">{item.product_name}</td>
@@ -222,13 +257,13 @@ export default function BomPage() {
                         <td className="px-4 py-2.5 text-center text-gray-900 text-xs font-medium">{item.cartons_required}</td>
                         <td className="px-4 py-2.5 text-center text-gray-500 text-xs">{item.pcs_required || "—"}</td>
                         <td className="px-4 py-2.5">
-                          <input type="number" min="0" value={item.in_stock || ""} onChange={e => updateItem(idx, "in_stock", e.target.value)}
+                          <input type="number" min="0" value={item.in_stock || ""} onChange={e => updateItem(item.id, "in_stock", e.target.value)}
                             className="w-full bg-white border border-gray-200 rounded px-2 py-1 text-center text-gray-900 text-sm focus:outline-none focus:border-violet-500/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
                         </td>
                         <td className={`px-4 py-2.5 text-center text-xs font-medium ${item.to_order > 0 ? "text-amber-600" : "text-emerald-600"}`}>{item.to_order}</td>
                         <td className="px-4 py-2.5">
                           <div className="relative">
-                            <select value={item.item_status} onChange={e => updateItem(idx, "item_status", e.target.value)}
+                            <select value={item.item_status} onChange={e => updateItem(item.id, "item_status", e.target.value)}
                               className="w-full bg-white border border-gray-200 rounded px-2 py-1 text-gray-900 text-xs appearance-none pr-6 focus:outline-none focus:border-violet-500/50 cursor-pointer">
                               {STATUS_OPTIONS.map(s => <option key={s.value} value={s.value} className="bg-white">{s.label}</option>)}
                             </select>
@@ -236,12 +271,12 @@ export default function BomPage() {
                           </div>
                         </td>
                         <td className="px-4 py-2.5">
-                          <input type="text" value={item.remarks} onChange={e => updateItem(idx, "remarks", e.target.value)} placeholder="..."
+                          <input type="text" value={item.remarks} onChange={e => updateItem(item.id, "remarks", e.target.value)} placeholder="..."
                             className="w-full bg-white border border-gray-200 rounded px-2 py-1 text-gray-700 text-xs focus:outline-none focus:border-violet-500/50" />
                         </td>
                       </tr>
                     ))}
-                    {items.length === 0 && <tr><td colSpan={9} className="px-4 py-12 text-center text-gray-400">This BOM has no items.</td></tr>}
+                    {finishedGoods.length === 0 && <tr><td colSpan={9} className="px-4 py-8 text-center text-gray-400 text-xs">{manufacturedGoods.length > 0 ? "Every product in this BOM has a recipe — see Raw Materials below." : "This BOM has no items."}</td></tr>}
                   </tbody>
                 </table>
               </div>
@@ -253,6 +288,61 @@ export default function BomPage() {
                 </button>
               </div>
             </div>
+
+            {/* Raw Materials to Procure/Produce — decomposed from each manufactured product's recipe */}
+            {manufacturedGoods.length > 0 && (
+              <>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <Beaker className="w-4 h-4 text-teal-600" />
+                    <h3 className="text-sm font-semibold text-gray-900">Raw Materials to Procure</h3>
+                    <span className="text-xs text-gray-400">— decomposed from {manufacturedGoods.map(m => m.product_name).join(", ")}</span>
+                  </div>
+                  <span className="text-xs text-gray-500">Est. total: <span className="text-gray-900 font-medium">${totals.materialsCost.toFixed(2)}</span></span>
+                </div>
+                <div className="rounded-xl bg-white/70 border border-gray-200/80 overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-gray-200/70">
+                          <th className="text-left px-4 py-3 text-gray-500 font-medium w-8">#</th>
+                          <th className="text-left px-4 py-3 text-gray-500 font-medium">Material</th>
+                          <th className="text-left px-4 py-3 text-gray-500 font-medium w-36">Category</th>
+                          <th className="text-center px-4 py-3 text-gray-500 font-medium w-24">Qty Needed</th>
+                          <th className="text-center px-4 py-3 text-gray-500 font-medium w-20">Unit</th>
+                          <th className="text-center px-4 py-3 text-gray-500 font-medium w-24">Est. Cost</th>
+                          <th className="text-left px-4 py-3 text-gray-500 font-medium w-40">Remarks</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {materials.map((m, idx) => (
+                          <tr key={m.id} className="border-b border-gray-100 hover:bg-gray-50/80">
+                            <td className="px-4 py-2.5 text-gray-400 text-xs">{idx + 1}</td>
+                            <td className="px-4 py-2.5 text-gray-900 text-xs font-medium">{m.material_name}</td>
+                            <td className="px-4 py-2.5 text-gray-500 text-xs">{m.category || "—"}</td>
+                            <td className="px-4 py-2.5 text-center text-gray-900 text-xs font-medium">{m.qty_needed}</td>
+                            <td className="px-4 py-2.5 text-center text-gray-500 text-xs">{m.unit || "—"}</td>
+                            <td className="px-4 py-2.5 text-center text-gray-500 text-xs">${m.est_cost.toFixed(2)}</td>
+                            <td className="px-4 py-2.5">
+                              <input type="text" value={m.remarks || ""} onChange={e => updateMaterialRemarks(idx, e.target.value)} placeholder="..."
+                                className="w-full bg-white border border-gray-200 rounded px-2 py-1 text-gray-700 text-xs focus:outline-none focus:border-teal-500/50" />
+                            </td>
+                          </tr>
+                        ))}
+                        {materials.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400 text-xs">No raw materials found — the manufactured product(s) above have no recipe saved in the Product List yet.</td></tr>}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-gray-200/70">
+                    {materialsSaved && <span className="flex items-center gap-1 text-xs text-emerald-600"><Check className="w-3.5 h-3.5" /> Saved</span>}
+                    <button onClick={saveMaterials} disabled={savingMaterials || materials.length === 0} className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm bg-teal-600 hover:bg-teal-500 text-white font-medium transition-colors disabled:opacity-40 cursor-pointer">
+                      {savingMaterials ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                      Save Remarks
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
           </>
         )}
       </div>

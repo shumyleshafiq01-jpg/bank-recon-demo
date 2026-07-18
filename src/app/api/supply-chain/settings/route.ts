@@ -49,6 +49,17 @@ export async function POST(request: Request) {
       return Response.json({ ok: true });
     }
 
+    // Update a container type's rated weight capacity (PMT) — e.g. rice
+    // is weight-limited: 20ft=25 PMT, 40ft/40HC=27 PMT by default, editable.
+    if (body.action === "update-container-weight" && body.name) {
+      const { error } = await supabase
+        .from("sc_container_types")
+        .update({ max_weight_pmt: Number(body.maxWeightPmt || 0) })
+        .eq("name", body.name);
+      if (error) throw error;
+      return Response.json({ ok: true });
+    }
+
     return Response.json({ error: "Unknown action" }, { status: 400 });
   } catch (err) {
     return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });

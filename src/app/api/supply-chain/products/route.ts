@@ -46,6 +46,9 @@ export async function POST(request: Request) {
         return Response.json({ error: "This product is already in the master" }, { status: 409 });
       }
 
+      // Rice is weight-limited, not carton-count limited — tracked in bags/PMT
+      const isRice = body.sourceDivision === "rice";
+
       const { error } = await supabase.from("sc_products").insert({
         brand: body.brand || "",
         product_name: body.productName || "",
@@ -60,6 +63,7 @@ export async function POST(request: Request) {
         max_40hc: 0,
         net_weight_kg: 0,
         pcs_per_carton: 0,
+        unit_type: isRice ? "bag" : "carton",
         sort_order: Number(body.sortOrder || 0),
       });
       if (error) throw error;
