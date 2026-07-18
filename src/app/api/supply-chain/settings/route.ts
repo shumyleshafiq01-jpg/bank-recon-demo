@@ -12,6 +12,12 @@ export async function GET() {
     const settings: Record<string, string> = {};
     for (const row of data ?? []) settings[row.key] = row.value;
 
+    // Never expose stored secrets — mask to last 4 characters
+    const SECRET_KEYS = ["whatsapp_token", "whatsapp_api_key", "resend_api_key"];
+    for (const k of SECRET_KEYS) {
+      if (settings[k]) settings[k] = "••••" + settings[k].slice(-4);
+    }
+
     const { data: containers, error: cErr } = await supabase
       .from("sc_container_types")
       .select("*")
@@ -32,6 +38,10 @@ export async function POST(request: Request) {
     const body = await request.json();
 
     if (body.action === "update-setting" && body.key) {
+      // A masked value means "unchanged secret" — don't overwrite the real key
+      if (typeof body.value === "string" && body.value.startsWith("••••")) {
+        return Response.json({ ok: true, skipped: true });
+      }
       const { error } = await supabase
         .from("sc_settings")
         .upsert({ key: body.key, value: String(body.value), updated_at: new Date().toISOString() }, { onConflict: "key" });

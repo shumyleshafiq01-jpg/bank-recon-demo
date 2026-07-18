@@ -1,5 +1,6 @@
 import { supabase } from "@/lib/supabase";
 import { getSession } from "@/lib/auth";
+import { notifyEvent } from "@/lib/sc-notify";
 
 export async function GET(request: Request) {
   try {
@@ -93,7 +94,16 @@ export async function POST(request: Request) {
         if (insErr) throw insErr;
       }
 
-      return Response.json({ ok: true, id: bom.id });
+      // Notify subscribers that the BOM stage is done
+      const totalCartons = rows.reduce((s, r) => s + r.cartons_required, 0);
+      const notified = await notifyEvent({
+        event: "bom_generated",
+        refId: bom.id,
+        text: `*KAFI — BOM GENERATED*\nFrom plan "${plan.plan_name}"${plan.buyer_name ? ` (${plan.buyer_name})` : ""}\n${rows.length} items · ${totalCartons} cartons required.`,
+        subject: `BOM generated — ${plan.plan_name}`,
+      });
+
+      return Response.json({ ok: true, id: bom.id, notified });
     }
 
     if (body.action === "update" && body.id) {

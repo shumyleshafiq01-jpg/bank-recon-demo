@@ -1,5 +1,6 @@
 import { supabase } from "@/lib/supabase";
 import { getSession } from "@/lib/auth";
+import { notifyEvent } from "@/lib/sc-notify";
 
 export async function GET(request: Request) {
   try {
@@ -151,7 +152,22 @@ export async function POST(request: Request) {
         updated_at: new Date().toISOString(),
       }).eq("id", body.planId);
 
-      return Response.json({ ok: true });
+      // First save of a plan notifies subscribers (deduped — re-saves stay quiet)
+      let notified: unknown[] = [];
+      if (body.items.length > 0) {
+        const { data: plan } = await supabase.from("sc_packing_plans").select("*").eq("id", body.planId).maybeSingle();
+        if (plan) {
+          notified = await notifyEvent({
+            event: "cbm_plan_saved",
+            refId: plan.id,
+            dedupe: true,
+            text: `*KAFI — CBM PLAN SAVED*\n"${plan.plan_name}"${plan.buyer_name ? ` for ${plan.buyer_name}` : ""}\nContainer: ${String(plan.container_type).toUpperCase()} · ${totalCartons} cartons · ${Math.round(totalFill * 100) / 100}% fill.`,
+            subject: `CBM plan saved — ${plan.plan_name}`,
+          });
+        }
+      }
+
+      return Response.json({ ok: true, notified });
     }
 
     return Response.json({ error: "Unknown action" }, { status: 400 });
