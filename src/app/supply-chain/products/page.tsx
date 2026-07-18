@@ -18,7 +18,7 @@ type Product = {
 
 type CatalogItem = {
   sourceProductId: string; name: string; category: string;
-  brandId: string; division: string; divisionLabel: string;
+  brandId: string; packagingDesc: string; division: string; divisionLabel: string;
 };
 
 type DimForm = {
@@ -27,7 +27,7 @@ type DimForm = {
   net_weight_kg: number; pcs_per_carton: number; sort_order: number;
 };
 
-type ContainerType = { name: string; length_ft: number; width_ft: number; height_ft: number };
+type ContainerType = { name: string; length_ft: number; width_ft: number; height_ft: number; max_cbm: number };
 
 export default function ProductMasterPage() {
   const router = useRouter();
@@ -61,16 +61,17 @@ export default function ProductMasterPage() {
     fetch("/api/supply-chain/settings").then(r => r.json()).then(d => setContainers(d.containers ?? [])).catch(() => {});
   }, []);
 
-  // Auto-calculate max cartons per container whenever L/W/H change
+  // Auto-calculate max cartons per container whenever L/W/H change,
+  // using the cbmcalculator.com volume method (container CBM / carton CBM).
   const recalcMax = useCallback((f: DimForm): DimForm => {
     if (containers.length === 0 || !f.length_in || !f.width_in || !f.height_in) return f;
     const dims = (name: string) => containers.find(c => c.name === name);
     const c20 = dims("20ft"), c40 = dims("40ft"), c40hc = dims("40hc");
     return {
       ...f,
-      max_20ft: c20 ? maxCartonsFit(f.length_in, f.width_in, f.height_in, c20.length_ft, c20.width_ft, c20.height_ft) : f.max_20ft,
-      max_40ft: c40 ? maxCartonsFit(f.length_in, f.width_in, f.height_in, c40.length_ft, c40.width_ft, c40.height_ft) : f.max_40ft,
-      max_40hc: c40hc ? maxCartonsFit(f.length_in, f.width_in, f.height_in, c40hc.length_ft, c40hc.width_ft, c40hc.height_ft) : f.max_40hc,
+      max_20ft: c20 ? maxCartonsFit(f.length_in, f.width_in, f.height_in, c20.max_cbm) : f.max_20ft,
+      max_40ft: c40 ? maxCartonsFit(f.length_in, f.width_in, f.height_in, c40.max_cbm) : f.max_40ft,
+      max_40hc: c40hc ? maxCartonsFit(f.length_in, f.width_in, f.height_in, c40hc.max_cbm) : f.max_40hc,
     };
   }, [containers]);
 
@@ -133,6 +134,7 @@ export default function ProductMasterPage() {
         productName: item.name,
         brand: item.divisionLabel,
         sourceDivision: item.division,
+        packingDesc: item.packagingDesc,
       }),
     });
     setAddingId(null);
@@ -404,7 +406,7 @@ export default function ProductMasterPage() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="text-gray-900 text-sm font-medium truncate">{item.name}</div>
-                      <div className="text-xs text-gray-500 truncate">{item.divisionLabel}{item.category && ` · ${item.category}`}</div>
+                      <div className="text-xs text-gray-500 truncate">{item.divisionLabel}{item.category && ` · ${item.category}`}{item.packagingDesc && ` · ${item.packagingDesc}`}</div>
                     </div>
                     {isAdding && <Loader2 className="w-4 h-4 animate-spin text-emerald-600 shrink-0" />}
                     {already && !isAdding && <Check className="w-4 h-4 text-emerald-600 shrink-0" />}

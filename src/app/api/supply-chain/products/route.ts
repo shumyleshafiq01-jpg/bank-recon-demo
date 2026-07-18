@@ -54,7 +54,7 @@ export async function POST(request: Request) {
         product_name: body.productName || "",
         source_product_id: body.sourceProductId,
         source_division: body.sourceDivision || "foods_spices",
-        packing_desc: "",
+        packing_desc: body.packingDesc || "",
         length_in: 0,
         width_in: 0,
         height_in: 0,
