@@ -14,12 +14,12 @@ export type ScEventKey =
   | "shipment_booked";
 
 export const SC_EVENTS: { key: ScEventKey; label: string; stage: string; gate?: boolean; future?: boolean }[] = [
-  { key: "query_received", label: "Query Received", stage: "1 · Query", future: true },
+  { key: "query_received", label: "Query Received", stage: "1 · Query" },
   { key: "cbm_plan_saved", label: "CBM Plan Saved", stage: "2 · CBM" },
   { key: "bom_generated", label: "BOM Generated", stage: "3 · BOM" },
   { key: "po_sent", label: "PO Sent to Vendor", stage: "4 · PO" },
   { key: "grn_created", label: "Goods Arrived (GRN)", stage: "5 · GRN" },
   { key: "grn_approved", label: "GRN Approved", stage: "5 · GRN", gate: true },
-  { key: "packing_done", label: "Packing Complete", stage: "6 · Packing", future: true },
+  { key: "packing_done", label: "Packing Complete", stage: "6 · Packing" },
   { key: "shipment_booked", label: "Shipment Booked", stage: "7 · Shipment", future: true },
 ];
