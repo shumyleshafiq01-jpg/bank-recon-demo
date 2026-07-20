@@ -338,6 +338,19 @@ export default function FundEstimatorPage() {
     return balances;
   }, []);
 
+  // Entries are keyed by date, not entry order — sort chronologically so the
+  // Date column reads in series and the running Balance actually reflects
+  // day-by-day order. Rows without a date yet (freshly added) sort last;
+  // same-day rows keep their original relative order (stable sort).
+  const sortByDate = useCallback((rows: LedgerRow[]): LedgerRow[] => {
+    return [...rows].sort((a, b) => {
+      if (!a.date && !b.date) return 0;
+      if (!a.date) return 1;
+      if (!b.date) return -1;
+      return a.date.localeCompare(b.date);
+    });
+  }, []);
+
   // Get balance for a bank account
   const getAccountBalance = useCallback((account: BankAccount): number => {
     const rows = ledger[account.id] ?? [];
@@ -347,7 +360,7 @@ export default function FundEstimatorPage() {
   }, [ledger, calcBalance]);
 
   const selectedAccount = banks.find((b) => b.id === selectedBank) ?? null;
-  const currentRows = selectedBank ? (ledger[selectedBank] ?? []) : [];
+  const currentRows = selectedBank ? sortByDate(ledger[selectedBank] ?? []) : [];
 
   function saveBankAccount(bank: BankAccount) {
     if (editingBank && banks.some((b) => b.id === bank.id)) {
@@ -438,7 +451,7 @@ export default function FundEstimatorPage() {
 
     // Each bank account as a sheet
     for (const bank of banks) {
-      const rows = ledger[bank.id] ?? [];
+      const rows = sortByDate(ledger[bank.id] ?? []);
       const balances = calcBalance(rows, bank.openingBalance);
       const sheetRows: (string | number)[][] = [
         [bank.bankName, "", "", "", "BRANCH", bank.branch, "", "", "Notes", ""],
