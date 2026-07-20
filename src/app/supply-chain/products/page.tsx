@@ -61,17 +61,18 @@ export default function ProductMasterPage() {
     fetch("/api/supply-chain/settings").then(r => r.json()).then(d => setContainers(d.containers ?? [])).catch(() => {});
   }, []);
 
-  // Auto-calculate max cartons per container whenever L/W/H change,
-  // using the cbmcalculator.com volume method (container CBM / carton CBM).
+  // Auto-calculate max cartons per container whenever L/W/H change, using a
+  // recursive guillotine 2D bin-packing model (see lib/cbm-calc.ts).
   const recalcMax = useCallback((f: DimForm): DimForm => {
     if (containers.length === 0 || !f.length_in || !f.width_in || !f.height_in) return f;
     const dims = (name: string) => containers.find(c => c.name === name);
     const c20 = dims("20ft"), c40 = dims("40ft"), c40hc = dims("40hc");
+    const fit = (c: ContainerType | undefined) => c ? maxCartonsFit(f.length_in, f.width_in, f.height_in, c.length_ft * 12, c.width_ft * 12, c.height_ft * 12) : 0;
     return {
       ...f,
-      max_20ft: c20 ? maxCartonsFit(f.length_in, f.width_in, f.height_in, c20.max_cbm) : f.max_20ft,
-      max_40ft: c40 ? maxCartonsFit(f.length_in, f.width_in, f.height_in, c40.max_cbm) : f.max_40ft,
-      max_40hc: c40hc ? maxCartonsFit(f.length_in, f.width_in, f.height_in, c40hc.max_cbm) : f.max_40hc,
+      max_20ft: c20 ? fit(c20) : f.max_20ft,
+      max_40ft: c40 ? fit(c40) : f.max_40ft,
+      max_40hc: c40hc ? fit(c40hc) : f.max_40hc,
     };
   }, [containers]);
 

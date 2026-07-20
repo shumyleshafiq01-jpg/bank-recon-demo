@@ -718,18 +718,22 @@ export default function FundEstimatorPage() {
                             <th className="px-3 py-2 text-left font-semibold w-[36px]">#</th>
                             <th className="px-3 py-2 text-left font-semibold w-[100px]">Date</th>
                             <th className="px-3 py-2 text-left font-semibold w-[130px]">Bank</th>
+                            <th className="px-3 py-2 text-left font-semibold w-[140px]">Account Title</th>
+                            <th className="px-3 py-2 text-left font-semibold w-[120px]">Account No.</th>
                             <th className="px-3 py-2 text-left font-semibold">Description</th>
                             <th className="px-3 py-2 text-right font-semibold w-[130px]">Amount</th>
                           </tr>
                         </thead>
                         <tbody>
                           {rows.length === 0 ? (
-                            <tr><td colSpan={5} className="px-3 py-6 text-center text-muted">No {type} transactions in this period.</td></tr>
+                            <tr><td colSpan={7} className="px-3 py-6 text-center text-muted">No {type} transactions in this period.</td></tr>
                           ) : rows.map((r, i) => (
                             <tr key={r.id} className={i % 2 === 0 ? "" : "bg-surface-light/20"}>
                               <td className="px-3 py-2 text-muted">{i + 1}</td>
                               <td className="px-3 py-2 text-muted">{r.date || "—"}</td>
                               <td className="px-3 py-2 text-foreground">{r.bankName}</td>
+                              <td className="px-3 py-2 text-muted truncate max-w-[140px]">{r.acTitle || "—"}</td>
+                              <td className="px-3 py-2 text-muted font-mono">{r.accountNo || "—"}</td>
                               <td className="px-3 py-2 text-muted truncate max-w-[250px]">
                                 <button onClick={() => r.description && setDescModal(r.description)}
                                   className={r.description ? "hover:text-indigo-400 cursor-pointer text-left truncate w-full" : "cursor-default text-muted/40"}>

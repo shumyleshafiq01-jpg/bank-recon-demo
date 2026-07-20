@@ -23,7 +23,15 @@ export async function GET(request: Request) {
         .from("sc_bom_materials").select("*").eq("bom_id", bomId).order("sort_order");
       if (mErr) throw mErr;
 
-      return Response.json({ bom, items: items ?? [], materials: materials ?? [] });
+      // The CBM fill % lives on the originating packing plan — surface it
+      // here so the BOM header can show it next to Cartons/Weight/Value.
+      let planFillPct: number | null = null;
+      if (bom.plan_id) {
+        const { data: plan } = await supabase.from("sc_packing_plans").select("total_fill_pct").eq("id", bom.plan_id).maybeSingle();
+        planFillPct = plan ? Number(plan.total_fill_pct) : null;
+      }
+
+      return Response.json({ bom, items: items ?? [], materials: materials ?? [], planFillPct });
     }
 
     const { data, error } = await supabase
@@ -107,8 +115,11 @@ export async function POST(request: Request) {
         .single();
       if (bErr) throw bErr;
 
-      // Aggregate raw materials across every recipe-bearing line
-      const materialsAgg: Record<string, { name: string; qty: number; unitType: string }> = {};
+      // Aggregate raw materials across every recipe-bearing line. `terms`
+      // tracks each contributing "qty-per-carton x cartons" so the UI can
+      // show the accountant exactly how the total was built, e.g.
+      // "20 x 800 + 12 x 900 = 26800" when two products share a material.
+      const materialsAgg: Record<string, { name: string; qty: number; unitType: string; terms: string[] }> = {};
 
       // Create BOM items from plan items — recipe-bearing products get
       // has_recipe=true (they decompose into materials below) and skip
@@ -124,12 +135,14 @@ export async function POST(request: Request) {
 
         if (hasRecipe) {
           for (const line of recipe!) {
-            const entry = (materialsAgg[line.material_id] ||= { name: line.material_name, qty: 0, unitType: line.unit_type });
+            const entry = (materialsAgg[line.material_id] ||= { name: line.material_name, qty: 0, unitType: line.unit_type, terms: [] });
             if (line.unit_type === "PCS") {
               entry.qty += line.qty * cartons;
+              entry.terms.push(`${line.qty} x ${cartons}`);
             } else {
               // CONTAINER / FIXED — once per shipment, not summed per line
               entry.qty = Math.max(entry.qty, line.qty);
+              if (entry.terms.length === 0) entry.terms.push(`${line.qty} (per shipment)`);
             }
           }
         }
@@ -160,17 +173,24 @@ export async function POST(request: Request) {
 
       const materialRows2 = Object.entries(materialsAgg)
         .sort((a, b) => (materialMeta[a[0]]?.category || "").localeCompare(materialMeta[b[0]]?.category || "") || a[1].name.localeCompare(b[1].name))
-        .map(([materialId, m], i) => ({
-          bom_id: bom.id,
-          material_id: materialId,
-          material_name: m.name,
-          unit: materialMeta[materialId]?.unit || "",
-          category: materialMeta[materialId]?.category || "",
-          qty_needed: Math.round(m.qty * 1000) / 1000,
-          est_cost: Math.round(m.qty * (materialMeta[materialId]?.price || 0) * 100) / 100,
-          unit_type: m.unitType,
-          sort_order: i,
-        }));
+        .map(([materialId, m], i) => {
+          const qtyNeeded = Math.round(m.qty * 1000) / 1000;
+          return {
+            bom_id: bom.id,
+            material_id: materialId,
+            material_name: m.name,
+            unit: materialMeta[materialId]?.unit || "",
+            category: materialMeta[materialId]?.category || "",
+            qty_needed: qtyNeeded,
+            est_cost: Math.round(m.qty * (materialMeta[materialId]?.price || 0) * 100) / 100,
+            unit_type: m.unitType,
+            calc_breakdown: `${m.terms.join(" + ")} = ${qtyNeeded}`,
+            qty_in_stock: 0,
+            extra_qty: 0,
+            qty_to_order: qtyNeeded,
+            sort_order: i,
+          };
+        });
 
       if (materialRows2.length > 0) {
         const { error: matErr } = await supabase.from("sc_bom_materials").insert(materialRows2);
@@ -226,10 +246,18 @@ export async function POST(request: Request) {
       return Response.json({ ok: true });
     }
 
-    // Save remarks on raw-material rows
+    // Save edits to raw-material rows: Qty In Stock / Extra Qty / remarks.
+    // Qty To Order = max(required - in stock, 0) + extra (Hafeez's buffer).
     if (body.action === "save-materials" && Array.isArray(body.items)) {
       for (const it of body.items) {
-        const { error } = await supabase.from("sc_bom_materials").update({ remarks: it.remarks || "" }).eq("id", it.id);
+        const qtyInStock = Number(it.qtyInStock || 0);
+        const extraQty = Number(it.extraQty || 0);
+        const required = Number(it.qtyNeeded || 0);
+        const qtyToOrder = Math.max(required - qtyInStock, 0) + extraQty;
+        const { error } = await supabase
+          .from("sc_bom_materials")
+          .update({ qty_in_stock: qtyInStock, extra_qty: extraQty, qty_to_order: qtyToOrder, remarks: it.remarks || "" })
+          .eq("id", it.id);
         if (error) throw error;
       }
       return Response.json({ ok: true });

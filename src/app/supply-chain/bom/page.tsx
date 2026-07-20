@@ -28,7 +28,12 @@ type BomItem = {
 type BomMaterial = {
   id: string; material_name: string; unit: string; category: string;
   qty_needed: number; est_cost: number; unit_type: string; remarks: string;
+  calc_breakdown: string; qty_in_stock: number; extra_qty: number; qty_to_order: number;
 };
+
+// These categories are logistics/service line items, not physical materials
+// to procure from a vendor — hidden from the Raw Materials view.
+const HIDDEN_MATERIAL_CATEGORIES = ["Export Charges", "Labor"];
 
 const STATUS_OPTIONS = [
   { value: "pending", label: "Pending", color: "bg-gray-200/70 text-gray-500" },
@@ -46,6 +51,7 @@ export default function BomPage() {
   const [bom, setBom] = useState<Bom | null>(null);
   const [items, setItems] = useState<BomItem[]>([]);
   const [materials, setMaterials] = useState<BomMaterial[]>([]);
+  const [planFillPct, setPlanFillPct] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [savingMaterials, setSavingMaterials] = useState(false);
@@ -99,6 +105,7 @@ export default function BomPage() {
     setBom(d.bom ?? null);
     setItems(d.items ?? []);
     setMaterials(d.materials ?? []);
+    setPlanFillPct(d.planFillPct ?? null);
     setShowList(false);
     setSaved(true);
     setMaterialsSaved(true);
@@ -135,8 +142,21 @@ export default function BomPage() {
     setSaved(true);
   }
 
-  function updateMaterialRemarks(idx: number, remarks: string) {
-    setMaterials(prev => { const next = [...prev]; next[idx] = { ...next[idx], remarks }; return next; });
+  function updateMaterial(id: string, field: "qty_in_stock" | "extra_qty" | "remarks", val: string | number) {
+    setMaterials(prev => prev.map(m => {
+      if (m.id !== id) return m;
+      const next = { ...m };
+      if (field === "qty_in_stock") {
+        next.qty_in_stock = Number(val) || 0;
+        next.qty_to_order = Math.max(next.qty_needed - next.qty_in_stock, 0) + next.extra_qty;
+      } else if (field === "extra_qty") {
+        next.extra_qty = Number(val) || 0;
+        next.qty_to_order = Math.max(next.qty_needed - next.qty_in_stock, 0) + next.extra_qty;
+      } else if (field === "remarks") {
+        next.remarks = String(val);
+      }
+      return next;
+    }));
     setMaterialsSaved(false);
   }
 
@@ -145,7 +165,10 @@ export default function BomPage() {
     setSavingMaterials(true);
     await fetch("/api/supply-chain/boms", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "save-materials", items: materials.map(m => ({ id: m.id, remarks: m.remarks })) }),
+      body: JSON.stringify({
+        action: "save-materials",
+        items: materials.map(m => ({ id: m.id, qtyNeeded: m.qty_needed, qtyInStock: m.qty_in_stock, extraQty: m.extra_qty, remarks: m.remarks })),
+      }),
     });
     setSavingMaterials(false);
     setMaterialsSaved(true);
@@ -162,14 +185,15 @@ export default function BomPage() {
 
   const finishedGoods = useMemo(() => items.filter(it => !it.has_recipe), [items]);
   const manufacturedGoods = useMemo(() => items.filter(it => it.has_recipe), [items]);
+  const visibleMaterials = useMemo(() => materials.filter(m => !HIDDEN_MATERIAL_CATEGORIES.includes(m.category)), [materials]);
 
   const totals = useMemo(() => ({
     cartons: items.reduce((s, it) => s + it.cartons_required, 0),
     toOrder: finishedGoods.reduce((s, it) => s + it.to_order, 0),
     weight: items.reduce((s, it) => s + it.net_weight_total, 0),
     value: items.reduce((s, it) => s + it.value_total, 0),
-    materialsCost: materials.reduce((s, m) => s + m.est_cost, 0),
-  }), [items, finishedGoods, materials]);
+    materialsCost: visibleMaterials.reduce((s, m) => s + m.est_cost, 0),
+  }), [items, finishedGoods, visibleMaterials]);
 
   if (loading) return <div className="min-h-screen flex items-center justify-center" style={{ background: "#e8ecf1" }}><div className="w-8 h-8 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" /></div>;
 
@@ -219,6 +243,9 @@ export default function BomPage() {
                 </p>
               </div>
               <div className="flex items-center gap-4 text-sm">
+                {planFillPct !== null && (
+                  <span className="text-gray-500">CBM: <span className={`font-medium ${planFillPct > 100 ? "text-red-600" : planFillPct > 95 ? "text-amber-600" : "text-emerald-600"}`}>{planFillPct}%</span></span>
+                )}
                 <span className="text-gray-500">Cartons: <span className="text-gray-900 font-medium">{totals.cartons}</span></span>
                 <span className="text-gray-500">To Order: <span className="text-amber-600 font-medium">{totals.toOrder}</span></span>
                 <span className="text-gray-500">Weight: <span className="text-gray-900 font-medium">{totals.weight.toFixed(1)} kg</span></span>
@@ -307,37 +334,51 @@ export default function BomPage() {
                         <tr className="border-b border-gray-200/70">
                           <th className="text-left px-4 py-3 text-gray-500 font-medium w-8">#</th>
                           <th className="text-left px-4 py-3 text-gray-500 font-medium">Material</th>
-                          <th className="text-left px-4 py-3 text-gray-500 font-medium w-36">Category</th>
-                          <th className="text-center px-4 py-3 text-gray-500 font-medium w-24">Qty Needed</th>
+                          <th className="text-left px-4 py-3 text-gray-500 font-medium w-32">Category</th>
+                          <th className="text-left px-4 py-3 text-gray-500 font-medium w-40">Calculation</th>
                           <th className="text-center px-4 py-3 text-gray-500 font-medium w-20">Unit</th>
-                          <th className="text-center px-4 py-3 text-gray-500 font-medium w-24">Est. Cost</th>
-                          <th className="text-left px-4 py-3 text-gray-500 font-medium w-40">Remarks</th>
+                          <th className="text-center px-4 py-3 text-gray-500 font-medium w-20">Required Qty</th>
+                          <th className="text-center px-4 py-3 text-gray-500 font-medium w-24">Qty In Stock</th>
+                          <th className="text-center px-4 py-3 text-gray-500 font-medium w-20">Extra Qty</th>
+                          <th className="text-center px-4 py-3 text-gray-500 font-medium w-24">Qty To Order</th>
+                          <th className="text-center px-4 py-3 text-gray-500 font-medium w-20">Est. Cost</th>
+                          <th className="text-left px-4 py-3 text-gray-500 font-medium w-32">Remarks</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {materials.map((m, idx) => (
+                        {visibleMaterials.map((m, idx) => (
                           <tr key={m.id} className="border-b border-gray-100 hover:bg-gray-50/80">
                             <td className="px-4 py-2.5 text-gray-400 text-xs">{idx + 1}</td>
                             <td className="px-4 py-2.5 text-gray-900 text-xs font-medium">{m.material_name}</td>
                             <td className="px-4 py-2.5 text-gray-500 text-xs">{m.category || "—"}</td>
-                            <td className="px-4 py-2.5 text-center text-gray-900 text-xs font-medium">{m.qty_needed}</td>
+                            <td className="px-4 py-2.5 text-gray-400 text-[11px] font-mono">{m.calc_breakdown || "—"}</td>
                             <td className="px-4 py-2.5 text-center text-gray-500 text-xs">{m.unit || "—"}</td>
+                            <td className="px-4 py-2.5 text-center text-gray-900 text-xs font-medium">{m.qty_needed}</td>
+                            <td className="px-4 py-2.5">
+                              <input type="number" min="0" value={m.qty_in_stock || ""} onChange={e => updateMaterial(m.id, "qty_in_stock", e.target.value)}
+                                className="w-full bg-white border border-gray-200 rounded px-2 py-1 text-center text-gray-900 text-sm focus:outline-none focus:border-teal-500/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                            </td>
+                            <td className="px-4 py-2.5">
+                              <input type="number" min="0" value={m.extra_qty || ""} onChange={e => updateMaterial(m.id, "extra_qty", e.target.value)}
+                                className="w-full bg-white border border-gray-200 rounded px-2 py-1 text-center text-gray-900 text-sm focus:outline-none focus:border-teal-500/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                            </td>
+                            <td className="px-4 py-2.5 text-center text-teal-700 text-xs font-semibold">{m.qty_to_order}</td>
                             <td className="px-4 py-2.5 text-center text-gray-500 text-xs">${m.est_cost.toFixed(2)}</td>
                             <td className="px-4 py-2.5">
-                              <input type="text" value={m.remarks || ""} onChange={e => updateMaterialRemarks(idx, e.target.value)} placeholder="..."
+                              <input type="text" value={m.remarks || ""} onChange={e => updateMaterial(m.id, "remarks", e.target.value)} placeholder="..."
                                 className="w-full bg-white border border-gray-200 rounded px-2 py-1 text-gray-700 text-xs focus:outline-none focus:border-teal-500/50" />
                             </td>
                           </tr>
                         ))}
-                        {materials.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400 text-xs">No raw materials found — the manufactured product(s) above have no recipe saved in the Product List yet.</td></tr>}
+                        {visibleMaterials.length === 0 && <tr><td colSpan={11} className="px-4 py-8 text-center text-gray-400 text-xs">No raw materials found — the manufactured product(s) above have no recipe saved in the Product List yet.</td></tr>}
                       </tbody>
                     </table>
                   </div>
                   <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-gray-200/70">
                     {materialsSaved && <span className="flex items-center gap-1 text-xs text-emerald-600"><Check className="w-3.5 h-3.5" /> Saved</span>}
-                    <button onClick={saveMaterials} disabled={savingMaterials || materials.length === 0} className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm bg-teal-600 hover:bg-teal-500 text-white font-medium transition-colors disabled:opacity-40 cursor-pointer">
+                    <button onClick={saveMaterials} disabled={savingMaterials || visibleMaterials.length === 0} className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm bg-teal-600 hover:bg-teal-500 text-white font-medium transition-colors disabled:opacity-40 cursor-pointer">
                       {savingMaterials ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                      Save Remarks
+                      Save Materials
                     </button>
                   </div>
                 </div>
