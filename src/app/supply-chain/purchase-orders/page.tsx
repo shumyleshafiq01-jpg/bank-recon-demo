@@ -14,20 +14,31 @@ type BomItem = {
   id: string; product_id: string | null; product_name: string; packing_desc: string;
   cartons_required: number; in_stock: number; to_order: number;
 };
+type BomMaterial = {
+  id: string; material_name: string; category: string; unit: string; qty_to_order: number;
+};
 type Vendor = { id: string; vendorName: string; commodity: string; phone: string };
 
 type PoItem = {
-  id: string; product_name: string; packing_desc: string; cartons_ordered: number; remarks: string;
+  id: string; product_name: string; packing_desc: string; cartons_ordered: number;
+  unit: string; item_kind: string; remarks: string;
 };
 type Po = {
   id: string; po_number: string; vendor_name: string; vendor_phone: string;
   status: string; total_cartons: number; notes: string; bom_id: string | null; items: PoItem[];
 };
 
-// A to-order line the user assigns a vendor to
+// Same categories the BOM page hides — logistics/service costs, not
+// vendor-sourced physical materials.
+const HIDDEN_MATERIAL_CATEGORIES = ["Export Charges", "Labor"];
+
+// A to-order line the user assigns a vendor to — either a finished-goods
+// product (in cartons) or a raw material (its own unit, its own vendor).
 type AssignRow = {
-  productId: string | null; productName: string; packingDesc: string;
-  cartons: number; vendorId: string;
+  kind: "product" | "material";
+  productId: string | null; materialId: string | null;
+  productName: string; packingDesc: string;
+  cartons: number; unit: string; vendorId: string;
 };
 
 const STATUS_META: Record<string, { label: string; color: string }> = {
@@ -78,14 +89,28 @@ export default function PurchaseOrdersPage() {
     const r = await fetch(`/api/supply-chain/boms?id=${bom.id}`);
     const d = await r.json();
     const items: BomItem[] = d.items ?? [];
-    // Only items that need ordering
-    const rows: AssignRow[] = items
+    const materials: BomMaterial[] = d.materials ?? [];
+
+    // Finished-goods products still needed (bought ready-made)
+    const productRows: AssignRow[] = items
       .filter(it => it.to_order > 0)
       .map(it => ({
-        productId: it.product_id, productName: it.product_name, packingDesc: it.packing_desc,
-        cartons: it.to_order, vendorId: "",
+        kind: "product", productId: it.product_id, materialId: null,
+        productName: it.product_name, packingDesc: it.packing_desc,
+        cartons: it.to_order, unit: "CARTON", vendorId: "",
       }));
-    setAssignRows(rows);
+
+    // Raw materials — each one often comes from a different vendor than
+    // the finished product does, so they get their own assignable rows.
+    const materialRows: AssignRow[] = materials
+      .filter(m => !HIDDEN_MATERIAL_CATEGORIES.includes(m.category) && m.qty_to_order > 0)
+      .map(m => ({
+        kind: "material", productId: null, materialId: m.id,
+        productName: m.material_name, packingDesc: m.category || "",
+        cartons: m.qty_to_order, unit: m.unit || "PCS", vendorId: "",
+      }));
+
+    setAssignRows([...productRows, ...materialRows]);
     setLoadingItems(false);
   }
 
@@ -113,8 +138,9 @@ export default function PurchaseOrdersPage() {
       .map(r => {
         const v = vendors.find(x => x.id === r.vendorId);
         return {
-          productId: r.productId, productName: r.productName, packingDesc: r.packingDesc,
-          cartons: r.cartons, vendorId: r.vendorId,
+          kind: r.kind, productId: r.productId, materialId: r.materialId,
+          productName: r.productName, packingDesc: r.packingDesc,
+          cartons: r.cartons, unit: r.unit, vendorId: r.vendorId,
           vendorName: v?.vendorName || "Unknown", vendorPhone: v?.phone || "",
         };
       });
@@ -215,9 +241,14 @@ export default function PurchaseOrdersPage() {
                       {po.items.map((it, i) => (
                         <tr key={it.id} className="border-b border-gray-100 last:border-0">
                           <td className="px-4 py-2 text-gray-400 text-xs w-8">{i + 1}</td>
+                          <td className="px-4 py-2 w-28">
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${it.item_kind === "material" ? "bg-teal-500/10 text-teal-700" : "bg-violet-500/10 text-violet-700"}`}>
+                              {it.item_kind === "material" ? "Material" : "Finished Good"}
+                            </span>
+                          </td>
                           <td className="px-4 py-2 text-gray-900 text-xs font-medium">{it.product_name}</td>
                           <td className="px-4 py-2 text-gray-500 text-xs">{it.packing_desc}</td>
-                          <td className="px-4 py-2 text-right text-orange-600 text-xs font-medium w-24">{it.cartons_ordered} ctn</td>
+                          <td className="px-4 py-2 text-right text-orange-600 text-xs font-medium w-28">{it.cartons_ordered} {(it.unit || "CARTON").toLowerCase()}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -232,21 +263,21 @@ export default function PurchaseOrdersPage() {
       {/* Generate Modal */}
       {showGenerate && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-6" onClick={() => setShowGenerate(false)}>
-          <div className="bg-white border border-gray-200 rounded-2xl w-full max-w-3xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200/70">
+          <div className="bg-white border border-gray-200 rounded-2xl w-full max-w-6xl h-[88vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200/70">
               <div>
-                <h3 className="text-gray-900 font-semibold">Generate Purchase Orders</h3>
-                <p className="text-xs text-gray-500 mt-0.5">{!selectedBom ? "Pick a BOM to pull its to-order items" : "Assign a vendor to each item — one PO is created per vendor"}</p>
+                <h3 className="text-gray-900 font-semibold text-lg">Generate Purchase Orders</h3>
+                <p className="text-xs text-gray-500 mt-0.5">{!selectedBom ? "Pick a BOM to pull its to-order items" : "Assign a vendor to each product and each raw material — a PO is created per vendor"}</p>
               </div>
-              <button onClick={() => setShowGenerate(false)} className="p-1 rounded hover:bg-gray-100 text-gray-500 cursor-pointer"><X className="w-4 h-4" /></button>
+              <button onClick={() => setShowGenerate(false)} className="p-1.5 rounded hover:bg-gray-100 text-gray-500 cursor-pointer"><X className="w-5 h-5" /></button>
             </div>
 
             {!selectedBom ? (
               <div className="flex-1 overflow-y-auto">
-                {boms.length === 0 && <div className="px-5 py-10 text-center text-gray-400 text-sm">No BOMs yet. Create one in the BOM module first.</div>}
+                {boms.length === 0 && <div className="px-6 py-16 text-center text-gray-400 text-sm">No BOMs yet. Create one in the BOM module first.</div>}
                 {boms.map(b => (
-                  <button key={b.id} onClick={() => pickBom(b)} className="w-full flex items-center gap-3 px-5 py-3 border-b border-gray-100 text-left hover:bg-gray-50 transition-colors cursor-pointer">
-                    <div className="w-8 h-8 rounded-lg bg-violet-500/10 flex items-center justify-center shrink-0"><FileText className="w-4 h-4 text-violet-600" /></div>
+                  <button key={b.id} onClick={() => pickBom(b)} className="w-full flex items-center gap-3 px-6 py-4 border-b border-gray-100 text-left hover:bg-gray-50 transition-colors cursor-pointer">
+                    <div className="w-9 h-9 rounded-lg bg-violet-500/10 flex items-center justify-center shrink-0"><FileText className="w-4 h-4 text-violet-600" /></div>
                     <div className="flex-1 min-w-0">
                       <div className="text-gray-900 text-sm font-medium truncate">{b.bom_name}</div>
                       <div className="text-xs text-gray-500 truncate">{b.buyer_name && `${b.buyer_name} · `}{b.container_type.toUpperCase()}</div>
@@ -256,13 +287,13 @@ export default function PurchaseOrdersPage() {
               </div>
             ) : (
               <>
-                <div className="px-5 py-3 border-b border-gray-200/70 flex items-center justify-between gap-3">
+                <div className="px-6 py-3 border-b border-gray-200/70 flex items-center justify-between gap-3">
                   <button onClick={() => { setSelectedBom(null); setAssignRows([]); }} className="text-xs text-gray-500 hover:text-gray-900 flex items-center gap-1 cursor-pointer"><ChevronLeft className="w-3.5 h-3.5" /> Back to BOMs</button>
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-gray-500">Assign all to:</span>
                     <div className="relative">
                       <select onChange={e => { assignAllTo(e.target.value); e.target.value = ""; }} defaultValue=""
-                        className="bg-white border border-gray-200 rounded-lg pl-2 pr-7 py-1 text-xs text-gray-900 appearance-none focus:outline-none cursor-pointer max-w-[180px]">
+                        className="bg-white border border-gray-200 rounded-lg pl-2 pr-7 py-1.5 text-xs text-gray-900 appearance-none focus:outline-none cursor-pointer max-w-[220px]">
                         <option value="" className="bg-white">Pick vendor…</option>
                         {vendors.map(v => <option key={v.id} value={v.id} className="bg-white">{v.vendorName}</option>)}
                       </select>
@@ -271,33 +302,39 @@ export default function PurchaseOrdersPage() {
                   </div>
                 </div>
                 <div className="flex-1 overflow-y-auto">
-                  {loadingItems && <div className="px-5 py-8 text-center"><Loader2 className="w-5 h-5 animate-spin text-orange-600 mx-auto" /></div>}
-                  {!loadingItems && assignRows.length === 0 && <div className="px-5 py-10 text-center text-gray-400 text-sm">This BOM has nothing to order (everything is in stock).</div>}
+                  {loadingItems && <div className="px-6 py-10 text-center"><Loader2 className="w-6 h-6 animate-spin text-orange-600 mx-auto" /></div>}
+                  {!loadingItems && assignRows.length === 0 && <div className="px-6 py-16 text-center text-gray-400 text-sm">This BOM has nothing to order (everything is in stock).</div>}
                   {assignRows.length > 0 && (
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="border-b border-gray-200/70 sticky top-0 bg-white">
-                          <th className="text-left px-4 py-2 text-gray-500 font-medium text-xs">Product</th>
-                          <th className="text-center px-4 py-2 text-gray-500 font-medium text-xs w-20">To Order</th>
-                          <th className="text-left px-4 py-2 text-gray-500 font-medium text-xs w-56">Vendor</th>
+                          <th className="text-left px-6 py-3 text-gray-500 font-medium text-xs w-24">Type</th>
+                          <th className="text-left px-6 py-3 text-gray-500 font-medium text-xs">Item</th>
+                          <th className="text-center px-6 py-3 text-gray-500 font-medium text-xs w-28">To Order</th>
+                          <th className="text-left px-6 py-3 text-gray-500 font-medium text-xs w-64">Vendor</th>
                         </tr>
                       </thead>
                       <tbody>
                         {assignRows.map((row, idx) => (
                           <tr key={idx} className="border-b border-gray-100">
-                            <td className="px-4 py-2">
-                              <div className="text-gray-900 text-xs font-medium">{row.productName}</div>
-                              <div className="text-gray-400 text-[11px]">{row.packingDesc}</div>
+                            <td className="px-6 py-3">
+                              <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${row.kind === "material" ? "bg-teal-500/10 text-teal-700" : "bg-violet-500/10 text-violet-700"}`}>
+                                {row.kind === "material" ? "Material" : "Finished Good"}
+                              </span>
                             </td>
-                            <td className="px-4 py-2 text-center text-orange-600 text-xs font-medium">{row.cartons}</td>
-                            <td className="px-4 py-2">
+                            <td className="px-6 py-3">
+                              <div className="text-gray-900 text-sm font-medium">{row.productName}</div>
+                              <div className="text-gray-400 text-xs">{row.packingDesc}</div>
+                            </td>
+                            <td className="px-6 py-3 text-center text-orange-600 text-sm font-medium">{row.cartons} <span className="text-gray-400 text-xs font-normal">{row.unit}</span></td>
+                            <td className="px-6 py-3">
                               <div className="relative">
                                 <select value={row.vendorId} onChange={e => setRowVendor(idx, e.target.value)}
-                                  className={`w-full border rounded-lg pl-2 pr-7 py-1 text-xs appearance-none focus:outline-none cursor-pointer ${row.vendorId ? "bg-white border-gray-200 text-gray-900" : "bg-amber-500/[0.06] border-amber-500/20 text-amber-700"}`}>
+                                  className={`w-full border rounded-lg pl-2.5 pr-7 py-1.5 text-sm appearance-none focus:outline-none cursor-pointer ${row.vendorId ? "bg-white border-gray-200 text-gray-900" : "bg-amber-500/[0.06] border-amber-500/20 text-amber-700"}`}>
                                   <option value="" className="bg-white">Unassigned</option>
                                   {vendors.map(v => <option key={v.id} value={v.id} className="bg-white">{v.vendorName}{v.commodity ? ` — ${v.commodity}` : ""}</option>)}
                                 </select>
-                                <ChevronDown className="w-3 h-3 absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+                                <ChevronDown className="w-3.5 h-3.5 absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
                               </div>
                             </td>
                           </tr>
@@ -306,9 +343,9 @@ export default function PurchaseOrdersPage() {
                     </table>
                   )}
                 </div>
-                <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-gray-200/70">
+                <div className="flex items-center justify-between gap-2 px-6 py-4 border-t border-gray-200/70">
                   <span className="text-xs text-gray-500">{assignedCount} of {assignRows.length} assigned · {vendorGroups} PO{vendorGroups !== 1 ? "s" : ""} will be created</span>
-                  <button onClick={generatePos} disabled={generating || assignedCount === 0} className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm bg-orange-600 hover:bg-orange-500 text-white font-medium transition-colors disabled:opacity-40 cursor-pointer">
+                  <button onClick={generatePos} disabled={generating || assignedCount === 0} className="flex items-center gap-1.5 px-5 py-2 rounded-lg text-sm bg-orange-600 hover:bg-orange-500 text-white font-medium transition-colors disabled:opacity-40 cursor-pointer">
                     {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
                     Create {vendorGroups > 0 ? vendorGroups : ""} PO{vendorGroups !== 1 ? "s" : ""}
                   </button>

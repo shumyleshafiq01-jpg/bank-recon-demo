@@ -58,8 +58,11 @@ export async function POST(request: Request) {
 
     const body = await request.json();
 
-    // Generate one PO per vendor from assigned BOM to-order items.
-    // body.assignments: [{ productId, productName, packingDesc, cartons, vendorId, vendorName, vendorPhone }]
+    // Generate one PO per vendor from assigned BOM to-order items. Lines can
+    // be finished-goods products OR raw materials — a BOM's materials each
+    // often come from a different vendor than the finished product itself.
+    // body.assignments: [{ kind: "product"|"material", productId, materialId,
+    //   productName, packingDesc, cartons, unit, vendorId, vendorName, vendorPhone }]
     if (body.action === "generate" && Array.isArray(body.assignments)) {
       const assigned = body.assignments.filter((a: Record<string, unknown>) => a.vendorId && Number(a.cartons) > 0);
       if (assigned.length === 0) {
@@ -103,9 +106,12 @@ export async function POST(request: Request) {
         const rows = items.map((it, i) => ({
           po_id: po.id,
           product_id: it.productId || null,
+          material_id: it.materialId || null,
+          item_kind: it.kind === "material" ? "material" : "product",
           product_name: (it.productName as string) || "",
           packing_desc: (it.packingDesc as string) || "",
           cartons_ordered: Number(it.cartons || 0),
+          unit: (it.unit as string) || "CARTON",
           remarks: (it.remarks as string) || "",
           sort_order: i,
         }));
