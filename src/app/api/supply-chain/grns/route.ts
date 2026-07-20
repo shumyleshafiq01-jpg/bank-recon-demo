@@ -15,6 +15,46 @@ async function getSetting(key: string): Promise<string> {
   return (data?.value as string) ?? "";
 }
 
+// Post a stock receipt into the persistent inventory ledger — creates the
+// inventory row on first use so every material/product accumulates a real
+// history across every order, not just the one BOM it arrived for.
+async function postInventoryReceipt(args: {
+  itemKind: string; materialId: string | null; productId: string | null;
+  itemName: string; unit: string; qty: number; refType: string; refId: string; createdBy: string;
+}) {
+  if (args.qty <= 0) return;
+  const itemType = args.itemKind === "material" ? "material" : "product";
+
+  let inv: { id: string; qty_on_hand: number } | null = null;
+  if (itemType === "material" && args.materialId) {
+    const { data } = await supabase.from("sc_inventory").select("id, qty_on_hand").eq("item_type", "material").eq("material_id", args.materialId).maybeSingle();
+    inv = data;
+  } else if (itemType === "product" && args.productId) {
+    const { data } = await supabase.from("sc_inventory").select("id, qty_on_hand").eq("item_type", "product").eq("product_id", args.productId).maybeSingle();
+    inv = data;
+  }
+
+  if (!inv) {
+    const { data: created, error } = await supabase
+      .from("sc_inventory")
+      .insert({
+        item_type: itemType, material_id: itemType === "material" ? args.materialId : null,
+        product_id: itemType === "product" ? args.productId : null,
+        item_name: args.itemName, unit: args.unit || "PCS", qty_on_hand: 0, reorder_level: 0,
+      })
+      .select("id, qty_on_hand")
+      .single();
+    if (error) return; // don't block GRN approval on inventory bookkeeping
+    inv = created;
+  }
+
+  const newQty = Number(inv.qty_on_hand) + args.qty;
+  await supabase.from("sc_inventory").update({ qty_on_hand: newQty, updated_at: new Date().toISOString() }).eq("id", inv.id);
+  await supabase.from("sc_inventory_transactions").insert({
+    inventory_id: inv.id, txn_type: "receipt", qty: args.qty, ref_type: args.refType, ref_id: args.refId, created_by: args.createdBy,
+  });
+}
+
 export async function GET(request: Request) {
   try {
     const session = await getSession();
@@ -90,10 +130,13 @@ export async function POST(request: Request) {
       const rows = (poItems ?? []).map((it, i) => ({
         grn_id: grn.id,
         product_id: it.product_id,
+        material_id: it.material_id,
+        item_kind: it.item_kind || "product",
         product_name: it.product_name,
         packing_desc: it.packing_desc,
         cartons_ordered: it.cartons_ordered,
         cartons_received: it.cartons_ordered, // receiver adjusts if short
+        unit: it.unit || "CARTON",
         damaged: 0,
         remarks: "",
         sort_order: i,
@@ -153,25 +196,54 @@ export async function POST(request: Request) {
         await supabase.from("sc_purchase_orders").update({ status: "received", updated_at: new Date().toISOString() }).eq("id", grn.po_id);
       }
 
-      // Update BOM stock: good units (received - damaged) go into in_stock
+      // Update BOM stock (finished goods AND raw materials) with good units
+      // (received - damaged), and post the same receipt into the persistent
+      // inventory ledger so it accumulates across every order over time.
       if (grn.po_id) {
         const { data: po } = await supabase.from("sc_purchase_orders").select("bom_id").eq("id", grn.po_id).maybeSingle();
-        if (po?.bom_id) {
-          const { data: grnItems } = await supabase.from("sc_grn_items").select("*").eq("grn_id", body.id);
-          for (const gi of grnItems ?? []) {
-            if (!gi.product_id) continue;
-            const { data: bomItem } = await supabase
-              .from("sc_bom_items").select("*")
-              .eq("bom_id", po.bom_id).eq("product_id", gi.product_id).maybeSingle();
-            if (!bomItem) continue;
-            const good = Math.max(Number(gi.cartons_received || 0) - Number(gi.damaged || 0), 0);
-            const inStock = Number(bomItem.in_stock || 0) + good;
-            const toOrder = Math.max(Number(bomItem.cartons_required || 0) - inStock, 0);
-            await supabase
-              .from("sc_bom_items")
-              .update({ in_stock: inStock, to_order: toOrder, item_status: toOrder === 0 ? "in_stock" : bomItem.item_status })
-              .eq("id", bomItem.id);
+        const { data: grnItems } = await supabase.from("sc_grn_items").select("*").eq("grn_id", body.id);
+
+        for (const gi of grnItems ?? []) {
+          const good = Math.max(Number(gi.cartons_received || 0) - Number(gi.damaged || 0), 0);
+          if (good <= 0) continue;
+          const isMaterial = gi.item_kind === "material";
+
+          if (po?.bom_id) {
+            if (isMaterial && gi.material_id) {
+              const { data: bomMat } = await supabase
+                .from("sc_bom_materials").select("*")
+                .eq("bom_id", po.bom_id).eq("material_id", gi.material_id).maybeSingle();
+              if (bomMat) {
+                const newInStock = Number(bomMat.qty_in_stock || 0) + good;
+                const newToOrder = Math.max(Number(bomMat.qty_needed || 0) - newInStock, 0) + Number(bomMat.extra_qty || 0);
+                await supabase.from("sc_bom_materials").update({ qty_in_stock: newInStock, qty_to_order: newToOrder }).eq("id", bomMat.id);
+              }
+            } else if (!isMaterial && gi.product_id) {
+              const { data: bomItem } = await supabase
+                .from("sc_bom_items").select("*")
+                .eq("bom_id", po.bom_id).eq("product_id", gi.product_id).maybeSingle();
+              if (bomItem) {
+                const inStock = Number(bomItem.in_stock || 0) + good;
+                const toOrder = Math.max(Number(bomItem.cartons_required || 0) - inStock, 0);
+                await supabase
+                  .from("sc_bom_items")
+                  .update({ in_stock: inStock, to_order: toOrder, item_status: toOrder === 0 ? "in_stock" : bomItem.item_status })
+                  .eq("id", bomItem.id);
+              }
+            }
           }
+
+          await postInventoryReceipt({
+            itemKind: gi.item_kind || "product",
+            materialId: gi.material_id || null,
+            productId: gi.product_id || null,
+            itemName: gi.product_name,
+            unit: gi.unit || "CARTON",
+            qty: good,
+            refType: "grn",
+            refId: grn.grn_number,
+            createdBy: session.id,
+          });
         }
       }
 

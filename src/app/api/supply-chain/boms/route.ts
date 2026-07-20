@@ -100,6 +100,15 @@ export async function POST(request: Request) {
         }
       }
 
+      // Suggest a starting "in stock" from the persistent inventory ledger
+      // instead of always 0 — still fully editable/overridable afterward.
+      const planProductIds = Array.from(new Set((planItems ?? []).map((it: Record<string, unknown>) => it.product_id as string).filter(Boolean)));
+      let productStockMap: Record<string, number> = {};
+      if (planProductIds.length > 0) {
+        const { data: invRows } = await supabase.from("sc_inventory").select("product_id, qty_on_hand").eq("item_type", "product").in("product_id", planProductIds);
+        for (const r of invRows ?? []) productStockMap[r.product_id as string] = Number(r.qty_on_hand || 0);
+      }
+
       // Create the BOM header
       const { data: bom, error: bErr } = await supabase
         .from("sc_boms")
@@ -147,6 +156,7 @@ export async function POST(request: Request) {
           }
         }
 
+        const inStock = hasRecipe ? 0 : Math.min(productStockMap[it.product_id as string] || 0, cartons);
         return {
           bom_id: bom.id,
           product_id: it.product_id,
@@ -157,8 +167,8 @@ export async function POST(request: Request) {
           pcs_required: cartons * pcsPerCarton,
           net_weight_total: Number(it.net_weight_total || 0),
           value_total: Number(it.total_value || 0),
-          in_stock: 0,
-          to_order: cartons,
+          in_stock: inStock,
+          to_order: Math.max(cartons - inStock, 0),
           item_status: "pending",
           remarks: (it.remarks as string) || "",
           sort_order: i,
@@ -171,10 +181,18 @@ export async function POST(request: Request) {
         if (insErr) throw insErr;
       }
 
+      const materialIds2 = Object.keys(materialsAgg);
+      let materialStockMap: Record<string, number> = {};
+      if (materialIds2.length > 0) {
+        const { data: invRows } = await supabase.from("sc_inventory").select("material_id, qty_on_hand").eq("item_type", "material").in("material_id", materialIds2);
+        for (const r of invRows ?? []) materialStockMap[r.material_id as string] = Number(r.qty_on_hand || 0);
+      }
+
       const materialRows2 = Object.entries(materialsAgg)
         .sort((a, b) => (materialMeta[a[0]]?.category || "").localeCompare(materialMeta[b[0]]?.category || "") || a[1].name.localeCompare(b[1].name))
         .map(([materialId, m], i) => {
           const qtyNeeded = Math.round(m.qty * 1000) / 1000;
+          const qtyInStock = Math.min(materialStockMap[materialId] || 0, qtyNeeded);
           return {
             bom_id: bom.id,
             material_id: materialId,
@@ -185,9 +203,9 @@ export async function POST(request: Request) {
             est_cost: Math.round(m.qty * (materialMeta[materialId]?.price || 0) * 100) / 100,
             unit_type: m.unitType,
             calc_breakdown: `${m.terms.join(" + ")} = ${qtyNeeded}`,
-            qty_in_stock: 0,
+            qty_in_stock: qtyInStock,
             extra_qty: 0,
-            qty_to_order: qtyNeeded,
+            qty_to_order: Math.max(qtyNeeded - qtyInStock, 0),
             sort_order: i,
           };
         });
