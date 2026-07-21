@@ -1,48 +1,60 @@
-// How many cartons of a given size fit in a container — using a recursive
-// guillotine 2D bin-packing model (per height-layer, fill leftover rows/
-// columns with a rotated orientation of the same box), tried across all 6
-// axis-orientations of the carton. This is much closer to how real freight
-// "container fit" calculators work than either naive grid-stacking or a
-// flat volume-ratio division.
+// How many cartons of a given size fit in a container — full 3D recursive
+// guillotine bin-packing. For the best-fit orientation, pack a maximal
+// nx*ny*nz grid, then recursively pack whatever's left over along EACH axis
+// (three independent leftover slabs, each free to use a different carton
+// orientation) — not just a single fixed-height "layer" like a naive
+// grid-stacking or 2D-per-layer model would.
 //
 // Verified against a real "Shipping & Freight" calculator (4 data points):
-//   15x13x4.6in   -> 2142/4382/5089  EXACT match (20ft/40ft/40HC)
-//   10x15x5in     -> 2484/5076/5922  EXACT match
-//   13.75x9.75x6.25in -> got 2310/4830/5152 vs their 2382/4848/5347 (~3-7% under)
-//   12x12x6.5in   -> got 1862 vs their 1995 (~7% under)
-// The two imperfect cases could not be closed even with a full recursive
-// guillotine search, suggesting their tool allows non-guillotine ("locked")
-// packings we can't cheaply replicate. This is still dramatically closer
-// than the old volume-ratio method (which was off by the same amount in
-// every case, not just some).
+//   15x13x4.6in       -> 2142/4382/5089  EXACT match (20ft/40ft/40HC)
+//   10x15x5in         -> 2484/5076/5922  EXACT match
+//   12x12x6.5in       -> 1995/4095/4680  EXACT match
+//   13.75x9.75x6.25in -> got 2316/4830/5209 vs their 2382/4848/5347 (~2-3% under)
+// The last case could not be closed even with a deeper (non-maximal-grid)
+// search — their tool appears to allow a non-guillotine ("interlocked")
+// packing for that specific shape that a guillotine-cut model can't reach.
+// Still a major accuracy improvement over both the old flat volume-ratio
+// method and the earlier 2D-per-layer guillotine (which got only 2/4 exact).
 
-function layerFit2D(
-  containerL: number, containerW: number,
-  boxA: number, boxB: number,
+function solve(
+  containerL: number, containerW: number, containerH: number,
+  boxDims: [number, number, number],
   memo: Map<string, number>
 ): number {
-  const key = `${containerL.toFixed(4)}|${containerW.toFixed(4)}`;
+  const key = `${containerL.toFixed(4)}|${containerW.toFixed(4)}|${containerH.toFixed(4)}`;
   const cached = memo.get(key);
   if (cached !== undefined) return cached;
 
-  const minDim = Math.min(boxA, boxB);
-  if (containerL < minDim - 1e-6 || containerW < minDim - 1e-6) {
+  const minDim = Math.min(...boxDims);
+  if (containerL < minDim - 1e-6 || containerW < minDim - 1e-6 || containerH < minDim - 1e-6) {
     memo.set(key, 0);
     return 0;
   }
 
+  const perms: [number, number, number][] = [
+    [0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0],
+  ];
+
   let best = 0;
-  const orientations: [number, number][] = [[boxA, boxB], [boxB, boxA]];
-  for (const [bw, bh] of orientations) {
-    if (bw > containerL + 1e-9 || bh > containerW + 1e-9) continue;
-    const nx = Math.floor(containerL / bw);
-    const ny = Math.floor(containerW / bh);
-    const main = nx * ny;
-    const remL = containerL - nx * bw;
-    const remW = containerW - ny * bh;
-    const optA = remL > 1e-6 ? main + layerFit2D(remL, containerW, boxA, boxB, memo) : main;
-    const optB = remW > 1e-6 ? main + layerFit2D(containerL, remW, boxA, boxB, memo) : main;
-    best = Math.max(best, optA, optB);
+  for (const [i, j, k] of perms) {
+    const a = boxDims[i], b = boxDims[j], c = boxDims[k];
+    if (a > containerL + 1e-9 || b > containerW + 1e-9 || c > containerH + 1e-9) continue;
+
+    const nx = Math.floor(containerL / a + 1e-9);
+    const ny = Math.floor(containerW / b + 1e-9);
+    const nz = Math.floor(containerH / c + 1e-9);
+    const main = nx * ny * nz;
+    if (main === 0) continue;
+
+    const remL = containerL - nx * a;
+    const remW = containerW - ny * b;
+    const remH = containerH - nz * c;
+
+    let total = main;
+    if (remL > 1e-6) total = Math.max(total, main + solve(remL, containerW, containerH, boxDims, memo));
+    if (remW > 1e-6) total = Math.max(total, main + solve(containerL, remW, containerH, boxDims, memo));
+    if (remH > 1e-6) total = Math.max(total, main + solve(containerL, containerW, remH, boxDims, memo));
+    best = Math.max(best, total);
   }
   memo.set(key, best);
   return best;
@@ -59,19 +71,6 @@ export function maxCartonsFit(
   if (!cartonLIn || !cartonWIn || !cartonHIn) return 0;
   if (!containerLIn || !containerWIn || !containerHIn) return 0;
 
-  const dims = [cartonLIn, cartonWIn, cartonHIn];
-  const perms: [number, number, number][] = [
-    [0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0],
-  ];
-
-  let best = 0;
-  for (const [i, j, k] of perms) {
-    const a = dims[i], b = dims[j], c = dims[k];
-    const layers = Math.floor(containerHIn / c);
-    if (layers <= 0) continue;
-    const memo = new Map<string, number>();
-    const perLayer = layerFit2D(containerLIn, containerWIn, a, b, memo);
-    best = Math.max(best, layers * perLayer);
-  }
-  return best;
+  const memo = new Map<string, number>();
+  return solve(containerLIn, containerWIn, containerHIn, [cartonLIn, cartonWIn, cartonHIn], memo);
 }
