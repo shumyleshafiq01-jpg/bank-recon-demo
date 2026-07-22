@@ -256,7 +256,7 @@ export default function BomPage() {
 
   return (
     <div className="min-h-screen" style={{ background: "#e8ecf1" }}>
-      <div className="max-w-7xl mx-auto px-6 py-6">
+      <div className="max-w-[100rem] mx-auto px-6 py-6">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
@@ -321,6 +321,9 @@ export default function BomPage() {
               <Boxes className="w-4 h-4 text-violet-600" />
               <h3 className="text-sm font-semibold text-gray-900">Finished Goods to Purchase</h3>
               <span className="text-xs text-gray-400">— products bought ready-made (no recipe on file)</span>
+              <span className="ml-1 px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-700 text-[11px] font-medium">
+                {items.length} finished good{items.length !== 1 ? "s" : ""} in this BOM
+              </span>
             </div>
             <div className="rounded-xl bg-white/70 border border-gray-200/80 overflow-hidden mb-6">
               <div className="overflow-x-auto">
@@ -395,19 +398,18 @@ export default function BomPage() {
                       <thead>
                         <tr className="border-b border-gray-200/70">
                           <th className="text-left px-4 py-3 text-gray-500 font-medium w-8">#</th>
-                          <th className="text-left px-4 py-3 text-gray-500 font-medium">Material</th>
-                          <th className="text-left px-4 py-3 text-gray-500 font-medium w-32">Category</th>
-                          <th className="text-left px-4 py-3 text-gray-500 font-medium w-40">Calculation</th>
-                          <th className="text-center px-4 py-3 text-gray-500 font-medium w-20">Unit</th>
+                          <th className="text-left px-4 py-3 text-gray-500 font-medium w-64">Material</th>
+                          <th className="text-left px-4 py-3 text-gray-500 font-medium w-28">Category</th>
+                          <th className="text-left px-4 py-3 text-gray-500 font-medium w-36">Calculation</th>
+                          <th className="text-center px-4 py-3 text-gray-500 font-medium w-16">Unit</th>
                           <th className="text-center px-4 py-3 text-gray-500 font-medium w-20">Required Qty</th>
-                          <th className="text-center px-4 py-3 text-gray-500 font-medium w-24">Qty In Stock</th>
+                          <th className="text-center px-4 py-3 text-gray-500 font-medium w-20">Qty In Stock</th>
                           <th className="text-center px-4 py-3 text-gray-500 font-medium w-20">Extra Qty</th>
-                          <th className="text-center px-4 py-3 text-gray-500 font-medium w-24">Qty To Order</th>
+                          <th className="text-center px-4 py-3 text-gray-500 font-medium w-20">Qty To Order</th>
                           <th className="text-center px-4 py-3 text-gray-500 font-medium w-36">Procurement</th>
-                          <th className="text-center px-4 py-3 text-gray-500 font-medium w-24">Rate</th>
-                          <th className="text-left px-4 py-3 text-gray-500 font-medium w-40">Vendor</th>
+                          <th className="text-center px-4 py-3 text-gray-500 font-medium w-32">Rate</th>
+                          <th className="text-left px-4 py-3 text-gray-500 font-medium w-44">Vendor</th>
                           <th className="text-center px-4 py-3 text-gray-500 font-medium w-28">PO</th>
-                          <th className="text-left px-4 py-3 text-gray-500 font-medium w-32">Remarks</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -479,14 +481,10 @@ export default function BomPage() {
                                 </button>
                               ) : null}
                             </td>
-                            <td className="px-4 py-2.5">
-                              <input type="text" value={m.remarks || ""} onChange={e => updateMaterial(m.id, "remarks", e.target.value)} placeholder="..."
-                                className="w-full bg-white border border-gray-200 rounded px-2 py-1 text-gray-700 text-xs focus:outline-none focus:border-teal-500/50" />
-                            </td>
                           </tr>
                           );
                         })}
-                        {visibleMaterials.length === 0 && <tr><td colSpan={14} className="px-4 py-8 text-center text-gray-400 text-xs">No raw materials found — the manufactured product(s) above have no recipe saved in the Product List yet.</td></tr>}
+                        {visibleMaterials.length === 0 && <tr><td colSpan={13} className="px-4 py-8 text-center text-gray-400 text-xs">No raw materials found — the manufactured product(s) above have no recipe saved in the Product List yet.</td></tr>}
                       </tbody>
                     </table>
                   </div>
