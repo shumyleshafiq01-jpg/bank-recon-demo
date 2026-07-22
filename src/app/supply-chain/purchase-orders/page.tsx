@@ -16,6 +16,7 @@ type BomItem = {
 };
 type BomMaterial = {
   id: string; material_name: string; category: string; unit: string; qty_to_order: number;
+  po_id: string | null;
 };
 type Vendor = { id: string; vendorName: string; commodity: string; phone: string };
 
@@ -59,6 +60,7 @@ export default function PurchaseOrdersPage() {
   const [boms, setBoms] = useState<Bom[]>([]);
   const [selectedBom, setSelectedBom] = useState<Bom | null>(null);
   const [assignRows, setAssignRows] = useState<AssignRow[]>([]);
+  const [alreadyOrdered, setAlreadyOrdered] = useState<BomMaterial[]>([]);
   const [loadingItems, setLoadingItems] = useState(false);
   const [generating, setGenerating] = useState(false);
 
@@ -102,8 +104,13 @@ export default function PurchaseOrdersPage() {
 
     // Raw materials — each one often comes from a different vendor than
     // the finished product does, so they get their own assignable rows.
-    const materialRows: AssignRow[] = materials
-      .filter(m => !HIDDEN_MATERIAL_CATEGORIES.includes(m.category) && m.qty_to_order > 0)
+    // Materials already ordered directly from the BOM page (po_id set) are
+    // excluded by default to avoid double-ordering — see alreadyOrderedCount.
+    const materialsToShow = materials.filter(m => !HIDDEN_MATERIAL_CATEGORIES.includes(m.category) && m.qty_to_order > 0);
+    setAlreadyOrdered(materialsToShow.filter(m => m.po_id));
+
+    const materialRows: AssignRow[] = materialsToShow
+      .filter(m => !m.po_id)
       .map(m => ({
         kind: "material", productId: null, materialId: m.id,
         productName: m.material_name, packingDesc: m.category || "",
@@ -112,6 +119,25 @@ export default function PurchaseOrdersPage() {
 
     setAssignRows([...productRows, ...materialRows]);
     setLoadingItems(false);
+  }
+
+  function includeAlreadyOrderedAnyway() {
+    if (alreadyOrdered.length === 0) return;
+    const ok = window.confirm(
+      `${alreadyOrdered.length} material(s) already have a PO sent from the BOM page:\n\n` +
+      alreadyOrdered.map(m => `• ${m.material_name}`).join("\n") +
+      `\n\nAdding them here will create a SECOND, separate PO for the same items. Continue anyway?`
+    );
+    if (!ok) return;
+    setAssignRows(prev => [
+      ...prev,
+      ...alreadyOrdered.map(m => ({
+        kind: "material" as const, productId: null, materialId: m.id,
+        productName: m.material_name, packingDesc: m.category || "",
+        cartons: m.qty_to_order, unit: m.unit || "PCS", vendorId: "",
+      })),
+    ]);
+    setAlreadyOrdered([]);
   }
 
   function setRowVendor(idx: number, vendorId: string) {
@@ -303,6 +329,16 @@ export default function PurchaseOrdersPage() {
                 </div>
                 <div className="flex-1 overflow-y-auto">
                   {loadingItems && <div className="px-6 py-10 text-center"><Loader2 className="w-6 h-6 animate-spin text-orange-600 mx-auto" /></div>}
+                  {!loadingItems && alreadyOrdered.length > 0 && (
+                    <div className="mx-6 mt-4 px-4 py-3 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-between gap-3">
+                      <p className="text-xs text-amber-800">
+                        <span className="font-semibold">{alreadyOrdered.length} material{alreadyOrdered.length !== 1 ? "s" : ""} already ordered</span> directly from the BOM page — excluded here to avoid a duplicate PO.
+                      </p>
+                      <button onClick={includeAlreadyOrderedAnyway} className="shrink-0 text-xs px-2.5 py-1 rounded-md bg-white border border-amber-500/40 text-amber-800 hover:bg-amber-500/10 transition-colors cursor-pointer">
+                        Include anyway
+                      </button>
+                    </div>
+                  )}
                   {!loadingItems && assignRows.length === 0 && <div className="px-6 py-16 text-center text-gray-400 text-sm">This BOM has nothing to order (everything is in stock).</div>}
                   {assignRows.length > 0 && (
                     <table className="w-full text-sm">

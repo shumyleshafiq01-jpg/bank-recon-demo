@@ -188,11 +188,32 @@ export async function POST(request: Request) {
         for (const r of invRows ?? []) materialStockMap[r.material_id as string] = Number(r.qty_on_hand || 0);
       }
 
+      // Pre-fill Rate/Vendor from the last time each material was actually
+      // ordered (most recent sc_bom_materials row with a vendor set) —
+      // saves re-typing the same vendor/rate on every new BOM. Blank on a
+      // material's first-ever order.
+      let lastUsedMap: Record<string, { rate: number; vendorId: string | null; vendorName: string | null }> = {};
+      if (materialIds2.length > 0) {
+        const { data: priorRows } = await supabase
+          .from("sc_bom_materials")
+          .select("material_id, rate, vendor_id, vendor_name, created_at")
+          .in("material_id", materialIds2)
+          .not("vendor_id", "is", null)
+          .order("created_at", { ascending: false });
+        for (const r of priorRows ?? []) {
+          const mid = r.material_id as string;
+          if (!lastUsedMap[mid]) {
+            lastUsedMap[mid] = { rate: Number(r.rate || 0), vendorId: r.vendor_id as string | null, vendorName: r.vendor_name as string | null };
+          }
+        }
+      }
+
       const materialRows2 = Object.entries(materialsAgg)
         .sort((a, b) => (materialMeta[a[0]]?.category || "").localeCompare(materialMeta[b[0]]?.category || "") || a[1].name.localeCompare(b[1].name))
         .map(([materialId, m], i) => {
           const qtyNeeded = Math.round(m.qty * 1000) / 1000;
           const qtyInStock = Math.min(materialStockMap[materialId] || 0, qtyNeeded);
+          const lastUsed = lastUsedMap[materialId];
           return {
             bom_id: bom.id,
             material_id: materialId,
@@ -207,6 +228,9 @@ export async function POST(request: Request) {
             extra_qty: 0,
             qty_to_order: Math.max(qtyNeeded - qtyInStock, 0),
             sort_order: i,
+            rate: lastUsed?.rate || 0,
+            vendor_id: lastUsed?.vendorId || null,
+            vendor_name: lastUsed?.vendorName || null,
           };
         });
 
@@ -278,6 +302,25 @@ export async function POST(request: Request) {
           .eq("id", it.id);
         if (error) throw error;
       }
+      return Response.json({ ok: true });
+    }
+
+    // Set a material's procurement path — "direct" (Hafeez already knows the
+    // rate/vendor, e.g. from a phone call) or "query" (send to multiple
+    // vendors for quotes via the Quotation Comparison module).
+    if (body.action === "set-procurement-mode" && body.id && body.mode) {
+      const { error } = await supabase.from("sc_bom_materials").update({ procurement_mode: body.mode }).eq("id", body.id);
+      if (error) throw error;
+      return Response.json({ ok: true });
+    }
+
+    // Order Direct — Hafeez enters the rate and picks the vendor inline.
+    if (body.action === "set-rate-vendor" && body.id) {
+      const { error } = await supabase
+        .from("sc_bom_materials")
+        .update({ rate: Number(body.rate || 0), vendor_id: body.vendorId || null, vendor_name: body.vendorName || null, procurement_mode: "direct" })
+        .eq("id", body.id);
+      if (error) throw error;
       return Response.json({ ok: true });
     }
 

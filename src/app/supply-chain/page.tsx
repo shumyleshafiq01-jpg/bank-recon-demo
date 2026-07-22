@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useRef, useCallback } from "react";
 import {
-  Package, Calculator, ClipboardList, ShoppingCart, Truck,
+  Package, Calculator, ClipboardList, ShoppingCart, Truck, Scale,
   PackageCheck, Ship, ArrowRight, ChevronLeft, LogOut,
   User, Warehouse, FileSpreadsheet, BarChart3, Plug, X, Loader2, Save,
   Plus, Trash2, Edit3, MessageCircle, Mail, ShieldCheck,
@@ -54,6 +54,7 @@ const MODULES = [
   { key: "product-master", route: "/supply-chain/products", title: "Product Master", desc: "Carton specifications — dimensions, weight, container capacity per product", icon: Package, color: "teal", iconBg: "bg-teal-500/20", iconColor: "text-teal-600", tagBg: "bg-teal-500/10 text-teal-700", border: "hover:border-teal-400/60", tags: ["Cartons", "Dimensions"], active: true },
   { key: "queries", route: "/supply-chain/queries", title: "Query Management", desc: "Log buyer inquiries — the starting point that hands off into a CBM plan", icon: ClipboardList, color: "blue", iconBg: "bg-blue-500/20", iconColor: "text-blue-600", tagBg: "bg-blue-500/10 text-blue-700", border: "hover:border-blue-400/60", tags: ["Queries", "Pipeline"], active: true },
   { key: "bom", route: "/supply-chain/bom", title: "Bill of Materials", desc: "Auto-generate BOM from a CBM plan — required cartons, in-stock, to-order, status", icon: FileSpreadsheet, color: "violet", iconBg: "bg-violet-500/20", iconColor: "text-violet-600", tagBg: "bg-violet-500/10 text-violet-700", border: "hover:border-violet-400/60", tags: ["BOM", "Auto-Generate"], active: true },
+  { key: "quotation-comparison", route: "/supply-chain/quotation-comparison", title: "Quotation Comparison", desc: "Log vendor quotes per raw material, compare side-by-side, pick the winner", icon: Scale, color: "orange", iconBg: "bg-orange-500/20", iconColor: "text-orange-600", tagBg: "bg-orange-500/10 text-orange-700", border: "hover:border-orange-400/60", tags: ["RFQ", "Vendor Compare"], active: true },
   { key: "purchase-orders", route: "/supply-chain/purchase-orders", title: "Purchase Orders", desc: "Generate POs from a BOM — one per vendor, track Draft → Sent → Received", icon: ShoppingCart, color: "orange", iconBg: "bg-orange-500/20", iconColor: "text-orange-600", tagBg: "bg-orange-500/10 text-orange-700", border: "hover:border-orange-400/60", tags: ["PO", "Per-Vendor"], active: true },
   { key: "grn", route: "/supply-chain/grn", title: "Goods Received", desc: "GRN against PO — receiver gets WhatsApp/email, verifies quantities & approves", icon: PackageCheck, color: "cyan", iconBg: "bg-cyan-500/20", iconColor: "text-cyan-600", tagBg: "bg-cyan-500/10 text-cyan-700", border: "hover:border-cyan-400/60", tags: ["GRN", "Notify + Approve"], active: true },
   { key: "inventory", route: "/supply-chain/inventory", title: "Inventory", desc: "Single-warehouse stock — feeds BOM's Qty In Stock, updated by approved GRNs", icon: Warehouse, color: "amber", iconBg: "bg-amber-500/20", iconColor: "text-amber-600", tagBg: "bg-amber-500/10 text-amber-700", border: "hover:border-amber-400/60", tags: ["Stock", "Warehouse"], active: true },
@@ -65,10 +66,12 @@ const MODULES = [
 // Integration settings — stored as key/value rows in sc_settings.
 // Secrets are masked by the API (••••last4) and skipped on save if unchanged.
 const INTEG_FIELDS: { key: string; label: string; secret?: boolean; select?: string[]; hint?: string }[] = [
-  { key: "whatsapp_provider", label: "WhatsApp Provider", select: ["meta", "360dialog"] },
+  { key: "whatsapp_provider", label: "WhatsApp Provider", select: ["meta", "360dialog", "bridge"] },
   { key: "whatsapp_token", label: "Meta Access Token", secret: true, hint: "Meta provider only" },
   { key: "whatsapp_phone_id", label: "Meta Phone Number ID", hint: "Meta provider only" },
   { key: "whatsapp_api_key", label: "360dialog API Key", secret: true, hint: "360dialog provider only" },
+  { key: "wa_bridge_url", label: "WhatsApp Bridge URL", hint: "bridge provider only — e.g. https://your-bridge.up.railway.app" },
+  { key: "wa_bridge_secret", label: "WhatsApp Bridge Secret", secret: true, hint: "bridge provider only" },
   { key: "resend_api_key", label: "Resend API Key", secret: true, hint: "for email notifications" },
   { key: "notify_email_from", label: "Email From Address", hint: "e.g. supply@kafi.com" },
   { key: "app_base_url", label: "App URL for links", hint: "https://your-app.vercel.app" },

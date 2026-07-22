@@ -122,6 +122,54 @@ export async function POST(request: Request) {
       return Response.json({ ok: true, created: createdIds.length });
     }
 
+    // Send a PO for a single BOM raw-material line directly from the BOM
+    // page — Hafeez has already picked a vendor + rate (either typed
+    // directly or from a won quotation) and just wants it ordered now,
+    // without going through the bulk "Generate Purchase Orders" flow.
+    if (body.action === "send-single" && body.bomMaterialId) {
+      const { data: mat, error: mErr } = await supabase.from("sc_bom_materials").select("*").eq("id", body.bomMaterialId).single();
+      if (mErr) throw mErr;
+      if (mat.po_id) return Response.json({ error: "PO already sent for this material" }, { status: 409 });
+      if (!mat.vendor_id || !mat.rate) return Response.json({ error: "Rate and vendor are required first" }, { status: 400 });
+
+      const { count } = await supabase.from("sc_purchase_orders").select("id", { count: "exact", head: true });
+
+      const { data: po, error: poErr } = await supabase
+        .from("sc_purchase_orders")
+        .insert({
+          po_number: poNumber((count ?? 0) + 1),
+          bom_id: mat.bom_id,
+          vendor_id: mat.vendor_id,
+          vendor_name: mat.vendor_name || "Unknown",
+          vendor_phone: "",
+          status: "draft",
+          total_cartons: mat.qty_to_order,
+          created_by: session.id,
+        })
+        .select("id, po_number")
+        .single();
+      if (poErr) throw poErr;
+
+      const { error: itErr } = await supabase.from("sc_po_items").insert({
+        po_id: po.id,
+        material_id: mat.material_id,
+        item_kind: "material",
+        product_name: mat.material_name,
+        packing_desc: "",
+        cartons_ordered: mat.qty_to_order,
+        unit: mat.unit || "PCS",
+        rate: mat.rate,
+        remarks: "",
+        sort_order: 0,
+      });
+      if (itErr) throw itErr;
+
+      const { error: updErr } = await supabase.from("sc_bom_materials").update({ po_id: po.id }).eq("id", mat.id);
+      if (updErr) throw updErr;
+
+      return Response.json({ ok: true, poId: po.id, poNumber: po.po_number });
+    }
+
     if (body.action === "update" && body.id) {
       const updates: Record<string, unknown> = {};
       if (body.status !== undefined) updates.status = body.status;

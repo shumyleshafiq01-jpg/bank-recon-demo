@@ -53,6 +53,28 @@ async function markRow(id: string | undefined, status: "sent" | "failed" | "pend
 
 async function sendWhatsApp(s: SettingsMap, to: string, body: string): Promise<{ ok: boolean; error?: string }> {
   const provider = s.whatsapp_provider || "meta";
+
+  // Internal bridge (unofficial, QR-linked WhatsApp Web session) — a small
+  // always-on service (see WhatsApp Bridge/) we run ourselves instead of a
+  // paid Meta/360dialog account. Internal team notifications only.
+  if (provider === "bridge") {
+    if (!s.wa_bridge_url || !s.wa_bridge_secret) return { ok: false, error: "not configured (Bridge URL / secret missing)" };
+    try {
+      const r = await fetch(`${s.wa_bridge_url.replace(/\/$/, "")}/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-bridge-secret": s.wa_bridge_secret },
+        body: JSON.stringify({ to, text: body }),
+      });
+      if (!r.ok) {
+        const text = await r.text();
+        return { ok: false, error: `HTTP ${r.status}: ${text.slice(0, 300)}` };
+      }
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
   const payload = {
     messaging_product: "whatsapp",
     recipient_type: "individual",
@@ -62,7 +84,7 @@ async function sendWhatsApp(s: SettingsMap, to: string, body: string): Promise<{
   };
 
   let url = "";
-  let headers: Record<string, string> = { "Content-Type": "application/json" };
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
 
   if (provider === "360dialog") {
     if (!s.whatsapp_api_key) return { ok: false, error: "not configured (360dialog API key missing)" };

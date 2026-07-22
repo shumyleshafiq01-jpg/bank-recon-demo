@@ -5,6 +5,7 @@ import { useEffect, useState, useMemo } from "react";
 import {
   ChevronLeft, FileSpreadsheet, Plus, Trash2, Save, X,
   Loader2, Check, FileText, Package, ChevronDown, Boxes, Beaker,
+  Send, Scale, ShieldCheck,
 } from "lucide-react";
 
 type PackingPlan = {
@@ -27,9 +28,13 @@ type BomItem = {
 
 type BomMaterial = {
   id: string; material_name: string; unit: string; category: string;
-  qty_needed: number; est_cost: number; unit_type: string; remarks: string;
+  qty_needed: number; unit_type: string; remarks: string;
   calc_breakdown: string; qty_in_stock: number; extra_qty: number; qty_to_order: number;
+  rate: number; vendor_id: string | null; vendor_name: string | null;
+  procurement_mode: "direct" | "query" | null; po_id: string | null;
 };
+
+type Vendor = { id: string; vendorName: string; commodity: string; phone: string };
 
 // These categories are logistics/service line items, not physical materials
 // to procure from a vendor — hidden from the Raw Materials view.
@@ -56,6 +61,8 @@ export default function BomPage() {
   const [saved, setSaved] = useState(false);
   const [savingMaterials, setSavingMaterials] = useState(false);
   const [materialsSaved, setMaterialsSaved] = useState(false);
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [sendingPoFor, setSendingPoFor] = useState<string | null>(null);
 
   // Generate modal
   const [showGenerate, setShowGenerate] = useState(false);
@@ -73,7 +80,10 @@ export default function BomPage() {
     setLoading(false);
   }
 
-  useEffect(() => { loadBoms(); }, []);
+  useEffect(() => {
+    loadBoms();
+    fetch("/api/vendors").then(r => r.json()).then(d => setVendors(d.vendors ?? [])).catch(() => {});
+  }, []);
 
   async function openGenerate() {
     setShowGenerate(true);
@@ -174,6 +184,47 @@ export default function BomPage() {
     setMaterialsSaved(true);
   }
 
+  async function setProcurementMode(id: string, mode: "direct" | "query") {
+    setMaterials(prev => prev.map(m => m.id === id ? { ...m, procurement_mode: mode } : m));
+    await fetch("/api/supply-chain/boms", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "set-procurement-mode", id, mode }),
+    });
+  }
+
+  function setMaterialRate(id: string, val: string) {
+    setMaterials(prev => prev.map(m => m.id === id ? { ...m, rate: Number(val) || 0 } : m));
+  }
+
+  function setMaterialVendor(id: string, vendorId: string) {
+    const v = vendors.find(x => x.id === vendorId);
+    setMaterials(prev => prev.map(m => m.id === id ? { ...m, vendor_id: vendorId, vendor_name: v?.vendorName || null } : m));
+  }
+
+  async function saveRateVendor(m: BomMaterial) {
+    await fetch("/api/supply-chain/boms", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "set-rate-vendor", id: m.id, rate: m.rate, vendorId: m.vendor_id, vendorName: m.vendor_name }),
+    });
+    setMaterials(prev => prev.map(x => x.id === m.id ? { ...x, procurement_mode: "direct" } : x));
+  }
+
+  async function sendPo(m: BomMaterial) {
+    if (!m.vendor_id || !m.rate) return;
+    setSendingPoFor(m.id);
+    const r = await fetch("/api/supply-chain/purchase-orders", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "send-single", bomMaterialId: m.id }),
+    });
+    const d = await r.json();
+    setSendingPoFor(null);
+    if (d.poId) {
+      setMaterials(prev => prev.map(x => x.id === m.id ? { ...x, po_id: d.poId } : x));
+    } else if (d.error) {
+      alert(d.error);
+    }
+  }
+
   async function deleteBom(id: string) {
     await fetch("/api/supply-chain/boms", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -192,8 +243,14 @@ export default function BomPage() {
     toOrder: finishedGoods.reduce((s, it) => s + it.to_order, 0),
     weight: items.reduce((s, it) => s + it.net_weight_total, 0),
     value: items.reduce((s, it) => s + it.value_total, 0),
-    materialsCost: visibleMaterials.reduce((s, m) => s + m.est_cost, 0),
-  }), [items, finishedGoods, visibleMaterials]);
+  }), [items, finishedGoods]);
+
+  // Procurement progress: how many materials that actually need ordering
+  // already have their PO sent.
+  const needOrdering = useMemo(() => visibleMaterials.filter(m => m.qty_to_order > 0), [visibleMaterials]);
+  const procurementPct = needOrdering.length > 0
+    ? Math.round((needOrdering.filter(m => m.po_id).length / needOrdering.length) * 100)
+    : null;
 
   if (loading) return <div className="min-h-screen flex items-center justify-center" style={{ background: "#e8ecf1" }}><div className="w-8 h-8 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" /></div>;
 
@@ -246,10 +303,16 @@ export default function BomPage() {
                 {planFillPct !== null && (
                   <span className="text-gray-500">CBM: <span className={`font-medium ${planFillPct > 100 ? "text-red-600" : planFillPct > 95 ? "text-amber-600" : "text-emerald-600"}`}>{planFillPct}%</span></span>
                 )}
+                {procurementPct !== null && (
+                  <span className="text-gray-500" title="Materials needing an order that already have a PO sent">Procured: <span className={`font-medium ${procurementPct === 100 ? "text-emerald-600" : "text-amber-600"}`}>{procurementPct}%</span></span>
+                )}
                 <span className="text-gray-500">Cartons: <span className="text-gray-900 font-medium">{totals.cartons}</span></span>
                 <span className="text-gray-500">To Order: <span className="text-amber-600 font-medium">{totals.toOrder}</span></span>
                 <span className="text-gray-500">Weight: <span className="text-gray-900 font-medium">{totals.weight.toFixed(1)} kg</span></span>
                 <span className="text-gray-500">Value: <span className="text-gray-900 font-medium">${totals.value.toFixed(2)}</span></span>
+                <button onClick={() => router.push("/supply-chain/quotation-comparison")} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs bg-orange-500/10 text-orange-700 hover:bg-orange-500/20 transition-colors cursor-pointer">
+                  <Scale className="w-3.5 h-3.5" /> Quotation Comparison
+                </button>
               </div>
             </div>
 
@@ -325,7 +388,6 @@ export default function BomPage() {
                     <h3 className="text-sm font-semibold text-gray-900">Raw Materials to Procure</h3>
                     <span className="text-xs text-gray-400">— decomposed from {manufacturedGoods.map(m => m.product_name).join(", ")}</span>
                   </div>
-                  <span className="text-xs text-gray-500">Est. total: <span className="text-gray-900 font-medium">${totals.materialsCost.toFixed(2)}</span></span>
                 </div>
                 <div className="rounded-xl bg-white/70 border border-gray-200/80 overflow-hidden">
                   <div className="overflow-x-auto">
@@ -341,12 +403,18 @@ export default function BomPage() {
                           <th className="text-center px-4 py-3 text-gray-500 font-medium w-24">Qty In Stock</th>
                           <th className="text-center px-4 py-3 text-gray-500 font-medium w-20">Extra Qty</th>
                           <th className="text-center px-4 py-3 text-gray-500 font-medium w-24">Qty To Order</th>
-                          <th className="text-center px-4 py-3 text-gray-500 font-medium w-20">Est. Cost</th>
+                          <th className="text-center px-4 py-3 text-gray-500 font-medium w-36">Procurement</th>
+                          <th className="text-center px-4 py-3 text-gray-500 font-medium w-24">Rate</th>
+                          <th className="text-left px-4 py-3 text-gray-500 font-medium w-40">Vendor</th>
+                          <th className="text-center px-4 py-3 text-gray-500 font-medium w-28">PO</th>
                           <th className="text-left px-4 py-3 text-gray-500 font-medium w-32">Remarks</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {visibleMaterials.map((m, idx) => (
+                        {visibleMaterials.map((m, idx) => {
+                          const needsOrder = m.qty_to_order > 0;
+                          const readyForPo = !!m.vendor_id && m.rate > 0;
+                          return (
                           <tr key={m.id} className="border-b border-gray-100 hover:bg-gray-50/80">
                             <td className="px-4 py-2.5 text-gray-400 text-xs">{idx + 1}</td>
                             <td className="px-4 py-2.5 text-gray-900 text-xs font-medium">{m.material_name}</td>
@@ -363,14 +431,62 @@ export default function BomPage() {
                                 className="w-full bg-white border border-gray-200 rounded px-2 py-1 text-center text-gray-900 text-sm focus:outline-none focus:border-teal-500/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
                             </td>
                             <td className="px-4 py-2.5 text-center text-teal-700 text-xs font-semibold">{m.qty_to_order}</td>
-                            <td className="px-4 py-2.5 text-center text-gray-500 text-xs">${m.est_cost.toFixed(2)}</td>
+                            <td className="px-4 py-2.5">
+                              {needsOrder && !m.po_id ? (
+                                <div className="flex items-center gap-1 justify-center">
+                                  <button onClick={() => setProcurementMode(m.id, "direct")}
+                                    className={`px-1.5 py-1 rounded text-[10px] font-medium transition-colors cursor-pointer ${m.procurement_mode === "direct" || !m.procurement_mode ? "bg-teal-500/15 text-teal-700" : "text-gray-400 hover:bg-gray-100"}`}>
+                                    Order Direct
+                                  </button>
+                                  <button onClick={() => setProcurementMode(m.id, "query")}
+                                    className={`px-1.5 py-1 rounded text-[10px] font-medium transition-colors cursor-pointer ${m.procurement_mode === "query" ? "bg-orange-500/15 text-orange-700" : "text-gray-400 hover:bg-gray-100"}`}>
+                                    Ask for Quotes
+                                  </button>
+                                </div>
+                              ) : m.po_id ? (
+                                <span className="flex items-center justify-center gap-1 text-[11px] text-emerald-700"><ShieldCheck className="w-3.5 h-3.5" /> Ordered</span>
+                              ) : (
+                                <span className="text-[11px] text-gray-400 block text-center">—</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-2.5">
+                              {m.procurement_mode === "query" && !m.vendor_name ? (
+                                <span className="text-[11px] text-orange-600 block text-center">via Quotes</span>
+                              ) : (
+                                <input type="number" step="0.01" min="0" disabled={!!m.po_id} value={m.rate || ""}
+                                  onChange={e => setMaterialRate(m.id, e.target.value)} onBlur={() => saveRateVendor(m)}
+                                  className="w-full bg-white border border-gray-200 rounded px-2 py-1 text-center text-gray-900 text-sm focus:outline-none focus:border-teal-500/50 disabled:opacity-60 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                              )}
+                            </td>
+                            <td className="px-4 py-2.5">
+                              {m.procurement_mode === "query" && !m.vendor_name ? (
+                                <span className="text-[11px] text-gray-400">Pending Quotation Comparison</span>
+                              ) : (
+                                <select value={m.vendor_id || ""} disabled={!!m.po_id} onChange={e => { setMaterialVendor(m.id, e.target.value); }} onBlur={() => saveRateVendor(m)}
+                                  className="w-full bg-white border border-gray-200 rounded px-2 py-1 text-gray-900 text-xs focus:outline-none focus:border-teal-500/50 disabled:opacity-60 cursor-pointer">
+                                  <option value="">— select —</option>
+                                  {vendors.map(v => <option key={v.id} value={v.id}>{v.vendorName}</option>)}
+                                </select>
+                              )}
+                            </td>
+                            <td className="px-4 py-2.5 text-center">
+                              {m.po_id ? (
+                                <span className="text-[11px] text-gray-400">sent</span>
+                              ) : needsOrder ? (
+                                <button onClick={() => sendPo(m)} disabled={!readyForPo || sendingPoFor === m.id}
+                                  className="flex items-center gap-1 mx-auto px-2 py-1 rounded-md text-[11px] font-medium bg-teal-600 hover:bg-teal-500 text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors">
+                                  {sendingPoFor === m.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />} Send PO
+                                </button>
+                              ) : null}
+                            </td>
                             <td className="px-4 py-2.5">
                               <input type="text" value={m.remarks || ""} onChange={e => updateMaterial(m.id, "remarks", e.target.value)} placeholder="..."
                                 className="w-full bg-white border border-gray-200 rounded px-2 py-1 text-gray-700 text-xs focus:outline-none focus:border-teal-500/50" />
                             </td>
                           </tr>
-                        ))}
-                        {visibleMaterials.length === 0 && <tr><td colSpan={11} className="px-4 py-8 text-center text-gray-400 text-xs">No raw materials found — the manufactured product(s) above have no recipe saved in the Product List yet.</td></tr>}
+                          );
+                        })}
+                        {visibleMaterials.length === 0 && <tr><td colSpan={14} className="px-4 py-8 text-center text-gray-400 text-xs">No raw materials found — the manufactured product(s) above have no recipe saved in the Product List yet.</td></tr>}
                       </tbody>
                     </table>
                   </div>

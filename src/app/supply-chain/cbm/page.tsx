@@ -5,7 +5,7 @@ import { useEffect, useState, useMemo } from "react";
 import {
   ChevronLeft, Plus, Trash2, Save, Package, Calculator,
   AlertTriangle, Check, Search, X, ChevronDown, Settings,
-  FileText, Loader2,
+  FileText, Loader2, Lock, Unlock, Wand2,
 } from "lucide-react";
 
 type Product = {
@@ -19,7 +19,7 @@ type Product = {
 type PlanItem = {
   productId: string; product?: Product; cartons: number;
   fillPct: number; netWeightTotal: number; unitPriceFob: number;
-  totalValue: number; remarks: string;
+  totalValue: number; remarks: string; locked?: boolean;
 };
 
 type PackingPlan = {
@@ -155,6 +155,10 @@ export default function CbmCalculatorPage() {
     setSaved(false);
   }
 
+  function toggleLock(idx: number) {
+    setItems(prev => prev.map((it, i) => i === idx ? { ...it, locked: !it.locked } : it));
+  }
+
   const cartonItems = items.filter(it => !isBagItem(it));
   const bagItems = items.filter(isBagItem);
 
@@ -165,6 +169,45 @@ export default function CbmCalculatorPage() {
   const totalValue = items.reduce((s, it) => s + it.totalValue, 0);
   const isOverCapacity = totalFillRounded > capacityThreshold;
   const isOverFull = totalFillRounded > 100;
+
+  // Suggest carton counts to hit the capacity threshold: scale every
+  // UNLOCKED item's cartons by the same factor so the whole plan lands on
+  // the threshold, while locked items (fixed quantities — e.g. a buyer
+  // wants exactly 500 of one SKU) are left untouched and their fill %
+  // is reserved out of the target before scaling the rest.
+  const suggestion = useMemo(() => {
+    const unlocked = cartonItems.filter(it => !it.locked && it.product);
+    if (unlocked.length === 0) return null;
+
+    const lockedFillSum = cartonItems.filter(it => it.locked).reduce((s, it) => s + it.fillPct, 0);
+    const unlockedFillSum = unlocked.reduce((s, it) => s + it.fillPct, 0);
+    const remainingPct = capacityThreshold - lockedFillSum;
+
+    if (remainingPct <= 0 || unlockedFillSum <= 0) return null;
+    if (Math.abs(totalFillRounded - capacityThreshold) < 0.05) return null; // already at target
+
+    const scale = remainingPct / unlockedFillSum;
+    const rows = unlocked.map(it => ({
+      productId: it.productId,
+      name: it.product?.product_name ?? "",
+      current: it.cartons,
+      suggested: Math.max(0, Math.round(it.cartons * scale)),
+    })).filter(r => r.suggested !== r.current);
+
+    if (rows.length === 0) return null;
+    return rows;
+  }, [cartonItems, capacityThreshold, totalFillRounded]);
+
+  function applySuggestion() {
+    if (!suggestion) return;
+    const map = new Map(suggestion.map(r => [r.productId, r.suggested]));
+    setItems(prev => prev.map(it => {
+      const sug = map.get(it.productId);
+      if (sug === undefined || !it.product) return it;
+      return { ...it, cartons: sug, fillPct: calcFillPct(sug, it.product, containerType), netWeightTotal: Math.round(sug * it.product.net_weight_kg * 100) / 100, totalValue: Math.round(sug * it.unitPriceFob * 100) / 100 };
+    }));
+    setSaved(false);
+  }
 
   // Rice/bag items are weight-limited (PMT), not carton-count limited —
   // same threshold rule as cartons, just measured in metric tons instead
@@ -368,6 +411,32 @@ export default function CbmCalculatorPage() {
           )}
         </div>
 
+        {/* 95% Suggestion — scales every unlocked item's cartons by the same
+            factor to land the whole plan on the capacity threshold. */}
+        {suggestion && (
+          <div className="mb-4 p-4 rounded-xl bg-emerald-500/[0.04] border border-emerald-500/20">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2 text-sm text-emerald-800 font-medium">
+                <Wand2 className="w-4 h-4" /> Try our suggested CBM &mdash; reach {capacityThreshold}%
+              </div>
+              <button onClick={applySuggestion} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-medium transition-colors cursor-pointer">
+                <Check className="w-3.5 h-3.5" /> Apply Suggestion
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-gray-600">
+              {suggestion.map(r => (
+                <span key={r.productId}>
+                  <span className="text-gray-500">{r.name}:</span>{" "}
+                  <span className="text-gray-400">{r.current}</span>
+                  {" → "}
+                  <span className="text-emerald-700 font-semibold">{r.suggested}</span>
+                </span>
+              ))}
+            </div>
+            <p className="text-[11px] text-gray-400 mt-1.5">Locked items (🔒) keep their quantity fixed — only unlocked items are scaled.</p>
+          </div>
+        )}
+
         {/* Rice / Weight Fill Bar — only appears once a bag-type (weight-limited) product is added */}
         {bagItems.length > 0 && (
           <div className="mb-4 p-4 rounded-xl bg-white/70 border border-gray-200/80">
@@ -419,6 +488,7 @@ export default function CbmCalculatorPage() {
                   <th className="text-center px-4 py-3 text-gray-500 font-medium w-24">FOB $/unit</th>
                   <th className="text-right px-4 py-3 text-gray-500 font-medium w-24">Value</th>
                   <th className="text-left px-4 py-3 text-gray-500 font-medium w-32">Remarks</th>
+                  <th className="text-center px-4 py-3 text-gray-500 font-medium w-10" title="Lock quantity — excluded from the 95% suggestion">Lock</th>
                   <th className="w-10"></th>
                 </tr>
               </thead>
@@ -452,6 +522,14 @@ export default function CbmCalculatorPage() {
                       <td className="px-4 py-2.5">
                         <input type="text" value={item.remarks} onChange={e => updateItem(idx, "remarks", e.target.value)} placeholder="..."
                           className="w-full bg-white border border-gray-200 rounded px-2 py-1 text-gray-700 text-xs focus:outline-none focus:border-emerald-500/50" />
+                      </td>
+                      <td className="px-2 py-2.5 text-center">
+                        {!isBag && (
+                          <button onClick={() => toggleLock(idx)} title={item.locked ? "Unlock — include in 95% suggestion" : "Lock — keep this quantity fixed"}
+                            className={`p-1 rounded transition-colors cursor-pointer ${item.locked ? "text-amber-600 hover:bg-amber-500/10" : "text-gray-300 hover:text-gray-500 hover:bg-gray-100"}`}>
+                            {item.locked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                          </button>
+                        )}
                       </td>
                       <td className="px-2 py-2.5">
                         <button onClick={() => removeItem(idx)} className="p-1 rounded hover:bg-red-500/10 text-gray-400 hover:text-red-600 transition-colors cursor-pointer">
