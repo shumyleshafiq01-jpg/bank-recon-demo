@@ -1,5 +1,24 @@
 import { supabase } from "@/lib/supabase";
 import { getSession } from "@/lib/auth";
+import { notifyEvent } from "@/lib/sc-notify";
+
+// Fires only on the CROSSING into low stock (was above reorder level,
+// now at or below it) — not on every transaction while it stays low,
+// so subscribers get one alert per dip instead of being spammed.
+async function checkLowStock(item: { id: string; item_name: string; unit: string; reorder_level: number }, prevQty: number, newQty: number) {
+  const reorderLevel = Number(item.reorder_level || 0);
+  if (reorderLevel <= 0) return;
+  const wasAbove = prevQty > reorderLevel;
+  const nowAtOrBelow = newQty <= reorderLevel;
+  if (!(wasAbove && nowAtOrBelow)) return;
+
+  await notifyEvent({
+    event: "low_stock_alert",
+    refId: item.id,
+    text: `*KAFI — LOW STOCK ALERT*\n${item.item_name}\n${newQty} ${item.unit} on hand (reorder level: ${reorderLevel} ${item.unit}).`,
+    subject: `Low stock — ${item.item_name}`,
+  });
+}
 
 // Single-warehouse inventory covering both raw materials (from the Product
 // List's material master, pl_master) and finished goods (sc_products).
@@ -88,12 +107,34 @@ export async function POST(request: Request) {
       });
       if (txnErr) throw txnErr;
 
+      await checkLowStock(inv, Number(inv.qty_on_hand), newQty);
+
       return Response.json({ ok: true, qtyOnHand: newQty });
     }
 
     if (body.action === "set-reorder" && body.inventoryId) {
-      const { error } = await supabase.from("sc_inventory").update({ reorder_level: Number(body.reorderLevel || 0) }).eq("id", body.inventoryId);
+      const { data: inv } = await supabase.from("sc_inventory").select("*").eq("id", body.inventoryId).maybeSingle();
+      const newReorderLevel = Number(body.reorderLevel || 0);
+      const { error } = await supabase.from("sc_inventory").update({ reorder_level: newReorderLevel }).eq("id", body.inventoryId);
       if (error) throw error;
+
+      // Raising the reorder level above current stock can itself put the
+      // item at risk even though qty_on_hand didn't move — fire only if
+      // this wasn't already true under the OLD reorder level.
+      if (inv) {
+        const qty = Number(inv.qty_on_hand);
+        const wasOk = newReorderLevel <= 0 || qty > Number(inv.reorder_level || 0);
+        const nowAtRisk = newReorderLevel > 0 && qty <= newReorderLevel;
+        if (wasOk && nowAtRisk) {
+          await notifyEvent({
+            event: "low_stock_alert",
+            refId: inv.id,
+            text: `*KAFI — LOW STOCK ALERT*\n${inv.item_name}\n${qty} ${inv.unit} on hand (reorder level: ${newReorderLevel} ${inv.unit}).`,
+            subject: `Low stock — ${inv.item_name}`,
+          });
+        }
+      }
+
       return Response.json({ ok: true });
     }
 
