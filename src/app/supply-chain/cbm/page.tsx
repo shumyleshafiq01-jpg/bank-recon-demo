@@ -5,7 +5,7 @@ import { useEffect, useState, useMemo } from "react";
 import {
   ChevronLeft, Plus, Trash2, Save, Package, Calculator,
   AlertTriangle, Check, Search, X, ChevronDown, Settings,
-  FileText, Loader2, Lock, Unlock, Wand2,
+  FileText, Loader2, Lock, Unlock, Wand2, Scale,
 } from "lucide-react";
 
 type Product = {
@@ -55,6 +55,12 @@ export default function CbmCalculatorPage() {
   const [showPicker, setShowPicker] = useState(false);
   const [pickerSearch, setPickerSearch] = useState("");
   const [pickerBrand, setPickerBrand] = useState("ALL");
+
+  // Sales History package suggestion (blends past orders to fill toward threshold)
+  const [showSalesSuggest, setShowSalesSuggest] = useState(false);
+  const [salesFilters, setSalesFilters] = useState({ country: "", port: "" });
+  const [salesSuggesting, setSalesSuggesting] = useState(false);
+  const [salesResult, setSalesResult] = useState<{ suggestions: { productId: string; productName: string; cartons: number; fillPct: number }[]; matchedOrders: number; note?: string } | null>(null);
 
   // Saved plans list
   const [showPlans, setShowPlans] = useState(false);
@@ -125,6 +131,39 @@ export default function CbmCalculatorPage() {
     }]);
     setShowPicker(false);
     setPickerSearch("");
+  }
+
+  function addProductWithCartons(product: Product, cartons: number) {
+    if (items.find(it => it.productId === product.id)) return;
+    const fillPct = calcFillPct(cartons, product, containerType);
+    setItems(prev => [...prev, {
+      productId: product.id, product, cartons, fillPct,
+      netWeightTotal: Math.round(cartons * product.net_weight_kg * 100) / 100,
+      unitPriceFob: 0, totalValue: 0, remarks: "from Sales History suggestion",
+    }]);
+  }
+
+  async function fetchSalesSuggestion() {
+    setSalesSuggesting(true);
+    setSalesResult(null);
+    const existingItems = cartonItems.filter(it => it.product).map(it => ({ productId: it.productId, fillPct: it.fillPct }));
+    const r = await fetch("/api/supply-chain/sales-history", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "suggest-package", containerType, targetFillPct: capacityThreshold, country: salesFilters.country || undefined, port: salesFilters.port || undefined, existingItems }),
+    });
+    const d = await r.json();
+    setSalesSuggesting(false);
+    setSalesResult(d);
+  }
+
+  function applySalesSuggestions() {
+    if (!salesResult) return;
+    for (const s of salesResult.suggestions) {
+      const product = products.find(p => p.id === s.productId);
+      if (product) addProductWithCartons(product, s.cartons);
+    }
+    setShowSalesSuggest(false);
+    setSalesResult(null);
   }
 
   function updateItem(idx: number, field: string, val: string | number) {
@@ -409,6 +448,9 @@ export default function CbmCalculatorPage() {
               <AlertTriangle className="w-3.5 h-3.5" /> Container is overpacked! Reduce cartons.
             </div>
           )}
+          <button onClick={() => setShowSalesSuggest(true)} className="mt-3 flex items-center gap-1.5 text-xs text-purple-700 bg-purple-500/10 hover:bg-purple-500/20 px-3 py-1.5 rounded-lg transition-colors cursor-pointer">
+            <Scale className="w-3.5 h-3.5" /> Suggest from Sales History
+          </button>
         </div>
 
         {/* 95% Suggestion — scales every unlocked item's cartons by the same
@@ -674,6 +716,54 @@ export default function CbmCalculatorPage() {
             <div className="flex justify-end gap-2">
               <button onClick={() => setShowSettings(false)} className="px-4 py-1.5 rounded-lg text-sm text-gray-500 hover:text-gray-900 cursor-pointer">Cancel</button>
               <button onClick={saveThreshold} className="px-4 py-1.5 rounded-lg text-sm bg-emerald-600 text-white hover:bg-emerald-500 cursor-pointer">Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Suggest from Sales History Modal */}
+      {showSalesSuggest && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-6" onClick={() => { setShowSalesSuggest(false); setSalesResult(null); }}>
+          <div className="bg-white border border-gray-200 rounded-2xl w-full max-w-lg max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200/70">
+              <div>
+                <h3 className="text-gray-900 font-semibold flex items-center gap-1.5"><Scale className="w-4 h-4 text-purple-600" /> Suggest from Sales History</h3>
+                <p className="text-xs text-gray-500 mt-0.5">Adds products from past matching orders to close the gap to {capacityThreshold}%</p>
+              </div>
+              <button onClick={() => { setShowSalesSuggest(false); setSalesResult(null); }} className="p-1 rounded hover:bg-gray-100 text-gray-500 cursor-pointer"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-5 py-4">
+              <div className="grid grid-cols-2 gap-2 mb-4">
+                <input value={salesFilters.country} onChange={e => setSalesFilters(f => ({ ...f, country: e.target.value }))} placeholder="Country (optional)"
+                  className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-purple-500/50" />
+                <input value={salesFilters.port} onChange={e => setSalesFilters(f => ({ ...f, port: e.target.value }))} placeholder="Port (optional)"
+                  className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-purple-500/50" />
+              </div>
+              <button onClick={fetchSalesSuggestion} disabled={salesSuggesting}
+                className="w-full flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-sm bg-purple-600 hover:bg-purple-500 text-white font-medium disabled:opacity-40 cursor-pointer mb-4">
+                {salesSuggesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Scale className="w-4 h-4" />} Get Suggestion
+              </button>
+              {salesResult && (
+                <div>
+                  {salesResult.note && <p className="text-xs text-amber-600 mb-2">{salesResult.note}</p>}
+                  <p className="text-xs text-gray-500 mb-2">Based on {salesResult.matchedOrders} matching past order(s)</p>
+                  {salesResult.suggestions.length > 0 && (
+                    <>
+                      <div className="rounded-lg border border-gray-200 overflow-hidden mb-3">
+                        {salesResult.suggestions.map(s => (
+                          <div key={s.productId} className="flex items-center justify-between px-3 py-2 border-b border-gray-100 last:border-0 text-sm">
+                            <span className="text-gray-900">{s.productName}</span>
+                            <span className="text-gray-500">{s.cartons} ctn <span className="text-purple-600 font-medium">(+{s.fillPct}%)</span></span>
+                          </div>
+                        ))}
+                      </div>
+                      <button onClick={applySalesSuggestions} className="w-full flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-sm bg-purple-600 hover:bg-purple-500 text-white font-medium cursor-pointer">
+                        <Check className="w-4 h-4" /> Add These to the Plan
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
