@@ -13,7 +13,10 @@ export type ScEventKey =
   | "packing_done"
   | "shipment_booked"
   | "shipment_delivered"
-  | "low_stock_alert";
+  | "low_stock_alert"
+  | "export_doc_matched"
+  | "export_doc_needs_review"
+  | "export_checklist_complete";
 
 export const SC_EVENTS: { key: ScEventKey; label: string; stage: string; gate?: boolean; future?: boolean }[] = [
   { key: "query_received", label: "Query Received", stage: "1 · Query" },
@@ -26,4 +29,7 @@ export const SC_EVENTS: { key: ScEventKey; label: string; stage: string; gate?: 
   { key: "shipment_booked", label: "Shipment Booked", stage: "7 · Shipment" },
   { key: "shipment_delivered", label: "Shipment Delivered", stage: "7 · Shipment" },
   { key: "low_stock_alert", label: "Low Stock Alert", stage: "Inventory" },
+  { key: "export_doc_matched", label: "Export Doc Matched to Checklist", stage: "Export" },
+  { key: "export_doc_needs_review", label: "Export Doc Needs Manual Review", stage: "Export" },
+  { key: "export_checklist_complete", label: "Export Checklist Complete", stage: "Export" },
 ];

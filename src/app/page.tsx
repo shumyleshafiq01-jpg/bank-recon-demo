@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useCallback, useState } from "react";
 import {
   Landmark, DollarSign, Package, Users, Bot,
-  ArrowRight, Sparkles, UserCheck, ClipboardList, LogOut, Share2,
+  ArrowRight, Sparkles, UserCheck, ClipboardList, LogOut, Share2, Ship,
 } from "lucide-react";
 
 type Node = { x: number; y: number; vx: number; vy: number; radius: number };
@@ -176,6 +176,17 @@ const AGENTS = [
     iconBg: "bg-emerald-100",
     iconColor: "text-emerald-500",
     route: "/supply-chain",
+  },
+  {
+    name: "Export Department Agent",
+    status: "wip",
+    statusLabel: "WIP",
+    statusColor: "bg-cyan-100 text-cyan-600",
+    desc: "Shipment file tracker, document checklist, Drive-based document review",
+    icon: Ship,
+    iconBg: "bg-cyan-100",
+    iconColor: "text-cyan-500",
+    route: "/export",
   },
   {
     name: "AI Agent CRM",
