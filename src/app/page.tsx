@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useCallback, useState } from "react";
 import {
   Landmark, DollarSign, Package, Users, Bot,
-  ArrowRight, Sparkles, UserCheck, ClipboardList, LogOut,
+  ArrowRight, Sparkles, UserCheck, ClipboardList, LogOut, Share2,
 } from "lucide-react";
 
 type Node = { x: number; y: number; vx: number; vy: number; radius: number };
@@ -189,6 +189,18 @@ const AGENTS = [
     route: null,
   },
   {
+    name: "Social Media Agent",
+    status: "wip",
+    statusLabel: "WIP",
+    statusColor: "bg-pink-100 text-pink-600",
+    desc: "AI content generation, designer approval queue, scheduling, and rival analytics",
+    icon: Share2,
+    iconBg: "bg-pink-100",
+    iconColor: "text-pink-500",
+    route: "https://kafi-social-media-agent.vercel.app/",
+    external: true,
+  },
+  {
     name: "AI Human Resource Manager",
     status: "tba",
     statusLabel: "TBA",
@@ -287,7 +299,11 @@ export default function HubPage() {
               <div key={agent.name}>
                 {i > 0 && <div className="border-t border-gray-200/60" />}
                 <button
-                  onClick={() => active && router.push(agent.route!)}
+                  onClick={() => {
+                    if (!active) return;
+                    if (agent.external) window.open(agent.route!, "_blank", "noopener,noreferrer");
+                    else router.push(agent.route!);
+                  }}
                   disabled={!active}
                   className={`w-full flex items-center gap-4 p-5 text-left transition-all ${
                     active
