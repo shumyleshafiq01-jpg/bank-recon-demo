@@ -4,7 +4,7 @@ import { useRouter, useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   ChevronLeft, Ship, ExternalLink, Loader2, ScanSearch, Check, Trash2, Plus,
-  AlertTriangle, HelpCircle, FileCheck2,
+  AlertTriangle, HelpCircle, FileCheck2, FileText,
 } from "lucide-react";
 
 type Shipment = {
@@ -121,6 +121,11 @@ export default function ShipmentDetailPage() {
             <Ship className="w-5 h-5 text-cyan-600" />
             <h1 className="text-lg font-bold text-gray-900">{shipment.buyer_name}</h1>
           </div>
+          <div className="flex-1" />
+          <button onClick={() => router.push(`/export/shipments/${id}/documents`)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm bg-cyan-500/10 text-cyan-700 hover:bg-cyan-500/20 transition-colors cursor-pointer">
+            <FileText className="w-4 h-4" /> Documents
+          </button>
         </div>
 
         {/* Shipment info card */}

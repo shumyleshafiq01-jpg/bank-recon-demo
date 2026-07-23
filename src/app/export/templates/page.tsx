@@ -127,60 +127,60 @@ export default function ExportTemplatesPage() {
 
       {showCreate && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-6" onClick={() => setShowCreate(false)}>
-          <div className="bg-white border border-gray-200 rounded-2xl w-full max-w-lg p-5 max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-gray-900 font-semibold">New Document Template</h3>
-              <button onClick={() => setShowCreate(false)} className="p-1 rounded hover:bg-gray-100 text-gray-500 cursor-pointer"><X className="w-4 h-4" /></button>
+          <div className="bg-white border border-gray-200 rounded-2xl w-full max-w-4xl p-8 max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-gray-900 font-bold text-2xl">New Document Template</h3>
+              <button onClick={() => setShowCreate(false)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 cursor-pointer"><X className="w-6 h-6" /></button>
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-5">
               <div>
-                <label className="text-xs text-gray-500 mb-1 block">Label *</label>
+                <label className="text-sm text-gray-600 mb-1.5 block font-medium">Label *</label>
                 <input value={form.label} onChange={e => setForm(f => ({ ...f, label: e.target.value }))} placeholder="e.g. Saudi Arabia — Courier SOP"
-                  className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-cyan-500/50" />
+                  className="w-full bg-white border border-gray-200 rounded-lg px-4 py-3 text-base text-gray-900 focus:outline-none focus:border-cyan-500/50" />
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-5">
                 <div>
-                  <label className="text-xs text-gray-500 mb-1 block">Country</label>
+                  <label className="text-sm text-gray-600 mb-1.5 block font-medium">Country</label>
                   <input value={form.country} onChange={e => setForm(f => ({ ...f, country: e.target.value }))}
-                    className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-cyan-500/50" />
+                    className="w-full bg-white border border-gray-200 rounded-lg px-4 py-3 text-base text-gray-900 focus:outline-none focus:border-cyan-500/50" />
                 </div>
                 <div>
-                  <label className="text-xs text-gray-500 mb-1 block">Buyer (optional override)</label>
+                  <label className="text-sm text-gray-600 mb-1.5 block font-medium">Buyer (optional override)</label>
                   <input value={form.buyerName} onChange={e => setForm(f => ({ ...f, buyerName: e.target.value }))}
-                    className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-cyan-500/50" />
+                    className="w-full bg-white border border-gray-200 rounded-lg px-4 py-3 text-base text-gray-900 focus:outline-none focus:border-cyan-500/50" />
                 </div>
               </div>
               <div>
-                <label className="text-xs text-gray-500 mb-1 block">Document Dispatch Method</label>
+                <label className="text-sm text-gray-600 mb-1.5 block font-medium">Document Dispatch Method</label>
                 <div className="flex gap-2">
                   {["courier", "email"].map(m => (
                     <button key={m} onClick={() => setForm(f => ({ ...f, sopMethod: m }))}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-colors ${form.sopMethod === m ? "bg-cyan-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+                      className={`px-4 py-2.5 rounded-lg text-sm font-medium cursor-pointer transition-colors ${form.sopMethod === m ? "bg-cyan-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
                       {m === "courier" ? "Physical Courier" : "Email / Soft Copy"}
                     </button>
                   ))}
                 </div>
               </div>
               <div>
-                <label className="text-xs text-gray-500 mb-1 block">Required Documents</label>
-                <div className="flex flex-wrap gap-1.5 mb-2">
+                <label className="text-sm text-gray-600 mb-2 block font-medium">Required Documents</label>
+                <div className="flex flex-wrap gap-2 mb-3">
                   {DEFAULT_DOC_TYPES.map(doc => (
                     <button key={doc} onClick={() => toggleDoc(doc)}
-                      className={`text-[11px] px-2 py-1 rounded-full cursor-pointer transition-colors ${form.docTypes.includes(doc) ? "bg-cyan-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+                      className={`text-sm px-3 py-1.5 rounded-full cursor-pointer transition-colors ${form.docTypes.includes(doc) ? "bg-cyan-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
                       {doc}
                     </button>
                   ))}
                 </div>
                 <div className="flex items-center gap-2">
                   <input value={customDoc} onChange={e => setCustomDoc(e.target.value)} onKeyDown={e => e.key === "Enter" && addCustomDoc()} placeholder="Add a custom document type..."
-                    className="flex-1 bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-xs text-gray-900 focus:outline-none focus:border-cyan-500/50" />
-                  <button onClick={addCustomDoc} className="p-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600 cursor-pointer"><Plus className="w-3.5 h-3.5" /></button>
+                    className="flex-1 bg-white border border-gray-200 rounded-lg px-4 py-2.5 text-sm text-gray-900 focus:outline-none focus:border-cyan-500/50" />
+                  <button onClick={addCustomDoc} className="p-2.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600 cursor-pointer"><Plus className="w-5 h-5" /></button>
                 </div>
                 {form.docTypes.filter(d => !DEFAULT_DOC_TYPES.includes(d)).length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mt-2">
+                  <div className="flex flex-wrap gap-2 mt-3">
                     {form.docTypes.filter(d => !DEFAULT_DOC_TYPES.includes(d)).map(doc => (
-                      <button key={doc} onClick={() => toggleDoc(doc)} className="text-[11px] px-2 py-1 rounded-full bg-cyan-600 text-white cursor-pointer">{doc} ✕</button>
+                      <button key={doc} onClick={() => toggleDoc(doc)} className="text-sm px-3 py-1.5 rounded-full bg-cyan-600 text-white cursor-pointer">{doc} ✕</button>
                     ))}
                   </div>
                 )}
@@ -188,8 +188,8 @@ export default function ExportTemplatesPage() {
             </div>
 
             <button onClick={saveTemplate} disabled={saving || !form.label.trim()}
-              className="w-full mt-4 flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-sm bg-cyan-600 hover:bg-cyan-500 text-white font-medium disabled:opacity-40 cursor-pointer">
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Save Template
+              className="w-full mt-6 flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-base bg-cyan-600 hover:bg-cyan-500 text-white font-semibold disabled:opacity-40 cursor-pointer">
+              {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Check className="w-5 h-5" />} Save Template
             </button>
           </div>
         </div>
